@@ -1,0 +1,76 @@
+name: Manual arm64 preview package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Preview package version (three numeric components)
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    # Provision SDK26.5/matching Swift on a dedicated clean arm64 Mac first.
+    # This workflow uploads build artifacts; it does not publish a GitHub Release.
+    runs-on: [self-hosted, macOS, ARM64, uniapi-sdk-26-5]
+    timeout-minutes: 45
+    env:
+      UNIAPI_CI_EVIDENCE: ${{ runner.temp }}/uniapi-ci-evidence
+      UNIAPI_PREVIEW_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify version, architecture and pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$UNIAPI_PREVIEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$(uname -m)" == arm64 ]]
+          source native/swift/tools/swift-environment.sh
+          uniapi_swift_environment
+          mkdir -p "$UNIAPI_CI_EVIDENCE"
+          {
+            sw_vers
+            uname -m
+            printf 'SDK: %s\nCompiler: %s\n' "$UNIAPI_SWIFT_SDK" "$UNIAPI_SWIFT_TOOLCHAIN"
+            "$UNIAPI_SWIFT_TOOLCHAIN" --version
+          } | tee "$UNIAPI_CI_EVIDENCE/environment.txt"
+      - name: Public fixtures and all optimized native tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/verify.sh 2>&1 | tee "$UNIAPI_CI_EVIDENCE/verification.log"
+      - name: Build the standard preview package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/package_release.py --platform macos --version "$UNIAPI_PREVIEW_VERSION" 2>&1 | tee "$UNIAPI_CI_EVIDENCE/package.log"
+      - name: Record actual executable headers and package checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="dist/UniApi-macos-$UNIAPI_PREVIEW_VERSION/UniApi.app"
+          for binary in "$app/Contents/MacOS/UniApiNative" "$app/Contents/Resources/Helpers/"*; do
+            [[ -f "$binary" && ! -L "$binary" ]]
+            [[ "$(lipo -archs "$binary")" == arm64 ]]
+            printf '\n%s\n' "$binary"
+            vtool -show-build "$binary"
+          done | tee "$UNIAPI_CI_EVIDENCE/executable-headers.txt"
+          shasum -a 256 "dist/UniApi-macos-$UNIAPI_PREVIEW_VERSION.zip" | tee "$UNIAPI_CI_EVIDENCE/package.sha256"
+          {
+            echo '### arm64 public preview build'
+            echo 'Actual host/SDK/toolchain and executable headers are attached as evidence.'
+            echo 'The source targets macOS 14; this is not macOS 14 runtime, Intel, universal, GUI/device or fresh-user proof.'
+            echo 'No Developer ID signing or Apple notarization is configured or claimed.'
+            echo 'No installer or production app was launched by this workflow.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UniApi-macos-arm64-preview-${{ inputs.version }}
+          path: |
+            dist/UniApi-macos-${{ inputs.version }}.zip
+            dist/UniApi-macos-${{ inputs.version }}.zip.sha256
+            ${{ runner.temp }}/uniapi-ci-evidence/
+          if-no-files-found: error

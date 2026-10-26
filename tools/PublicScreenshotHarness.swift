@@ -1,0 +1,204 @@
+import AppKit
+import SwiftUI
+import UniApiCore
+import UniApiPresentation
+
+// Page illustrations only: the runner supplies exact copied production UI and
+// one capture-only session initializer. Never call NativeEntry.main(), the
+// default NativeAppSession initializer, or NativeAppDelegate here.
+private final class PublicCapturePanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+    override func constrainFrameRect(_ rect: NSRect, to screen: NSScreen?) -> NSRect { rect }
+}
+
+@MainActor private final class PublicPageCapture {
+    private var panel: PublicCapturePanel?
+    private var host: NSHostingView<AnyView>?
+    private var activated = false
+    private var observer: NSObjectProtocol?
+    private var samples: [[String: Any]] = []
+    private var preferences: UserDefaults?
+    private var suite: String?
+
+    private func sample(_ phase: String) throws {
+        guard let panel else { throw NativeFailure("Capture panel missing") }
+        let intersects = NSScreen.screens.contains { $0.frame.intersects(panel.frame) }
+        let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid()
+        let quiet = !intersects && !panel.isVisible && !panel.isKeyWindow && !panel.isMainWindow
+            && !NSApp.isActive && !frontmost && !activated
+        samples.append(["phase": phase, "intersectsScreen": intersects, "visible": panel.isVisible,
+                        "key": panel.isKeyWindow, "main": panel.isMainWindow,
+                        "active": NSApp.isActive, "frontmostIsOwn": frontmost, "quiet": quiet])
+        guard quiet else { throw NativeFailure("Offscreen capture lost its quiet state") }
+    }
+
+    private func readiness(_ metrics: URL, visit: Int) throws -> Bool {
+        guard FileManager.default.fileExists(atPath: metrics.path) else { return false }
+        let rows = try String(contentsOf: metrics, encoding: .utf8).split(separator: "\n")
+        var ready = false
+        for row in rows {
+            let value = try JSONValue.decode(Data(row.utf8))
+            guard value["visit"].int == visit else { continue }
+            if value["phase"].string == "failureViewCommit" {
+                throw NativeFailure("The production page reported failed readiness")
+            }
+            ready = ready || value["phase"].string == "dataViewCommit"
+        }
+        return ready
+    }
+
+    func capture(paths: NativePaths, output: URL, page: String, appearance: String) async throws {
+        guard paths.readOnly, ["stats", "transcribe", "settings"].contains(page),
+              ["light", "dark"].contains(appearance),
+              let metricsPath = ProcessInfo.processInfo.environment["UNIAPI_NATIVE_UI_METRICS"] else {
+            throw NativeFailure("Expected isolated read-only page capture arguments")
+        }
+        let metrics = URL(fileURLWithPath: metricsPath)
+        let runtime = try NativeRuntime(paths: paths)
+        // Injected into the copied class, not an extension or product change.
+        let session = NativeAppSession(captureRuntime: runtime)
+        guard session.activity == nil, session.battery == nil, session.fans == nil,
+              session.summaries == nil, session.preferencesPrepared, session.pageActive else {
+            throw NativeFailure("Unexpected background domains in capture session")
+        }
+        let suiteName = "org.uniapi.public-page-capture." + UUID().uuidString
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            throw NativeFailure("Cannot create isolated preferences")
+        }
+        suite = suiteName; preferences = defaults
+        // setVolatileDomain does not create persistent operator preferences.
+        defaults.setVolatileDomain(["uniapi-theme": appearance, "uniapi-density": "standard",
+                                    "uniapi-motion": "reduced", "uniapi.transcribe.notify": false,
+                                    "uniapi.stats.source": "all", "uniapi.stats.range": 0],
+                                   forName: suiteName)
+        NativeUIReadiness.shared.launched()
+        let destination: NativeDestination = page == "stats" ? .stats : page == "transcribe" ? .transcribe : .settings
+        guard let visit = NativeUIReadiness.shared.begin(destination) else {
+            throw NativeFailure("Production readiness instrumentation must be enabled")
+        }
+        let content: AnyView
+        switch page {
+        case "stats": content = AnyView(NativeStatsPage(runtime: runtime))
+        case "transcribe": content = AnyView(NativeTranscribePage(runtime: runtime))
+        default: content = AnyView(NativeSettingsPage(runtime: runtime))
+        }
+        let scheme: ColorScheme = appearance == "dark" ? .dark : .light
+        let view = AnyView(content.environmentObject(session).defaultAppStorage(defaults)
+            .environment(\.nativePageVisit, visit)
+            .environment(\.nativePageActivation, session.pageActivation)
+            .environment(\.nativeInterfaceDensity, .standard)
+            .environment(\.nativeReducedMotion, true)
+            .environment(\.nativeMotionVisible, false)
+            .environment(\.colorScheme, scheme).preferredColorScheme(scheme))
+        observer = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+            object: NSApp, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.activated = true }
+            }
+        let x = (NSScreen.screens.map { $0.frame.minX }.min() ?? 0) - 10_000
+        let y = (NSScreen.screens.map { $0.frame.minY }.min() ?? 0) - 10_000
+        let panel = PublicCapturePanel(contentRect: NSRect(x: x, y: y, width: 1050, height: 800),
+            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        self.panel = panel
+        panel.isReleasedWhenClosed = false; panel.animationBehavior = .none
+        panel.isExcludedFromWindowsMenu = true
+        panel.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
+        let host = NSHostingView(rootView: view); self.host = host
+        panel.contentView = host
+        host.frame = NSRect(x: 0, y: 0, width: 1050, height: 800)
+        // The production page owns its NativePage/ScrollView. No extra scroll
+        // container, artificial minimum height, sidebar, or ordering call.
+        try sample("created-unordered")
+        let deadline = ProcessInfo.processInfo.systemUptime + 20
+        while true {
+            host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
+            try sample("waiting-for-production-readiness")
+            // An unordered host may commit its readiness probe only while
+            // caching display. Drive that path without accepting this bitmap.
+            guard let discarded = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+                throw NativeFailure("Cannot allocate readiness bitmap")
+            }
+            host.cacheDisplay(in: host.bounds, to: discarded)
+            try sample("after-readiness-bitmap")
+            if try readiness(metrics, visit: visit.id) { break }
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                throw NativeFailure("Page never reached ready; no screenshot accepted")
+            }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        try sample("before-bitmap")
+        host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
+        guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            throw NativeFailure("Cannot allocate native page bitmap")
+        }
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw NativeFailure("Cannot encode native page bitmap")
+        }
+        try sample("after-bitmap")
+        let report: [String: Any] = ["kind": "offscreen-native-page-empty-fixture", "page": page,
+            "appearance": appearance, "viewportWidth": 1050, "viewportHeight": 800,
+            "pixelWidth": bitmap.pixelsWide, "pixelHeight": bitmap.pixelsHigh,
+            "quiet": true, "samples": samples, "inputActions": 0,
+            "sessionInitializer": "captureRuntime", "readOnly": true,
+            "limits": "Page illustration only. No complete shell, compositor, layout parity, runtime feature or fresh-installed acceptance claim."]
+        // Core's writer creates its temporary file beside the destination;
+        // Foundation atomic writes can request an external replacement folder.
+        let reportData = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])
+        try NativeFile.writeAtomic(reportData, to: output.appendingPathComponent("capture.json"))
+        try NativeFile.writeAtomic(png, to: output.appendingPathComponent("page.png"))
+        // Dropping the actual page cancels its SwiftUI reads/listeners. This
+        // special session never started the normal session background domains.
+        host.rootView = AnyView(EmptyView())
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        defaults.removeVolatileDomain(forName: suiteName)
+        panel.close()
+    }
+}
+
+@main private enum PublicScreenshotMain {
+    @MainActor static func main() {
+        let args = Array(CommandLine.arguments.dropFirst())
+        guard args.count >= 3 else { fputs("Use the capture-public-screenshots.py runner\n", stderr); exit(64) }
+        let root = URL(fileURLWithPath: args[1], isDirectory: true)
+        let home = URL(fileURLWithPath: args[2], isDirectory: true)
+        let env = ProcessInfo.processInfo.environment
+        guard root.path == home.appendingPathComponent("UniApi").path,
+              env["UNIAPI_ROOT"] == root.path, env["UNIAPI_NATIVE_HOME"] == home.path,
+              env["UNIAPI_NATIVE_READ_ONLY"] == "1", env["HOME"] == home.path else {
+            fputs("Isolated capture environment required\n", stderr); exit(64)
+        }
+        if args[0] == "--prepare-fixture", args.count == 3 {
+            // A separate process exits after creating only fresh schemas. No
+            // default session, ownership lease, recovery, services or UI starts.
+            Task {
+                do {
+                    let runtime = try NativeRuntime(paths: NativePaths(root: root, home: home))
+                    try await NativeTranscriptionService(runtime: runtime).start()
+                    try await NativeStatisticsService(runtime: runtime).start()
+                    guard try runtime.db.query("SELECT id FROM jobs").isEmpty,
+                          try runtime.db.query("SELECT id FROM transcripts").isEmpty,
+                          try runtime.providers.list().isEmpty else {
+                        throw NativeFailure("Fixture must remain empty")
+                    }
+                    exit(0)
+                } catch { fputs("Fixture preparation failed: \(error.localizedDescription)\n", stderr); exit(1) }
+            }
+            dispatchMain()
+        }
+        guard args[0] == "--capture", args.count == 6 else { exit(64) }
+        let app = NSApplication.shared
+        guard app.setActivationPolicy(.prohibited) else { exit(65) }
+        let capture = PublicPageCapture()
+        Task { @MainActor in
+            do {
+                try await capture.capture(paths: NativePaths(root: root, home: home, readOnly: true),
+                    output: URL(fileURLWithPath: args[3], isDirectory: true), page: args[4], appearance: args[5])
+                exit(0)
+            } catch { fputs("Page capture failed: \(error.localizedDescription)\n", stderr); exit(1) }
+        }
+        // Run AppKit's loop without the production delegate or entry point.
+        withExtendedLifetime(capture) { app.run() }
+    }
+}

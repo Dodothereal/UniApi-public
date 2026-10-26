@@ -1,0 +1,69 @@
+name: Public native source checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      native_gate:
+        description: Run the optimized native gate on a provisioned dedicated arm64 Mac
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Public boundaries and isolated Python fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: bash tools/verify.sh --static
+
+  native:
+    # Never execute untrusted pull-request code automatically on a self-hosted Mac.
+    # Configure this label only on a dedicated runner without operator data/services.
+    if: github.event_name == 'workflow_dispatch' && inputs.native_gate
+    needs: static
+    runs-on: [self-hosted, macOS, ARM64, uniapi-sdk-26-5]
+    timeout-minutes: 45
+    env:
+      UNIAPI_CI_EVIDENCE: ${{ runner.temp }}/uniapi-ci-evidence
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record the actual host and require the pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -m)" == arm64 ]]
+          source native/swift/tools/swift-environment.sh
+          uniapi_swift_environment
+          mkdir -p "$UNIAPI_CI_EVIDENCE"
+          {
+            sw_vers
+            uname -m
+            printf 'SDK: %s\nCompiler: %s\n' "$UNIAPI_SWIFT_SDK" "$UNIAPI_SWIFT_TOOLCHAIN"
+            "$UNIAPI_SWIFT_TOOLCHAIN" --version
+            echo 'Deployment target: macOS 14. Actual test host is recorded above.'
+            echo 'No Intel, universal, macOS 14 runtime, GUI/device or fresh-user acceptance is inferred.'
+          } | tee "$UNIAPI_CI_EVIDENCE/environment.txt"
+      - name: All optimized native tests, including PublicSettings and Whisper
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/verify.sh 2>&1 | tee "$UNIAPI_CI_EVIDENCE/native-verification.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-arm64-ci-evidence
+          path: ${{ runner.temp }}/uniapi-ci-evidence/
+          if-no-files-found: warn

@@ -1,0 +1,74 @@
+{
+  "kind": "offscreen-native-page-empty-fixture",
+  "label": "Actual complete native page views in an offscreen viewport, empty fixture data; no full-shell or compositor claim.",
+  "requiresVisualReview": false,
+  "parentVisualReviewed": true,
+  "quiet": true,
+  "completeShell": false,
+  "compositorCapture": false,
+  "freshInstalledAcceptance": false,
+  "sessionInitializer": "captureRuntime",
+  "sessionBypass": "Capture-only session initializer; normal background-service startup is bypassed.",
+  "cases": [
+    {
+      "page": "stats",
+      "appearance": "light",
+      "image": "stats-light.png",
+      "sha256": "6b04e58da3c76b196e926ded3cf6a44c196e3a8de200f1cdc3b64e4001b81e88",
+      "viewport": [
+        1050,
+        800
+      ]
+    },
+    {
+      "page": "stats",
+      "appearance": "dark",
+      "image": "stats-dark.png",
+      "sha256": "2caa0687da9b570accd64d6362184f0965b16bfbdce36de898714cce4126a2e0",
+      "viewport": [
+        1050,
+        800
+      ]
+    },
+    {
+      "page": "transcribe",
+      "appearance": "light",
+      "image": "transcribe-light.png",
+      "sha256": "3e1cf6ab5fdf072c01eada8e3bc3553f184acea7b6c60cc2b0ba8ddadc8ecd45",
+      "viewport": [
+        1050,
+        800
+      ]
+    },
+    {
+      "page": "transcribe",
+      "appearance": "dark",
+      "image": "transcribe-dark.png",
+      "sha256": "6d24f369741e5599a1df360ba6dc6588dc753e631abca23f83c4dbbfd333518a",
+      "viewport": [
+        1050,
+        800
+      ]
+    },
+    {
+      "page": "settings",
+      "appearance": "light",
+      "image": "settings-light.png",
+      "sha256": "0e74a091f5f7fac395d4c61fe4e424a3dadc750892965ee30e3d857b81e63dd4",
+      "viewport": [
+        1050,
+        800
+      ]
+    },
+    {
+      "page": "settings",
+      "appearance": "dark",
+      "image": "settings-dark.png",
+      "sha256": "6e9d56f7a5483812fb4f1541fdc5f5b9b590416ae3ef7bba40eb54b2e1ab4b96",
+      "viewport": [
+        1050,
+        800
+      ]
+    }
+  ]
+}

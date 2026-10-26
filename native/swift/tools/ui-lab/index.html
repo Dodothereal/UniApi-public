@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Native capture viewer</title>
+<style>
+:root{color-scheme:light dark;--bg:#f3f4f5;--surface:#fff;--ink:#20242b;--muted:#626b78;--border:#d5d9df;--active:#e8eef6;--focus:#356fa8}
+@media(prefers-color-scheme:dark){:root{--bg:#17191d;--surface:#22252a;--ink:#e6e8ec;--muted:#a3abb7;--border:#3b414b;--active:#303e50;--focus:#87b8ed}}
+*{box-sizing:border-box}body{margin:0;height:100dvh;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select{font:inherit;color:inherit}button,select,input{border:1px solid var(--border);border-radius:5px;background:var(--surface);min-height:32px}button{cursor:pointer;padding:5px 10px}button:disabled{opacity:.45;cursor:default}button:hover:not(:disabled){background:var(--active)}:focus-visible{outline:2px solid var(--focus);outline-offset:2px}header{padding:14px 18px 12px;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:center;flex-wrap:wrap}h1{font-size:15px;font-weight:600;margin:0}header p{font-size:12px;color:var(--muted);margin:3px 0 0}.tools{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap}.tools label{display:flex;align-items:center;gap:5px;margin-left:6px}.tools input{min-height:0}.zoom{display:flex;gap:3px}button[aria-pressed=true]{background:var(--active);border-color:var(--focus)}.workspace{flex:1;min-height:0;display:grid;grid-template-columns:250px minmax(0,1fr)}aside{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--border);background:var(--surface)}.filters{padding:12px;display:grid;gap:8px;border-bottom:1px solid var(--border)}.filters input{width:100%;padding:5px 8px}.filter-row{display:flex;gap:6px}.filter-row select{width:50%;min-width:0;padding:4px}.case-list{overflow:auto;padding:8px;flex:1}.case{display:block;width:100%;text-align:left;border-color:transparent;background:transparent;margin-bottom:4px;padding:9px 10px}.case[aria-current=true]{background:var(--active)}.case strong{display:block;font-size:12.5px;font-weight:500;overflow-wrap:anywhere}.case small{display:block;margin-top:4px;color:var(--muted);font:10.5px ui-monospace,SFMono-Regular,monospace}.empty{padding:24px;color:var(--muted);text-align:center;line-height:1.6}.stage{min-width:0;min-height:0;display:flex;flex-direction:column}.selection{padding:11px 16px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}.selection strong{font-size:13px;font-weight:500;overflow-wrap:anywhere}.selection span{color:var(--muted);font:11px ui-monospace,SFMono-Regular,monospace}.pictures{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;padding:14px}.pictures.compare{grid-template-columns:repeat(2,minmax(0,1fr))}figure{margin:0;min-width:0;min-height:0;display:flex;flex-direction:column}figcaption{padding:0 2px 7px;color:var(--muted);font:11px ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere}.viewport{overflow:auto;flex:1;min-height:0;background:#777b82;border-radius:3px}.image-wrap{min-width:100%;min-height:100%;width:max-content;display:flex;align-items:center;justify-content:center}.image-wrap img{display:block;flex:none;max-width:none;max-height:none}.fit .image-wrap{width:100%;height:100%}.fit img{width:100%;height:100%;object-fit:contain}.image-error{padding:20px;color:#fff}footer{border-top:1px solid var(--border);min-height:30px;padding:7px 16px;color:var(--muted);font:10.5px ui-monospace,SFMono-Regular,monospace}footer.error{color:var(--ink)}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}[hidden]{display:none!important}
+@media(max-width:740px){header{padding:10px 12px}.tools{margin-left:0}.workspace{grid-template-columns:190px minmax(0,1fr)}.pictures{padding:8px;gap:8px}.pictures.compare{grid-template-columns:minmax(0,1fr);grid-template-rows:repeat(2,minmax(0,1fr))}.selection{padding:10px}.filters{padding:8px}}@media(max-width:480px){.workspace{grid-template-columns:145px minmax(0,1fr)}.filter-row{flex-direction:column}.filter-row select{width:100%}.case{padding:8px 5px}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Native capture viewer</h1><p>Saved PNG artifacts / read-only</p></div>
+  <div class="tools">
+    <div class="zoom" role="group" aria-label="Image zoom">
+      <button type="button" data-zoom="fit" aria-pressed="true">Fit</button>
+      <button type="button" data-zoom="1" aria-pressed="false">1x</button>
+      <button type="button" data-zoom="2" aria-pressed="false">2x</button>
+    </div>
+    <label><input id="compare" type="checkbox" disabled> Reference</label>
+    <button type="button" id="refresh">Refresh</button>
+  </div>
+</header>
+<div class="workspace">
+  <aside aria-label="Saved capture cases">
+    <div class="filters">
+      <label class="sr-only" for="search">Filter captures</label>
+      <input id="search" type="search" placeholder="Filter captures" autocomplete="off">
+      <div class="filter-row">
+        <select id="appearance" aria-label="Appearance"><option value="">All themes</option><option value="light">Light</option><option value="dark">Dark</option></select>
+        <select id="width" aria-label="Capture width"><option value="">All widths</option></select>
+      </div>
+    </div>
+    <nav class="case-list" id="cases" aria-label="Capture picker"></nav>
+  </aside>
+  <main class="stage">
+    <div class="selection"><strong id="title">Loading saved captures</strong><span id="metadata"></span></div>
+    <div class="pictures" id="pictures"></div>
+    <div class="empty" id="empty" hidden>No saved captures match these filters.</div>
+  </main>
+</div>
+<footer id="status" role="status" aria-live="polite">Reading the admitted manifest...</footer>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+let captures = [], selected = null, zoom = 'fit', etag = null, timer = null, controller = null, request = 0;
+let renderedPaneKey = null;
+const widthOf = item => item.viewportWidth ?? item.image.width;
+const widthUnit = item => item.viewportWidth ? 'pt' : 'px';
+const summary = item => `${item.appearance} / ${widthOf(item)}${widthUnit(item)} / ${item.image.width} x ${item.image.height}px`;
+function element(tag, className, value) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (value !== undefined) node.textContent = value;
+  return node;
+}
+function widths() {
+  const previous = $('width').value;
+  $('width').replaceChildren(new Option('All widths', ''));
+  const values = [...new Map(captures.map(item => [widthOf(item) + widthUnit(item), item])).values()];
+  values.sort((a,b) => widthOf(a) - widthOf(b) || widthUnit(a).localeCompare(widthUnit(b)));
+  for (const item of values) {
+    const value = widthOf(item) + widthUnit(item);
+    $('width').add(new Option(value, value));
+  }
+  if ([...$('width').options].some(option => option.value === previous)) $('width').value = previous;
+}
+function render() {
+  const focusedCase = document.activeElement?.dataset.caseId;
+  const query = $('search').value.toLowerCase().trim();
+  const matches = captures.filter(item => (!$('appearance').value || item.appearance === $('appearance').value)
+    && (!$('width').value || widthOf(item) + widthUnit(item) === $('width').value)
+    && `${item.id} ${item.label} ${item.page ?? ''} ${summary(item)}`.toLowerCase().includes(query));
+  if (!matches.some(item => item.id === selected)) selected = matches[0]?.id ?? null;
+  $('cases').replaceChildren();
+  for (const item of matches) {
+    const button = element('button', 'case'); button.type = 'button';
+    button.dataset.caseId = item.id;
+    button.setAttribute('aria-current', String(item.id === selected));
+    button.append(element('strong', '', item.label), element('small', '', summary(item)));
+    button.addEventListener('click', () => { selected = item.id; render(); });
+    $('cases').append(button);
+  }
+  if (focusedCase) [...$('cases').children].find(node => node.dataset.caseId === focusedCase)?.focus({preventScroll:true});
+  if (!matches.length) $('cases').append(element('div', 'empty', 'No matching captures'));
+  const item = matches.find(item => item.id === selected);
+  $('pictures').hidden = !item; $('empty').hidden = Boolean(item);
+  $('title').textContent = item?.label ?? 'No capture selected';
+  $('metadata').textContent = item ? `${item.page ? item.page + ' / ' : ''}${summary(item)} / ${item.id}` : '';
+  $('compare').disabled = !item?.reference;
+  const comparing = Boolean(item?.reference && $('compare').checked);
+  $('pictures').classList.toggle('compare', comparing);
+  const images = item ? [[item.image, 'Native capture']] : [];
+  if (comparing) images.push([item.reference, item.reference.label ?? 'Reference']);
+  const paneKey = JSON.stringify([item?.id ?? null, item?.image.sha256 ?? null,
+    item?.reference?.sha256 ?? null, zoom, comparing]);
+  if (paneKey === renderedPaneKey) {
+    // Metadata can change without replacing an image or its focused scroll pane.
+    images.forEach(([image, label], index) => describePane($('pictures').children[index], image, label, item));
+    return;
+  }
+  $('pictures').replaceChildren();
+  renderedPaneKey = paneKey;
+  for (const [image, label] of images) {
+    const figure = element('figure');
+    figure.append(element('figcaption'));
+    const viewport = element('div', 'viewport' + (zoom === 'fit' ? ' fit' : ''));
+    viewport.tabIndex = 0;
+    const wrap = element('div', 'image-wrap'), img = element('img');
+    img.width = image.width * (zoom === '2' ? 2 : 1); img.height = image.height * (zoom === '2' ? 2 : 1);
+    img.draggable = false; img.decoding = 'async';
+    img.addEventListener('error', () => { wrap.replaceChildren(element('p', 'image-error', 'Capture unavailable. Refresh after publishing complete artifacts.')); }, {once:true});
+    img.src = image.url; wrap.append(img); viewport.append(wrap); figure.append(viewport); $('pictures').append(figure);
+    describePane(figure, image, label, item);
+  }
+}
+function describePane(figure, image, label, item) {
+  const caption = figure.querySelector('figcaption');
+  caption.textContent = `${label} / ${image.width} x ${image.height}px / ${image.sha256.slice(0,12)}`;
+  caption.title = 'SHA-256 ' + image.sha256;
+  figure.querySelector('.viewport').setAttribute('aria-label', label + ', scrollable saved image');
+  figure.querySelector('img')?.setAttribute('alt', `${item.label}, ${label}, ${item.appearance}`);
+}
+function status(message, error=false) { $('status').textContent = message; $('status').classList.toggle('error', error); }
+async function refresh() {
+  clearTimeout(timer);
+  if (document.hidden) return;
+  const ticket = ++request; controller?.abort(); controller = new AbortController();
+  try {
+    const response = await fetch('/manifest.json', {cache:'no-store', signal:controller.signal, headers:etag ? {'If-None-Match':etag} : {}});
+    if (ticket !== request || document.hidden) return;
+    if (response.status !== 304) {
+      if (!response.ok) throw new Error('Snapshot admission failed. Check the manifest and publish complete PNG files.');
+      const data = await response.json();
+      if (ticket !== request || document.hidden) return;
+      captures = data.cases; etag = response.headers.get('ETag'); widths(); render();
+    }
+    status(`${captures.length} saved capture${captures.length === 1 ? '' : 's'} / read-only / visible-page refresh every 5s`);
+  } catch (error) {
+    if (ticket === request && error.name !== 'AbortError') {
+      status(error.message || 'Viewer connection unavailable.', true);
+      if (!captures.length) { $('title').textContent = 'Captures unavailable'; $('empty').hidden = false; }
+    }
+  } finally {
+    if (ticket === request && !document.hidden) timer = setTimeout(refresh, 5000);
+  }
+}
+for (const id of ['search','appearance','width']) $(id).addEventListener(id === 'search' ? 'input' : 'change', render);
+$('compare').addEventListener('change', render);
+for (const button of document.querySelectorAll('[data-zoom]')) button.addEventListener('click', () => {
+  zoom = button.dataset.zoom;
+  for (const item of document.querySelectorAll('[data-zoom]')) item.setAttribute('aria-pressed', String(item === button));
+  render();
+});
+$('refresh').addEventListener('click', () => {
+  if ($('pictures').querySelector('.image-error')) renderedPaneKey = null;
+  etag = null; refresh();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { ++request; clearTimeout(timer); controller?.abort(); }
+  else refresh();
+});
+window.addEventListener('pagehide', () => { ++request; clearTimeout(timer); controller?.abort(); });
+if (!document.hidden) refresh();
+</script>
+</body>
+</html>

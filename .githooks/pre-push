@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+# Fast public inventory and credential boundary; full tests run in CI and before review.
+exec python3 tools/pentest.py --static
