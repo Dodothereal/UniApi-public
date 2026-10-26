@@ -18,10 +18,12 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, uniapi-sdk-26-5]
     timeout-minutes: 45
     env:
-      UNIAPI_CI_EVIDENCE: ${{ runner.temp }}/uniapi-ci-evidence
       UNIAPI_PREVIEW_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - name: Select the runner-owned evidence directory
+        shell: bash
+        run: echo "UNIAPI_CI_EVIDENCE=$RUNNER_TEMP/uniapi-ci-evidence" >> "$GITHUB_ENV"
       - name: Verify version, architecture and pinned toolchain
         shell: bash
         run: |
