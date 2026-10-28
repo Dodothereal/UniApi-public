@@ -7,6 +7,7 @@ import XCTest
 private final class TimingTestGate: @unchecked Sendable {
     private let lock = NSLock()
     private var opened = false, waiters: [CheckedContinuation<Void, Never>] = []
+    var signalled: Bool { lock.withLock { opened } }
     func wait() async {
         await withCheckedContinuation { continuation in
             let ready = lock.withLock { if opened { return true }; waiters.append(continuation); return false }
@@ -25,6 +26,86 @@ private final class TimingTestRecords: @unchecked Sendable {
     private var rows: [NativeCodexStreamTimingObservation] = []
     func add(_ row: NativeCodexStreamTimingObservation) { lock.withLock { rows.append(row) } }
     var count: Int { lock.withLock { rows.count } }
+}
+
+private final class TimingHeldUpstream: ShimTransport, @unchecked Sendable {
+    let tail = TimingTestGate(), drain = TimingTestGate()
+    let frames: [Data]
+    init(_ frames: [Data]) { self.frames = frames }
+    func open(_ request: ShimHTTPRequest) async throws -> ShimUpstream {
+        guard request.url.host == "chatgpt.com", request.url.path == "/backend-api/codex/responses" else { throw NativeFailure("Unexpected fixture endpoint") }
+        let stream = AsyncThrowingStream<Data, Error>.makeStream()
+        let task = Task {
+            do {
+                for frame in frames {
+                    try Task.checkCancellation(); stream.continuation.yield(frame)
+                    try await Task.sleep(nanoseconds: 20_000_000)
+                }
+                await tail.wait(); try Task.checkCancellation()
+                stream.continuation.yield(Data("data: [DONE]\n\n".utf8)); stream.continuation.finish()
+            } catch { stream.continuation.finish(throwing: error) }
+        }
+        return .init(status: 200, headers: ["content-type": "text/event-stream"], chunks: stream.stream,
+                     cancel: { task.cancel(); self.tail.signal() },
+                     waitForCompletion: { await task.value; await self.drain.wait() })
+    }
+    func release() { tail.signal(); drain.signal() }
+}
+
+private enum TimingLoopbackClient {
+    /// Read a complete Responses terminal, then close without waiting for DONE/EOF.
+    static func completedThenClose(port: Int, token: String) throws -> Bool {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw NativeFailure("Fixture socket unavailable") }
+        defer { close(fd) }
+        var noPipe: Int32 = 1
+        guard fcntl(fd, F_SETFD, FD_CLOEXEC) == 0, fcntl(fd, F_SETFL, O_NONBLOCK) == 0,
+              setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noPipe, socklen_t(MemoryLayout<Int32>.size)) == 0 else { throw NativeFailure("Fixture socket configuration failed") }
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
+        func wait(_ events: Int16) throws {
+            while ProcessInfo.processInfo.systemUptime < deadline {
+                var descriptor = pollfd(fd: fd, events: events, revents: 0)
+                let result = poll(&descriptor, 1, 20)
+                if result < 0 && errno == EINTR { continue }
+                guard result >= 0, descriptor.revents & Int16(POLLERR | POLLNVAL) == 0 else { throw NativeFailure("Fixture socket poll failed") }
+                if result > 0 { return }
+            }
+            throw NativeFailure("Fixture socket deadline")
+        }
+        var address = sockaddr_in(); address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET); address.sin_port = UInt16(port).bigEndian; address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+        guard connected == 0 || errno == EINPROGRESS else { throw NativeFailure("Fixture connect failed") }
+        if connected != 0 {
+            try wait(Int16(POLLOUT)); var code: Int32 = 0, length = socklen_t(MemoryLayout<Int32>.size)
+            guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &code, &length) == 0, code == 0 else { throw NativeFailure("Fixture connect rejected") }
+        }
+        let body = try JSONValue.object(["model": "example-model", "stream": true, "input": "owned fixture"]).encoded()
+        let request = Data("POST /_uniapi/codex/\(token)/v1/responses HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nAuthorization: Bearer fixture-only\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8) + body
+        try request.withUnsafeBytes { bytes in
+            var offset = 0
+            while offset < bytes.count {
+                try wait(Int16(POLLOUT)); let count = Darwin.send(fd, bytes.baseAddress!.advanced(by: offset), bytes.count - offset, 0)
+                if count < 0 && [EINTR, EAGAIN, EWOULDBLOCK].contains(errno) { continue }
+                guard count > 0 else { throw NativeFailure("Fixture send failed") }; offset += count
+            }
+        }
+        var received = Data(), buffer = [UInt8](repeating: 0, count: 4096)
+        while received.count < 65_536 {
+            try wait(Int16(POLLIN)); let count = recv(fd, &buffer, buffer.count, 0)
+            if count < 0 && [EINTR, EAGAIN, EWOULDBLOCK].contains(errno) { continue }
+            guard count > 0 else { throw NativeFailure("Fixture reply ended before completed") }
+            received.append(contentsOf: buffer.prefix(count))
+            if let boundary = received.range(of: Data("\r\n\r\n".utf8)) {
+                let body = Data(received[boundary.upperBound...])
+                guard let completeFrame = body.range(of: Data("\n\n".utf8), options: .backwards) else { continue }
+                var parser = ShimSSEParser()
+                let frames = try parser.feed(Data(body[..<completeFrame.upperBound]))
+                if frames.contains(where: { $0.data["type"] == "response.completed" && $0.data["response"]["status"] == "completed" }) { return true }
+            }
+        }
+        throw NativeFailure("Fixture reply exceeded its bound")
+    }
 }
 
 final class NativeCodexStreamTimingTests: XCTestCase {
@@ -174,7 +255,7 @@ final class NativeCodexStreamTimingTests: XCTestCase {
         XCTAssertNotEqual(observation?.responseID, "resp_1")
         XCTAssertEqual(observation?.model, "uniapi/example/model")
     }
-    func testSocketRecordsOnlyAfterSendAndDrainAndNeverAfterCancellation() async throws {
+    func testSocketKeepsDeliveredCompletionWhileDrainingOrCancelling() async throws {
         for cancelled in [false, true] {
             let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             let paths = NativePaths(root: root), clock = Clock(), records = TimingTestRecords()
@@ -188,10 +269,10 @@ final class NativeCodexStreamTimingTests: XCTestCase {
             let socket = ShimSocket(connection: NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: 1)!, using: .tcp), gateway: gateway, queue: DispatchQueue(label: "timing-test"), readTimeout: 1, ended: {})
             let task = Task { try await socket.transmit(response) { _, _ in clock.now += 1 } }
             await entered.wait()
-            XCTAssertEqual(records.count, 0)
+            XCTAssertEqual(records.count, 1)
             if cancelled { task.cancel() }
             drain.signal(); try await task.value
-            XCTAssertEqual(records.count, cancelled ? 0 : 1)
+            XCTAssertEqual(records.count, 1)
         }
     }
     func testSocketSendAndJournalFailuresNeverAdmitOrBreakTheReply() async throws {
@@ -219,12 +300,13 @@ final class NativeCodexStreamTimingTests: XCTestCase {
             XCTAssertEqual(records.count, failSend ? 0 : 1)
         }
     }
-    func testSocketStreamFailureAfterTerminalDoesNotRecord() async throws {
+    func testSocketStreamFailureBeforeOrAfterDeliveredTerminal() async throws {
+        for completedFirst in [false, true] {
         let paths = NativePaths(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
         let clock = Clock(), records = TimingTestRecords()
         let chunks = try [frame(created()), frame(delta("first")), frame(delta("second")), frame(completed())]
         var response = ShimClientResponse(status: 200, headers: ["content-type": "text/event-stream"], chunks: AsyncThrowingStream { continuation in
-            for chunk in chunks { continuation.yield(chunk) }; continuation.finish(throwing: NativeFailure("upstream failure"))
+            for chunk in completedFirst ? chunks : Array(chunks.dropLast()) { continuation.yield(chunk) }; continuation.finish(throwing: NativeFailure("upstream failure"))
         })
         response.codexStreamTiming = .init(requestedModel: "example-model", uptime: { clock.now }, record: { records.add($0) })
         let gateway = NativeShimGateway(providers: NativeProviderStore(paths: paths), dependencies: .init(), paths: paths)
@@ -232,7 +314,111 @@ final class NativeCodexStreamTimingTests: XCTestCase {
         do {
             try await socket.transmit(response) { _, _ in clock.now += 1 }
             XCTFail("A failed upstream stream succeeded")
-        } catch { XCTAssertEqual(records.count, 0) }
+        } catch { XCTAssertEqual(records.count, completedFirst ? 1 : 0) }
+        }
+    }
+    func testSocketDoesNotLoseDeliveredClockWhenDoneOrEOFFails() async throws {
+        for failAtDone in [false, true] {
+            let paths = NativePaths(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+            let clock = Clock(), records = TimingTestRecords()
+            let done = Data("data: [DONE]\n\n".utf8)
+            let chunks = try [frame(created()), frame(delta("first")), frame(delta("second")), frame(completed()), done]
+            var response = ShimClientResponse(status: 200, headers: ["content-type": "text/event-stream"], chunks: AsyncThrowingStream { continuation in
+                for chunk in chunks { continuation.yield(chunk) }; continuation.finish()
+            })
+            response.codexStreamTiming = .init(requestedModel: "example-model", uptime: { clock.now }, record: { records.add($0) })
+            let gateway = NativeShimGateway(providers: NativeProviderStore(paths: paths), dependencies: .init(), paths: paths)
+            let socket = ShimSocket(connection: NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: 1)!, using: .tcp), gateway: gateway, queue: DispatchQueue(label: "timing-completed-close"), readTimeout: 1, ended: {})
+            do {
+                try await socket.transmit(response) { bytes, final in
+                    clock.now += 1
+                    if failAtDone ? bytes == done : final { throw NativeFailure("peer closed after completed") }
+                }
+                XCTFail("A failed send succeeded")
+            } catch { XCTAssertEqual(records.count, 1) }
+        }
+    }
+    func testSocketCancellationOrFailedSendBeforeTerminalHasNoClock() async throws {
+        for cancelBeforeTerminal in [false, true] {
+            let paths = NativePaths(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+            let clock = Clock(), records = TimingTestRecords()
+            let chunks = try [frame(created()), frame(delta("first")), frame(delta("second")), frame(completed())]
+            var response = ShimClientResponse(status: 200, headers: ["content-type": "text/event-stream"], chunks: AsyncThrowingStream { continuation in
+                for chunk in chunks { continuation.yield(chunk) }; continuation.finish()
+            })
+            response.codexStreamTiming = .init(requestedModel: "example-model", uptime: { clock.now }, record: { records.add($0) })
+            let gateway = NativeShimGateway(providers: NativeProviderStore(paths: paths), dependencies: .init(), paths: paths)
+            let socket = ShimSocket(connection: NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: 1)!, using: .tcp), gateway: gateway, queue: DispatchQueue(label: "timing-incomplete-close"), readTimeout: 1, ended: {})
+            let task = Task {
+                var count = 0
+                try await socket.transmit(response) { _, _ in
+                    count += 1; clock.now += 1
+                    if cancelBeforeTerminal && count == 4 { withUnsafeCurrentTask { $0?.cancel() } }
+                    if !cancelBeforeTerminal && count == 5 { throw NativeFailure("completed was not delivered") }
+                }
+            }
+            do { try await task.value; XCTFail("An incomplete send succeeded") } catch {}
+            XCTAssertEqual(records.count, 0)
+        }
+    }
+    func testSocketRequiresTheCompleteTerminalEventDelimiter() async throws {
+        for sendDelimiter in [false, true] {
+            let paths = NativePaths(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+            let clock = Clock(), records = TimingTestRecords(), delimiter = Data([10])
+            let terminalWithoutDelimiter = try Data(frame(completed()).dropLast())
+            let chunks = try [frame(created()), frame(delta("first")), frame(delta("second")), terminalWithoutDelimiter, delimiter]
+            var response = ShimClientResponse(status: 200, headers: ["content-type": "text/event-stream"], chunks: AsyncThrowingStream { continuation in
+                for chunk in chunks { continuation.yield(chunk) }; continuation.finish()
+            })
+            response.codexStreamTiming = .init(requestedModel: "example-model", uptime: { clock.now }, record: { records.add($0) })
+            let gateway = NativeShimGateway(providers: NativeProviderStore(paths: paths), dependencies: .init(), paths: paths)
+            let socket = ShimSocket(connection: NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: 1)!, using: .tcp), gateway: gateway, queue: DispatchQueue(label: "timing-terminal-delimiter"), readTimeout: 1, ended: {})
+            do {
+                try await socket.transmit(response) { bytes, _ in
+                    if bytes == delimiter {
+                        XCTAssertEqual(records.count, 0, "A JSON data line is not yet a complete SSE event")
+                        if !sendDelimiter { throw NativeFailure("terminal delimiter was not sent") }
+                    }
+                    clock.now += 1
+                }
+                XCTAssertTrue(sendDelimiter)
+            } catch { XCTAssertFalse(sendDelimiter) }
+            XCTAssertEqual(records.count, sendDelimiter ? 1 : 0)
+        }
+    }
+    func testRealLoopbackClientClosingAtCompletedRetainsExactClock() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = NativePaths(root: root, home: root.appendingPathComponent("home"))
+        try paths.ensureDirectories()
+        try NativeFile.writeAtomic(try JSONValue.object(["providers": []]).encoded(), to: paths.providers)
+        let upstream = TimingHeldUpstream(try [frame(created()), frame(delta("first")), frame(delta("second")), frame(completed())])
+        let watchdog = DispatchWorkItem { upstream.release() }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 8, execute: watchdog)
+        defer { watchdog.cancel(); upstream.release() }
+        let server = try NativeShimServer(paths: paths, port: 0, dependencies: .init(transport: upstream))
+        do {
+            try await server.start()
+            let port = try XCTUnwrap(server.listeningPort), token = try NativeCodexRoutingSecret.load(paths)
+            let client = try await Task.detached { try TimingLoopbackClient.completedThenClose(port: port, token: token) }.value
+            XCTAssertTrue(client)
+            let deadline = ProcessInfo.processInfo.systemUptime + 3
+            var observation: NativeCodexStreamTimingObservation?
+            repeat {
+                observation = NativeCodexStreamTimings.read(paths: paths)["codex:resp_1"]
+                if observation != nil { break }
+                try await Task.sleep(nanoseconds: 1_000_000)
+            } while ProcessInfo.processInfo.systemUptime < deadline
+            let value = try XCTUnwrap(observation)
+            XCTAssertFalse(upstream.drain.signalled, "Clock must survive independently of upstream teardown")
+            XCTAssertEqual(value.responseID, "resp_1"); XCTAssertEqual(value.model, "example-model")
+            XCTAssertEqual(value.outputTokens, 10); XCTAssertEqual(value.reasoningTokens, 2); XCTAssertEqual(value.streamOutputTokens, 8)
+            XCTAssertTrue(value.durationMs.isFinite && value.durationMs > 0)
+            upstream.release(); await server.shutdown()
+            XCTAssertEqual(NativeCodexStreamTimings.read(paths: paths).count, 1)
+        } catch {
+            upstream.release(); await server.shutdown(); throw error
+        }
     }
     func testBoundedJournalAndUnsafeLinkAreRejected() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

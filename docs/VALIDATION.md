@@ -1,5 +1,47 @@
 # Preview validation
 
+## Completed-response streaming clock (unreleased)
+
+An isolated Codex 0.164.0 client using the 0.1.5 shim completed an actual shell
+tool and final reply against a synthetic loopback provider. Metadata-only traces
+of a private diagnostic source copy show the completed event's successful host
+send callback, followed by the peer closing before the trailing DONE frame.
+The old socket path discarded the clock on that later cancellation. These
+controls use no real provider, operator history, app session or hardware.
+
+The correction reports a strict, validated observation once, immediately after
+the completed response bytes pass the host send callback. Connection teardown
+and upstream draining still run; their later failure cannot undo already sent
+output. Cancellation or a failed send before completion remains unmeasured.
+The observer's exact ID/model/output checks, explicit reasoning requirement and
+two-delta/positive-duration admission are unchanged. A buffered tool call with
+one argument delta does not acquire an invented rate.
+
+Regression coverage includes failures before completion, DONE/EOF failure,
+cancellation while draining and an actual private TCP peer that reads completed
+then closes while upstream teardown is held. Independent review identified an
+additional framing boundary: a JSON data line alone is not a complete SSE
+event. Its split-delimiter regression failed before the repair (one method,
+three assertions); admission now also requires the event's blank-line delimiter.
+The final optimized gate passed **1,255 tests, zero failures**, in 41.588 seconds
+(41.667 seconds including suite completion). The complete command took 110.104
+seconds, including a 66.92-second incremental build and all three product links.
+All 372 source/test inputs stayed unchanged; their manifest SHA-256 is
+`88825bfa41e1707a0ddf2e928ee1aa62ac32c5d79a4da9f785b5fb6bcb1f33c9`.
+
+The repaired release shim also retained the eligible final clock in the actual
+Codex client control. Its response ID, selected model and synthetic declared
+counters match exactly: 60 output, 10 reasoning and 50 streamed output tokens,
+over an 81.879 ms host clock. The protected tool took 10.010 seconds; the two
+upstream requests were separated by over 10 seconds. The one-delta tool response
+remains untimed. These synthetic counters do not establish a real provider's
+token rate. The original runner's cross-process absolute-monotonic comparison
+failed because those Python clocks use different epochs here; the saved
+postcheck compares differences within each clock, not their absolute values.
+This is a host send-completion clock, not peer receipt, compositor timing or
+every-provider acceptance. Clock metadata never adds token usage by itself;
+Statistics still requires an exact matching client usage record.
+
 ## Statistics empty-source presentation (unreleased)
 
 Empty source cards now say **No recorded usage**, including their accessibility

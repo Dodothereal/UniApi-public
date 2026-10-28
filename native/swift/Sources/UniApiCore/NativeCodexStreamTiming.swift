@@ -161,7 +161,7 @@ public struct NativeCodexStreamTimingObserver {
         finish(success: success, completedAt: completedAt, providerReasoning: nil)
     }
     func finish(success: Bool, completedAt: Double = Date().timeIntervalSince1970, providerReasoning: (output: Int, reasoning: Int)?) -> NativeCodexStreamTimingObservation? {
-        guard success, !poisoned, frame.isEmpty, !oversized, deltas >= 2,
+        guard success, !poisoned, frame.isEmpty, dataLines == 0, !oversized, deltas >= 2,
               let first, let last, let terminal else { return nil }
         let reasoning = terminal.reasoning ?? (providerReasoning?.output == terminal.output ? providerReasoning?.reasoning : nil)
         guard let reasoning, reasoning >= 0, reasoning < terminal.output else { return nil }
