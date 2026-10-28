@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -37,7 +37,7 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, uniapi-sdk-26-5]
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Select the runner-owned evidence directory
         shell: bash
         run: echo "UNIAPI_CI_EVIDENCE=$RUNNER_TEMP/uniapi-ci-evidence" >> "$GITHUB_ENV"
@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           bash tools/verify.sh 2>&1 | tee "$UNIAPI_CI_EVIDENCE/native-verification.log"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: native-arm64-ci-evidence
