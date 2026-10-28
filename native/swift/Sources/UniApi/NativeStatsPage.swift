@@ -207,6 +207,7 @@ private struct NativeStatsContents: View {
                     ForEach(StatisticsSource.allCases, id: \.rawValue) { s in
                         let value = payload["sources"][s.rawValue]
                         let stream = NativeStatsThroughputPresentation.streamingSource(d["throughput"], source: s.rawValue)
+                        let hasUsage = nativeStatsGrand(value) > 0 || value["messages"].double > 0
                         Button { selectSource(s.rawValue) } label: {
                             Card(padding: 14) {
                                 VStack(alignment: .leading, spacing: 4) {
@@ -216,20 +217,26 @@ private struct NativeStatsContents: View {
                                         Text(value.isNull ? "No recorded usage" : "tokens").font(Theme.ui(10)).foregroundStyle(Theme.muted)
                                     }
                                     if !detail, !value.isNull {
-                                        Text("\(nativeStatsCount(value["output"].double)) output · \(nativeStatsCount(value["cacheRead"].double)) cached").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                                        if let rate = NativeStatsThroughputPresentation.rate(stream) {
-                                            Text(String(format: "%.1f streaming tokens/s", rate)).font(Theme.mono(11)).foregroundStyle(Theme.dim)
-                                                .help(NativeStatsRateMetric.streaming.timingDetail(stream))
+                                        if hasUsage {
+                                            Text("\(nativeStatsCount(value["output"].double)) output · \(nativeStatsCount(value["cacheRead"].double)) cached").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
+                                            if let rate = NativeStatsThroughputPresentation.rate(stream) {
+                                                Text(String(format: "%.1f streaming tokens/s", rate)).font(Theme.mono(11)).foregroundStyle(Theme.dim)
+                                                    .help(NativeStatsRateMetric.streaming.timingDetail(stream))
+                                            } else {
+                                                Text(NativeStatsThroughputPresentation.missingClockLabel(source: s.rawValue))
+                                                    .font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
+                                                    .help("Token totals are available. A streaming rate needs token-arrival timestamps; elapsed tool and response time cannot replace them.")
+                                            }
                                         } else {
-                                            Text(NativeStatsThroughputPresentation.missingClockLabel(source: s.rawValue))
-                                                .font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                                                .help("Token totals are available. A streaming rate needs token-arrival timestamps; elapsed tool and response time cannot replace them.")
+                                            // Match the populated tile's two detail lines.
+                                            Text("No recorded usage").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
+                                                .frame(minHeight: 30, alignment: .topLeading)
                                         }
                                     }
                                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             }
                         }.buttonStyle(.plain).pointingHand().nativeStatsRowHover(radius: Theme.radius, overlay: true).accessibilityLabel("Open \(nativeStatsSourceName(s.rawValue)) statistics")
-                            .accessibilityValue("Streaming tokens per second: " + (NativeStatsThroughputPresentation.rate(stream).map { String(format: "%.1f", $0) } ?? "Unavailable") + ". " + NativeStatsRateMetric.streaming.coverage(stream))
+                            .accessibilityValue(hasUsage ? "Streaming tokens per second: " + (NativeStatsThroughputPresentation.rate(stream).map { String(format: "%.1f", $0) } ?? "Unavailable") + ". " + NativeStatsRateMetric.streaming.coverage(stream) : "No recorded usage")
                     }
                 }
             }

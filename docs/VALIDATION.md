@@ -1,5 +1,27 @@
 # Preview validation
 
+## Statistics empty-source presentation (unreleased)
+
+Empty source cards now say **No recorded usage**, including their accessibility
+value. Cards containing usage retain their output/cache detail and measured
+streaming rate or missing-clock explanation. Token, rate and pricing folds are
+unchanged.
+
+An optimized link compiled all current UI source copies against 159 retained
+Core, Presentation and C objects in 72.791 seconds, targeting macOS 14/SDK 26.5.
+The complete Statistics page was captured in 12 isolated cases: fully priced,
+unknown and partially priced usage, Light/Dark, at 1050×800 and 720×1000 points.
+Each uses the actual read-only Statistics service with two synthetic Codex
+records totaling 1,320,000 tokens. Partial coverage is 912,000 priced tokens
+and 408,000 unpriced tokens; unknown cost is shown as a dash, not zero.
+
+Independent source and visual review found no actionable defect in this scope.
+The captures use invisible native hosts outside all displays without app
+activation, contact with production services, inference or physical input.
+They establish page layout, not input,
+VoiceOver execution, compositor performance, a real-client streaming clock or
+installed-user acceptance. The preceding 1,251-test result is not a new run.
+
 ## Onboarding presentation refinement (0.1.5 candidate)
 
 Only `NativeOnboardingView.swift` changes application behavior. The admission

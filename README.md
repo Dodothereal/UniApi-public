@@ -123,6 +123,8 @@ and usage records as private when sharing diagnostics.
 The cost summary separates missing prices from empty usage. **View prices**
 opens the model breakdown; partially priced usage is labeled as a partial
 estimate, with unknown costs excluded rather than counted as zero.
+Sources without any recorded usage show a simple empty state. Sources with
+usage retain their streaming rate or an explanation of the missing clock.
 
 Streaming speed is separate from response averages. New eligible Codex Responses
 streams routed through UniApi can record a host send-completion clock, excluding
@@ -178,11 +180,16 @@ records capture scope and image checksums.
 [Starting page](assets/screenshots/onboarding-start-dark.png) ·
 [Ready summary](assets/screenshots/onboarding-ready-dark.png)
 
-**Statistics — Dark**
+**Statistics — sample usage, Dark**
 
-![Statistics native page with empty fixture data, Dark appearance](assets/screenshots/stats-dark.png)
+![Native Statistics page with two synthetic records and a partial cost estimate, Dark appearance](assets/screenshots/stats-populated-dark.png)
 
-[Statistics — Light](assets/screenshots/stats-light.png)
+[Sample usage — Light](assets/screenshots/stats-populated-light.png) ·
+[Empty state — Dark](assets/screenshots/stats-dark.png) ·
+[Empty state — Light](assets/screenshots/stats-light.png)
+
+The sample contains two synthetic records. Its cost is a reference estimate,
+not an operator's usage or billed spend.
 
 **Transcribe — Dark**
 
