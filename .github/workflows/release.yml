@@ -20,7 +20,7 @@ jobs:
     env:
       UNIAPI_PREVIEW_VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Select the runner-owned evidence directory
         shell: bash
         run: echo "UNIAPI_CI_EVIDENCE=$RUNNER_TEMP/uniapi-ci-evidence" >> "$GITHUB_ENV"
@@ -68,7 +68,7 @@ jobs:
             echo 'No Developer ID signing or Apple notarization is configured or claimed.'
             echo 'No installer or production app was launched by this workflow.'
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: UniApi-macos-arm64-preview-${{ inputs.version }}
           path: |
