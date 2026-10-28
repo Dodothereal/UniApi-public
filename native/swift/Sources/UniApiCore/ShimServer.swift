@@ -118,14 +118,27 @@ private final class ShimListenerReady: @unchecked Sendable {
 /// The same send loop serves observed and ordinary responses. The callback is
 /// the host's send-completion boundary, not a claim of receipt by the peer.
 enum ShimResponseTransmission {
-    static func send(_ response: ShimClientResponse, using send: (Data, Bool) async throws -> Void) async throws -> NativeCodexStreamTimingObservation? {
+    static func send(_ response: ShimClientResponse,
+                     onCompleted: ((NativeCodexStreamTimingObservation) -> Void)? = nil,
+                     using send: (Data, Bool) async throws -> Void) async throws -> NativeCodexStreamTimingObservation? {
         var observer = response.codexStreamTiming.map { NativeCodexStreamTimingObserver(requestedModel: $0.requestedModel, uptime: $0.uptime) }
+        var reported = false
         var header = "HTTP/1.1 \(response.status) Response\r\nServer: uniapi-native-shim\r\nConnection: close\r\n"
         for (key, value) in response.headers.sorted(by: { $0.key < $1.key }) where key != "connection" { header += key + ": " + value + "\r\n" }; header += "\r\n"
         try await send(Data(header.utf8), false)
         for try await data in response.chunks {
+            try Task.checkCancellation()
             try await send(data, false)
             if let context = response.codexStreamTiming { observer?.feedDelivered(data, at: context.uptime()) }
+            // A Responses client may close as soon as it receives completed,
+            // before [DONE], EOF or upstream cleanup. These bytes have already
+            // passed the host send callback. Later teardown cannot undo that
+            // delivery; incomplete/invalid envelopes still yield no observation.
+            if onCompleted != nil, !reported, let context = response.codexStreamTiming,
+               let observation = observer?.finish(success: true, providerReasoning: context.reasoning?.snapshot()) {
+                reported = true
+                onCompleted?(observation)
+            }
         }
         try await send(Data(), true)
         guard !Task.isCancelled, let context = response.codexStreamTiming,
@@ -222,17 +235,15 @@ final class ShimSocket: @unchecked Sendable {
     func transmit(_ response: ShimClientResponse, using overrideSend: ((Data, Bool) async throws -> Void)? = nil) async throws {
         let stopped = lock.withLock { self.response = response; return closed }
         if stopped { response.cancel(); await response.waitForCompletion(); throw CancellationError() }
-        let observation: NativeCodexStreamTimingObservation?
         do {
-        observation = try await ShimResponseTransmission.send(response) { data, final in
+        _ = try await ShimResponseTransmission.send(response, onCompleted: { observation in
+            response.codexStreamTiming?.record(observation)
+        }) { data, final in
             if let overrideSend { try await overrideSend(data, final) }
             else { try await self.send(data, final: final) }
         }
         } catch { response.cancel(); await response.waitForCompletion(); cancel(); throw error }
         response.cancel(); await response.waitForCompletion()
-        if let observation, let context = response.codexStreamTiming {
-            lock.withLock { if !closed && !Task.isCancelled { context.record(observation) } }
-        }
         cancel()
     }
 }

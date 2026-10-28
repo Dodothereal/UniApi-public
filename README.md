@@ -131,6 +131,9 @@ streams routed through UniApi can record a host send-completion clock, excluding
 tool waits between requests and explicitly counted hidden reasoning tokens.
 Historical records without that clock stay unmeasured; the app explains the gap
 and offers response averages separately. No missing clock is replaced with zero.
+A finished response keeps its measured clock if the client immediately closes
+the connection. Replies that end before completion or lack enough arrival data
+remain unmeasured.
 
 ## Settings and navigation
 
