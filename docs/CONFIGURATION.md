@@ -28,6 +28,28 @@ Coding integrations are optional and depend on the relevant locally installed to
 
 Native Codex routing is optional. Use the app's journal-aware handoff to connect or disconnect managed routes so unrelated configuration and another writer's ownership are preserved. Do not manually overwrite shared routing files or assume desktop routing also configures every other coding tool. Authentication, discovery, text inference and full tool execution are separate capabilities.
 
+### Native routing from the command line
+
+The native executable also accepts these commands before UI readiness, AppKit startup or app-session creation:
+
+```sh
+uniapi_cli="native/swift/build.noindex/UniApi Native.app/Contents/MacOS/UniApiNative"
+"$uniapi_cli" --codex-routing status
+"$uniapi_cli" --codex-routing connect
+"$uniapi_cli" --codex-routing restore
+"$uniapi_cli" --codex-routing connect --wait-for-idle 600
+```
+
+Use the staged executable after building, or substitute the installed/extracted app's `Contents/MacOS/UniApiNative`. These commands use the normal runtime's Codex actor without starting services, recovering jobs, creating the app session or starting hardware monitoring. They honor the data overrides above, `CODEX_HOME` and `CODEX_CHATGPT_WEB_HOME`. Status opens the existing runtime storage read-only and does not initialize an absent installation.
+
+`connect` delegates to the same guarded native handoff as the app: it drains the Swift shim, then the integrated Web bridge, uses the bridge's journal-aware route disconnect, and transfers catalog membership through the existing ownership checks. `restore` uses the normal guarded restore action. Neither command stops Web services, cancels active turns, sends inference, edits configuration directly or weakens admission checks. Once connected, API and subscription routing are independent of the optional Web bridge.
+
+Without a wait option, busy required owners cause immediate refusal. Only `connect` accepts `--wait-for-idle SECONDS`, an explicit integer from 1 through 600. It observes healthy required owners once per second, holding no drain while waiting. Before waiting it pins the exact bytes and presence of Codex `config.toml`, `providers.json`, bridge `config.json`, bridge `uniapi-catalog.json` and the destination native catalog. Each poll rechecks those fingerprints, including the last idle observation before invoking the normal action. A changed file, unreadable fingerprint, unhealthy or unknown required owner, unexpected error, cancellation or deadline ends the command without retrying the mutation. Codex's naturally refreshed `models_cache.json` is excluded. An already connected native route never waits: it runs the normal action when idle or immediately reports busy. A disconnected optional Web installation is not a required owner. The guarded action still checks admission again, so traffic arriving after an idle poll can cause refusal.
+
+The wait deadline bounds polling; an in-flight status read or guarded action must finish its existing transport timeout or recovery. SIGINT and SIGTERM cancel the wait with exit 130. Cancellation before the action leaves routing untouched; after an action starts, allow its owned recovery to finish and inspect status before retrying. Do not force-kill a handoff or automatically replay a failed mutation.
+
+Every command prints one JSON result with `command`, `outcome`, `reloadRequired` and a safe status projection. The projection contains only booleans, counts or null: native connection/admission/activity, Web integration/running/busy state, restore availability and error-presence flags. Private paths, base URLs, routing capabilities, credentials, raw manager errors and model/provider identifiers are omitted. Usage errors print a fixed usage result. Exit codes are 0 for status/completion, 2 for busy/unhealthy/changed-intent/timeout refusal, 64 for invalid arguments, 130 for cancellation and 1 for an unexpected error or uncertain postcondition. An acknowledged action is completed only when its returned status explicitly reports clean configuration, native ownership and catalog error fields, a disconnected Web route, and the requested native connection state (connected for `connect`, disconnected for `restore`). A conflicting or missing postcondition returns `outcome: "uncertain"` with exit 1 and no automatic retry. On refusal or error, inspect the app's private diagnostics; a failed action may have committed routing before a later acknowledgement or resume failure. Reload Codex when idle if a completed result sets `reloadRequired`.
+
 Statistics reads supported coding tools' local stores. It does not require configuring every supported tool. Imported history may include private project names and paths; redact it before sharing screenshots or diagnostics.
 
 ## Local Transcribe

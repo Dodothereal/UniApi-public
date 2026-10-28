@@ -2,6 +2,7 @@
 
 - No emojis in code, UI, documentation or communication.
 - This is the clean public native macOS source tree. Never copy private operator data, credentials, history, caches, receipts or local build artifacts into it.
+- Maintain local and public app changes in this one source tree. Build local updates from the same reviewed revision; preserve earlier private checkouts as archives and keep existing runtime storage separate. See `docs/LOCAL-DEVELOPMENT.md`.
 - Keep providers user-supplied. Local transcription must not read another app's authentication store.
 - Preserve other workers' edits and use explicit, disjoint ownership.
 - Keep UI, platform, security and user-facing documentation consistent with changes.

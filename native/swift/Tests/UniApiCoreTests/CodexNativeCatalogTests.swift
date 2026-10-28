@@ -24,6 +24,43 @@ final class CodexNativeCatalogTests: XCTestCase {
         XCTAssertEqual(rows[2]["context_window"], 128000)
         XCTAssertFalse(String(decoding: try result.encoded(), as: UTF8.self).contains("fixture-key"))
     }
+    func testRefreshReplacesLegacyNoneRowWithModelCapabilitiesThroughCacheDecode() throws {
+        let modelID = "deepseek/deepseek-v4.1-flash"
+        let alias = NativeCodexCatalogStore.id(provider: "fixture", model: modelID)
+        var p = provider()
+        p["base_url"] = "https://api.commandcode.ai/provider/v1"
+        p["codex"]["models"] = [.string(modelID), "sibling"]
+        p["codex"]["efforts"] = []
+        var stale = model(alias, priority: 1)
+        stale["supported_reasoning_levels"] = [["effort": "none", "description": "No reasoning override"]]
+        stale["default_reasoning_level"] = "none"
+        let input: JSONValue = ["models": [model("native"), stale]]
+        let selected: JSONValue = ["providerIds": ["fixture"], "workerModels": [.string(alias)]]
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("models_cache.json")
+        // Exercise the catalog producer and picker decoder together: refreshing
+        // a cache must replace old provider rows, rather than merge their None.
+        let cases: [(JSONValue?, [String])] = [(nil, ["high", "low", "max"]), ([], ["none"]), (["max"], ["max"])]
+        for (override, expected) in cases {
+            var changed = p
+            if let override { changed["codex"]["model_efforts"][modelID] = override }
+            let result = try NativeCodexRouteCatalog.augment(input, providers: ["providers": [changed]], choices: selected)
+            let providerRows = result["models"].array.filter { $0["slug"] == .string(alias) }
+            XCTAssertEqual(providerRows.count, 1)
+            let row = try XCTUnwrap(providerRows.first)
+            XCTAssertEqual(row["supported_reasoning_levels"].array.map { $0["effort"].string }, expected)
+            XCTAssertEqual(row["default_reasoning_level"], .string(expected[0]))
+            XCTAssertEqual(row["priority"], 1)
+            XCTAssertEqual(result["models"].array.first { $0["slug"] == "uniapi/fixture/sibling" }?["supported_reasoning_levels"], [["effort": "none"]])
+            let bytes = try result.encoded()
+            XCTAssertFalse(String(decoding: bytes, as: UTF8.self).contains("fixture-key"))
+            try NativeFile.writeAtomic(bytes, to: file)
+            let cached = try NativeCodexModelCache.rows(file).filter { $0["slug"] == .string(alias) }
+            XCTAssertEqual(cached.count, 1)
+            XCTAssertEqual(cached.first?["supported_reasoning_levels"].array.map { $0["effort"].string }, expected)
+        }
+    }
     func testInvalidContextFallsBackWithoutInventingLimit() throws {
         for bad: JSONValue in [0, -1, 1.5, "1000000", 9007199254740992] {
             var p = provider(); p["proxy"]["model_context_tokens"]["glm:free"] = bad; p["proxy"]["context_tokens"] = 200000
