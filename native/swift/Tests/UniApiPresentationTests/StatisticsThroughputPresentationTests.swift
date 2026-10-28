@@ -45,4 +45,16 @@ final class StatisticsThroughputPresentationTests: XCTestCase {
         XCTAssertTrue(secondary.contains("including request latency"))
         XCTAssertTrue(secondary.contains("estimated"))
     }
+
+    func testEmptyStreamingBoardsDoNotBecomeMeasurementsFromResponseRates() {
+        XCTAssertFalse(NativeStatsThroughputPresentation.hasMeasurements(.null))
+        XCTAssertFalse(NativeStatsThroughputPresentation.hasMeasurements(["summary": ["avgTps": 99, "timedResponses": 0]]))
+        XCTAssertFalse(NativeStatsThroughputPresentation.hasMeasurements(["summary": ["avgTps": "99", "timedResponses": 3]]))
+        XCTAssertTrue(NativeStatsThroughputPresentation.hasMeasurements(["summary": streaming]))
+        let rows: [JSONValue] = [["model": "missing", "timedResponses": 0],
+                                 ["model": "inconsistent", "timedResponses": 0, "avgTps": 8],
+                                 ["model": "measured", "timedResponses": 2, "avgTps": 45]]
+        XCTAssertEqual(NativeStatsThroughputPresentation.measuredRows(rows).map { $0["model"].string }, ["measured"])
+        XCTAssertTrue(NativeStatsThroughputPresentation.missingClockLabel(source: "codex").contains("history"))
+    }
 }

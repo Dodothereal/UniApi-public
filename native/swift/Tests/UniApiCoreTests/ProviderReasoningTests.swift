@@ -27,36 +27,53 @@ final class ProviderReasoningTests: XCTestCase {
         let row = provider()
         for base in ["https://api.commandcode.ai/provider/v1", "https://api.commandcode.ai/provider/v1/", "https://api.commandcode.ai:443/provider/v1", "https://api.commandcode.ai:443/provider/v1/"] {
             var changed = row; changed["base_url"] = .string(base)
-            XCTAssertEqual(NativeProviderInfo(changed).efforts(for: model), ["high", "low", "max"])
+            XCTAssertEqual(NativeProviderInfo(changed).efforts(for: model), ["low", "high", "max"])
+            XCTAssertEqual(NativeProviderReasoning.capabilities(NativeProviderInfo(changed), model: model).defaultEffort, "high")
         }
         XCTAssertEqual(NativeProviderInfo(row).efforts(for: "sibling"), [])
+        XCTAssertNil(NativeProviderReasoning.capabilities(NativeProviderInfo(row), model: "sibling").defaultEffort)
         for base in ["https://other.invalid/provider/v1", "http://api.commandcode.ai/provider/v1", "https://api.commandcode.ai:8443/provider/v1", "https://api.commandcode.ai/other", "https://api.commandcode.ai.evil.invalid/provider/v1", "https://api.commandcode.ai/provider/v1?x=1", "https://api.commandcode.ai/provider/%761", "https://api.commandcode.ai/other/../provider/v1"] {
             var changed = row; changed["base_url"] = .string(base)
             XCTAssertEqual(NativeProviderInfo(changed).efforts(for: model), [], base)
+            XCTAssertNil(NativeProviderReasoning.capabilities(NativeProviderInfo(changed), model: model).defaultEffort, base)
         }
         var changed = row; changed["proxy"]["direct_url"] = "https://other.invalid/v1"
         XCTAssertEqual(NativeProviderInfo(changed).efforts(for: model), [])
+        XCTAssertNil(NativeProviderReasoning.capabilities(NativeProviderInfo(changed), model: model).defaultEffort)
         changed = row; changed["proxy"]["format"] = "anthropic"
         XCTAssertEqual(NativeProviderInfo(changed).efforts(for: model), [])
+        XCTAssertNil(NativeProviderReasoning.capabilities(NativeProviderInfo(changed), model: model).defaultEffort)
     }
     func testModelDeclarationsOverrideProviderAndDocumentedFallbackWithoutLeakingToSiblings() {
-        var row = provider(); row["codex"]["efforts"] = ["low", "high"]
-        row["codex"]["model_efforts"][model] = ["max", "max", "invalid", 42]
-        XCTAssertEqual(NativeProviderInfo(row).efforts(for: model), ["max"])
-        XCTAssertEqual(NativeProviderInfo(row).efforts(for: "sibling"), ["low", "high"])
-        for override: JSONValue in [[], "high", 4, [:]] {
+        var row = provider(); row["codex"]["efforts"] = ["invalid", 42, "high", "low", "high"]
+        row["codex"]["model_efforts"][model] = ["invalid", 42, "max", "max", "low", "high"]
+        XCTAssertEqual(NativeProviderInfo(row).efforts(for: model), ["max", "low", "high"])
+        XCTAssertEqual(NativeProviderReasoning.capabilities(NativeProviderInfo(row), model: model).defaultEffort, "max")
+        XCTAssertEqual(NativeProviderInfo(row).efforts(for: "sibling"), ["high", "low"])
+        XCTAssertEqual(NativeProviderReasoning.capabilities(NativeProviderInfo(row), model: "sibling").defaultEffort, "high")
+        for override: JSONValue in [[], "high", 4, [:], .null, ["invalid", 42]] {
             row["codex"]["model_efforts"][model] = override
             XCTAssertEqual(NativeProviderInfo(row).efforts(for: model), [])
+            XCTAssertNil(NativeProviderReasoning.capabilities(NativeProviderInfo(row), model: model).defaultEffort)
+        }
+    }
+    func testProviderDeclarationKeepsFirstValidDefaultOnDocumentedModelAndSibling() {
+        var row = provider(); row["codex"]["efforts"] = ["invalid", 42, "max", "low", "max", "high"]
+        for selected in [model, "sibling"] {
+            let reasoning = NativeProviderReasoning.capabilities(NativeProviderInfo(row), model: selected)
+            XCTAssertEqual(reasoning.efforts, ["max", "low", "high"])
+            XCTAssertEqual(reasoning.defaultEffort, "max")
         }
     }
     func testNativeCatalogAdvertisesOnlyModelEffortsAndExplicitHighDefault() throws {
         let native: JSONValue = ["models": [["slug": "native", "visibility": "list", "supported_in_api": true, "priority": 0, "multi_agent_version": "v1"]]]
         let rows = try NativeCodexRouteCatalog.augment(native, providers: ["providers": [provider()]], choices: ["providerIds": ["fixture"], "workerModels": []])["models"].array
         let deepseek = try XCTUnwrap(rows.first { $0["slug"] == .string(NativeCodexCatalogStore.id(provider: "fixture", model: model)) })
-        XCTAssertEqual(deepseek["supported_reasoning_levels"], [["effort": "high"], ["effort": "low"], ["effort": "max"]])
+        XCTAssertEqual(deepseek["supported_reasoning_levels"], [["effort": "low", "description": "low"], ["effort": "high", "description": "high"], ["effort": "max", "description": "max"]])
         XCTAssertEqual(deepseek["default_reasoning_level"], "high")
         let sibling = try XCTUnwrap(rows.first { $0["slug"] == "uniapi/fixture/sibling" })
-        XCTAssertEqual(sibling["supported_reasoning_levels"], [["effort": "none"]])
+        XCTAssertEqual(sibling["supported_reasoning_levels"], [["effort": "none", "description": "No reasoning override"]])
+        XCTAssertEqual(sibling["default_reasoning_level"], "none")
         XCTAssertFalse(String(decoding: try JSONValue.array(rows).encoded(), as: UTF8.self).contains("fixture-key"))
     }
     func testActualResponsesGatewayForwardsEachSupportedEffortToOpenAI() async throws {
