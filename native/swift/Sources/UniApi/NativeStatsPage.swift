@@ -217,9 +217,14 @@ private struct NativeStatsContents: View {
                                     }
                                     if !detail, !value.isNull {
                                         Text("\(nativeStatsCount(value["output"].double)) output · \(nativeStatsCount(value["cacheRead"].double)) cached").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                                        Text("Streaming tokens/s").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                                        Text(NativeStatsThroughputPresentation.rate(stream).map { String(format: "%.1f", $0) } ?? "Unavailable").font(Theme.mono(11)).foregroundStyle(Theme.dim)
-                                            .help(NativeStatsRateMetric.streaming.timingDetail(stream))
+                                        if let rate = NativeStatsThroughputPresentation.rate(stream) {
+                                            Text(String(format: "%.1f streaming tokens/s", rate)).font(Theme.mono(11)).foregroundStyle(Theme.dim)
+                                                .help(NativeStatsRateMetric.streaming.timingDetail(stream))
+                                        } else {
+                                            Text(NativeStatsThroughputPresentation.missingClockLabel(source: s.rawValue))
+                                                .font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
+                                                .help("Token totals are available. A streaming rate needs token-arrival timestamps; elapsed tool and response time cannot replace them.")
+                                        }
                                     }
                                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             }
@@ -285,7 +290,15 @@ private struct NativeStatsContents: View {
     }
     private var prompt: Double { t["input"].double + t["cacheRead"].double + t["cacheWrite"].double }
     private var costTile: some View {
-        NativeStatsValueTile(label: "API value estimate", value: d["cost"]["pricedTokens"].double > 0 ? d["cost"]["usd"].double : nil, unit: "USD", detail: "\(nativeStatsCount(d["cost"]["pricedTokens"].double)) priced tokens · current reference rates")
+        NativeStatsValueTile(label: "Estimated API cost", value: d["cost"]["pricedTokens"].double > 0 ? d["cost"]["usd"].double : nil, unit: "USD", detail: costDetail)
+    }
+    private var costDetail: String {
+        let cost = d["cost"]
+        if cost.isNull { return "Prices not available yet" }
+        if cost["pricedTokens"].double > 0 {
+            return cost["unpricedTokens"].double > 0 ? "Partial estimate · unknown costs excluded" : "Based on current API rates"
+        }
+        return cost["unpricedTokens"].double > 0 ? "Prices missing for this usage" : "No usage recorded yet"
     }
     private var span: String { let first = d["summary"]["first"], last = d["summary"]["last"]; return first.isNull ? "" : " · \(nativeStatsDate(first.double))–\(nativeStatsDate(last.double))" }
     private var scanFooter: String { detail ? "" : " · \(payload["scan"]["files"].int) files, \(nativeStatsCount(payload["scan"]["bytes"].double)) bytes · scan \(payload["scan"]["elapsedMs"].double.formatted(.number.precision(.fractionLength(0)))) ms" }

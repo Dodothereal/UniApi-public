@@ -61,6 +61,24 @@ Every command prints one JSON result with `command`, `outcome`, `reloadRequired`
 
 Statistics reads supported coding tools' local stores. It does not require configuring every supported tool. Imported history may include private project names and paths; redact it before sharing screenshots or diagnostics.
 
+### Streaming measurements
+
+New successful streaming Responses routed through UniApi can contribute a
+`uniapi-host-sse-clock` observation. This measures the interval between host send
+completions for the first and last eligible visible-output deltas, not peer
+receipt or a provider's internal decoder. Matching requires the exact response
+ID, selected model, output count and explicit reasoning count. Failed,
+cancelled, incomplete, single/coalesced-delta or mismatched responses remain
+unmeasured. Waits between tool requests are outside each response's clock.
+
+The private journal is limited to 1 MiB; Statistics checks its metadata every
+10 seconds while running and retains up to 65,536 supplemental observations in
+its own database. Observations may wait for their transcript to be imported.
+They never replace token totals or rewrite source transcripts. This bounded
+retention can leave older records unmeasured. Historical Codex and Claude stores
+without token-arrival clocks cannot retrospectively supply streaming speed.
+Response averages remain an explicitly separate view.
+
 ## Local Transcribe
 
 Local transcription uses the bundled, statically built upstream Whisper v1.9.4 CLI. Real local CLI validation has covered model installation, file transcription, concurrent-use refusal, cancellation, model removal and child-process cleanup. The final 0.1.0 packaged executable passed these checks, including refusal of removal by another process while recognition holds the model lease; this does not establish all app job flows or optional integrations as tested. No Wispr login, vendor account or cloud transcription credentials are needed.
@@ -109,6 +127,14 @@ The commands honor the data-location overrides above. Local CLI checks have conf
 Per-transcript notifications default to off. Optional Telegram delivery also requires explicit saved configuration in Settings.
 
 The model download and link retrieval use the network. Transcription of a local file uses the local runtime after model installation. If you choose a provider for summarization, the text sent for that summary leaves the machine.
+
+## Appearance and navigation
+
+Use Settings to choose theme, spacing, reduced motion, launch behavior and
+sidebar layout. Existing users can replay the skippable guide with
+**Show setup**. Page visibility and badges are optional; Home, Jobs and Settings
+remain available. See [setup and navigation settings](SETTINGS.md) for defaults,
+restoration precedence and reset behavior.
 
 ## Mac controls and background tasks
 

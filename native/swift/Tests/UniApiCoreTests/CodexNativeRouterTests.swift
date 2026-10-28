@@ -58,6 +58,16 @@ private final class CodexRouterHeldUpstream: @unchecked Sendable {
     func release() { cancel(); drained.signal() }
 }
 
+private final class CodexRouter401State: @unchecked Sendable {
+    let draining = CodexRouterSignal(), release = CodexRouterSignal()
+    private let lock = NSLock()
+    private var requests = 0, cancellations = 0, drains = 0
+    func request() { lock.withLock { requests += 1 } }
+    func cancel() { lock.withLock { cancellations += 1 } }
+    func waitForDrain() async { lock.withLock { drains += 1 }; draining.signal(); await release.wait() }
+    var counts: (Int, Int, Int) { lock.withLock { (requests, cancellations, drains) } }
+}
+
 final class CodexNativeRouterTests: XCTestCase {
     private struct Fixture {
         let root: URL, paths: NativePaths, catalog: NativeCodexCatalogStore, gateway: NativeShimGateway
@@ -119,6 +129,62 @@ final class CodexNativeRouterTests: XCTestCase {
             guard ProcessInfo.processInfo.systemUptime < deadline else { throw NativeFailure("Private router fixture did not reach its expected cleanup phase") }
             try await Task.sleep(nanoseconds: 1_000_000)
         }
+    }
+
+    func testTimingContextOnlyOnSuccessfulStreamingResponses() async throws {
+        let cases: [(String, Bool, Int, String, Bool)] = [
+            ("responses", true, 200, "text/event-stream", true),
+            ("responses", false, 200, "text/event-stream", false),
+            ("responses", true, 400, "text/event-stream", false),
+            ("responses", true, 200, "application/json", false),
+            ("responses/compact", true, 200, "text/event-stream", false),
+            ("alpha/search", true, 200, "text/event-stream", false)
+        ]
+        for (endpoint, stream, status, contentType, expected) in cases {
+            let transport = CodexRouterTransport { _ in codexRouterUpstream(Data("data: [DONE]\n\n".utf8), status: status, headers: ["content-type": contentType]) }
+            let f = try fixture(transport)
+            let response = try await f.gateway.handle(request("/_uniapi/codex/v1/" + endpoint, body: input("native-anchor", stream: stream)))
+            XCTAssertEqual(response.codexStreamTiming != nil, expected, endpoint)
+            if expected { XCTAssertEqual(response.codexStreamTiming?.requestedModel, "native-anchor") }
+            response.cancel(); await response.waitForCompletion()
+        }
+        let transport = CodexRouterTransport { _ in codexRouterUpstream(Data("data: [DONE]\n\n".utf8), headers: ["content-type": "text/event-stream"]) }
+        let f = try fixture(transport)
+        let provider = try await f.gateway.handle(request(body: input(alias, stream: true)))
+        XCTAssertNotNil(provider.codexStreamTiming)
+        XCTAssertEqual(provider.codexStreamTiming?.requestedModel, alias)
+        provider.cancel(); await provider.waitForCompletion()
+    }
+
+    func testProvider401ExplainsCredentialRejectionAfterDrainWithoutLeakingBodyOrRetrying() async throws {
+        let transport = CodexRouterTransport(), f = try fixture(transport), state = CodexRouter401State()
+        let router = NativeCodexRouter(paths: f.paths, providers: NativeProviderStore(paths: f.paths), dependencies: .init(transport: transport))
+        let incoming = try request(body: input(alias, stream: true))
+        let pending = Task {
+            try await router.handle(incoming, ticket: nil) { _ in
+                state.request()
+                return ShimClientResponse(status: 401, headers: ["content-type": "application/json"],
+                    chunks: AsyncThrowingStream { continuation in
+                        continuation.yield(Data("private-upstream-secret-body".utf8)); continuation.finish()
+                    }, cancel: { state.cancel() }, waitForCompletion: { await state.waitForDrain() })
+            }
+        }
+        await state.draining.wait()
+        let before = state.counts
+        XCTAssertEqual(before.0, 1); XCTAssertEqual(before.1, 1); XCTAssertEqual(before.2, 1)
+        state.release.signal()
+        let response = try await pending.value
+        XCTAssertEqual(response.status, 401)
+        let body = try await response.body(), value = try JSONValue.decode(body)
+        XCTAssertEqual(value["error"]["type"], "authentication_error")
+        XCTAssertTrue(value["error"]["message"].string.contains("router/fixture%"))
+        XCTAssertTrue(value["error"]["message"].string.contains("provider editor"))
+        XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("private-upstream-secret-body"))
+        XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("private-router-provider-key"))
+        let after = state.counts
+        XCTAssertEqual(after.0, 1); XCTAssertEqual(after.1, 1); XCTAssertEqual(after.2, 1)
+        let calls = await transport.captured()
+        XCTAssertTrue(calls.isEmpty)
     }
 
     func testModelsUsesFixedNativeHostAuthAndExactQueryThenAugmentsUpstreamCatalog() async throws {

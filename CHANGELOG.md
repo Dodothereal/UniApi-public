@@ -2,6 +2,17 @@
 
 User-facing changes are recorded here. Release entries should describe shipped behavior and actual validation, with unresolved limitations kept explicit.
 
+## 0.1.4 — preview
+
+- Added a skippable four-step native welcome with immediate theme, spacing and reduced-motion choices, a starting-page selection and Settings replay. Setup does not connect providers, download models or change routing or hardware controls.
+- Added launch-page selection, last-page restoration, sidebar page visibility and optional sidebar badges. Home, Jobs and Settings remain accessible; hiding a page does not remove it as a valid destination.
+- Replaced repeated sidebar movement buttons with drag targets and a Move menu. Expanded Telegram setup with explicit chat discovery, draft status and disconnect confirmation.
+- Added independent Light/Dark palettes, four presets, common and advanced color controls, hex entry, palette undo and contrast checks. Theme edits redraw without remounting pages.
+- Added prospective host send-completion timing for eligible Codex Responses streams. Exact response identity and usage counters bind supplemental measurements; tool waits between requests and explicitly counted reasoning tokens are excluded. Historical missing clocks remain unknown, and response averages stay separate.
+- Added an actionable provider-credential message for routed HTTP 401 responses without retrying or switching providers.
+- Simplified Statistics cost presentation with a short state summary and View prices control. Empty usage, missing prices and partial estimates are distinguished without a repeated diagnostic-style header.
+- Expanded the README with installation, first steps, local transcription, routing, cost estimates and configuration guidance.
+
 ## 0.1.3 — preview
 
 - Fixed native Codex WebSocket probes aborting normal turns and compaction: the HTTP-only route now returns HTTP 426 for the exact Responses probe, and all routed catalog rows advertise HTTP transport.

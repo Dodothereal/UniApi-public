@@ -221,7 +221,19 @@ struct NativeRoot: View {
                 if let error = session.error { NativeError(message: error).padding(30) }
                 else { ProgressView("Opening local storage…").padding(30) }
             }
-            else if let runtime = session.runtime { NativeShell(runtime: runtime).environmentObject(session) }
+            else if session.initialOnboarding {
+                NativeOnboardingView { session.finishOnboarding(destination: $0) }
+            }
+            else if let runtime = session.runtime {
+                NativeShell(runtime: runtime)
+                    .environmentObject(session)
+                    .onAppear { session.deliverOnboardingDestination() }
+                    .sheet(isPresented: $session.onboardingPresented, onDismiss: { session.deliverOnboardingDestination() }) {
+                        NativeOnboardingView { session.finishOnboarding(destination: $0) }
+                            .frame(width: 820, height: 660)
+                            .interactiveDismissDisabled()
+                    }
+            }
             else { NativeError(message: session.error ?? "Unable to open local storage").padding(30).frame(minWidth: 900, minHeight: 600) }
         }
     }
@@ -243,6 +255,9 @@ final class NativeAppSession: ObservableObject {
         set { if newValue { presentation.show() } else { presentation.close() } }
     }
     @Published var preferencesPrepared = false
+    @Published var initialOnboarding = false
+    @Published var onboardingPresented = false
+    private var onboardingDestination: NativeDestination?
     private var prompts: NativePromptsService?
     var transcription: NativeTranscriptionService?
     var activity: NativeActivityService?
@@ -284,7 +299,26 @@ final class NativeAppSession: ObservableObject {
             summaries = NativeHubSummaries(runtime: runtime, transcription: transcription)
             Task {
                 do {
-                    if !paths.readOnly { _ = try await NativePreferencesBridge.migrate(runtime: runtime) }
+                    var importedPreferences = false
+                    if !paths.readOnly {
+                        let migration = try await NativePreferencesBridge.migrate(runtime: runtime)
+                        importedPreferences = !migration.imported.isEmpty || !migration.preserved.isEmpty
+                    }
+                    let defaults = UserDefaults.standard
+                    let domain = Bundle.main.bundleIdentifier.flatMap { defaults.persistentDomain(forName: $0) } ?? [:]
+                    // A prior migration can have imported only benchmark state,
+                    // whose preferences live in files instead of UserDefaults.
+                    let hasSavedBenchmarkPreferences = ["native-selection.json", "native-results-view.json"].contains {
+                        FileManager.default.fileExists(atPath: paths.bench.appendingPathComponent("state/" + $0).path)
+                    }
+                    // Failure to inspect providers is not evidence of a fresh install.
+                    let hasProviders = (try? !runtime.providers.list().isEmpty) ?? true
+                    self.initialOnboarding = NativeOnboardingPolicy.shouldOffer(
+                        completedVersion: defaults.integer(forKey: NativeOnboardingPolicy.completionKey),
+                        hasExistingPreferences: Bundle.main.bundleIdentifier == nil || importedPreferences || hasSavedBenchmarkPreferences || NativeOnboardingPolicy.hasExistingPreferences(in: domain),
+                        hasProviders: hasProviders, readOnly: paths.readOnly,
+                        startedVersion: defaults.integer(forKey: NativeOnboardingPolicy.startedKey))
+                    if self.initialOnboarding { NativeOnboardingPolicy.begin(in: defaults) }
                     guard !self.statisticsStopping else { return }
                     if let statistics = self.statistics {
                         // Claim before Home can queue its independent cache
@@ -331,6 +365,22 @@ final class NativeAppSession: ObservableObject {
         catch { self.error = error.localizedDescription }
         Self.current = self
         if runtime == nil { Task { NotificationCenter.default.post(name: .nativeSessionPrepared, object: self) } }
+    }
+    func showOnboarding() {
+        guard preferencesPrepared, runtime != nil, !initialOnboarding else { return }
+        onboardingPresented = true
+    }
+    func finishOnboarding(destination: String?) {
+        if runtime?.paths.readOnly == false { NativeOnboardingPolicy.finish(in: .standard) }
+        onboardingDestination = destination.flatMap(NativeDestination.init(rawValue:))
+        if initialOnboarding { initialOnboarding = false }
+        else { onboardingPresented = false }
+    }
+    func deliverOnboardingDestination() {
+        guard let destination = onboardingDestination else { return }
+        onboardingDestination = nil
+        // Let the retained or newly mounted shell install its notification observer.
+        DispatchQueue.main.async { NotificationCenter.default.post(name: .nativeNavigation, object: destination) }
     }
     func shutdown() async {
         statisticsStopping = true

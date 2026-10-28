@@ -3,6 +3,16 @@ import AppKit
 import UniApiCore
 import UniApiPresentation
 
+private struct NativeBatterySupportKey: EnvironmentKey {
+    static let defaultValue: JSONValue = .null
+}
+extension EnvironmentValues {
+    var nativeBatterySupported: JSONValue {
+        get { self[NativeBatterySupportKey.self] }
+        set { self[NativeBatterySupportKey.self] = newValue }
+    }
+}
+
 enum NativeDestination: String, CaseIterable, Identifiable {
     case home, speed, results, prompts, arena, switcher, code, stats, activity, fans, battery, transcribe, jobs, settings
     var id: String { rawValue }
@@ -77,7 +87,7 @@ enum NativeInstalledPages {
     }
 }
 
-/// Only sidebar layout is reset; appearance, visibility, density and motion stay independent.
+/// Sidebar layout resets do not change appearance, sidebar open state, density or motion.
 enum NativeSidebarLayout {
     static let defaultWidth = 216.0
     static func width(_ value: Double) -> Double { value.isFinite ? min(320, max(180, value)) : defaultWidth }
@@ -103,6 +113,8 @@ struct NativeShell: View {
     @AppStorage("uniapi-sidebar") private var sidebarOpen = true
     @AppStorage("uniapi-sidebar-width") private var sidebarWidth = NativeSidebarLayout.defaultWidth
     @AppStorage("uniapi-sidebar-order") private var sidebarOrder = ""
+    @AppStorage("uniapi-sidebar-hidden") private var sidebarHidden = ""
+    @AppStorage("uniapi-sidebar-badges") private var sidebarBadges = NativeNavigationPreferences.defaultSidebarBadges
     @AppStorage("uniapi-theme") private var appearance = "auto"
     @AppStorage("uniapi-density") private var density = "standard"
     @AppStorage("uniapi-motion") private var motion = "system"
@@ -123,8 +135,18 @@ struct NativeShell: View {
     private static var initialDestination: NativeDestination {
         let env = ProcessInfo.processInfo.environment
         let readOnly = env["UNIAPI_NATIVE_READ_ONLY"] == "1" || CommandLine.arguments.contains("--read-only") || Bundle.main.object(forInfoDictionaryKey: "UniApiReadOnlyPreview") as? Bool == true
-        if readOnly, let name = env["UNIAPI_NATIVE_UI_PAGE"] ?? Bundle.main.object(forInfoDictionaryKey: "UniApiUIProfilePage") as? String, let page = NativeDestination(rawValue: name) { return page }
-        return NativeDestination(rawValue: UserDefaults.standard.string(forKey: "uniapi-native-page") ?? "") ?? .home
+        let defaults = UserDefaults.standard
+        let preview = readOnly ? env["UNIAPI_NATIVE_UI_PAGE"] ?? Bundle.main.object(forInfoDictionaryKey: "UniApiUIProfilePage") as? String : nil
+        let restore = defaults.object(forKey: NativeNavigationPreferences.restoreLastPageKey) as? Bool ?? NativeNavigationPreferences.defaultRestoreLastPage
+        let installed = NativeInstalledPages.destinations.map(\.rawValue)
+        let page = NativeNavigationPreferences.initialPage(
+            startPage: defaults.string(forKey: NativeNavigationPreferences.startPageKey),
+            lastVisited: defaults.string(forKey: "uniapi-native-page"),
+            restoreLastPage: restore,
+            previewPage: preview,
+            installedPages: installed
+        )
+        return NativeDestination(rawValue: page.rawValue) ?? .home
     }
     private var scheme: ColorScheme? { appearance == "dark" ? .dark : appearance == "light" ? .light : nil }
     private var reduceMotion: Bool { systemReduceMotion || motion == "reduced" }
@@ -161,6 +183,7 @@ struct NativeShell: View {
         .preferredColorScheme(scheme)
         .environment(\.nativeInterfaceDensity, NativeInterfaceDensity(rawValue: density) ?? .standard)
         .environment(\.nativeReducedMotion, reduceMotion)
+        .environment(\.nativeBatterySupported, batterySupported)
         .environment(\.nativeMotionVisible, session.presented && session.pageActive)
         .onAppear { visit = NativeUIReadiness.shared.begin(destination) }
         .onChange(of: session.presentation.generation) { _, _ in pageModels.discard() }
@@ -247,7 +270,12 @@ struct NativeShell: View {
                 VStack(alignment: .leading, spacing: 14) {
                     navigationRow(.home)
                     ForEach(NativeSidebarLayout.orderedSections(sidebarOrder), id: \.self) { section in
-                        let pages = NativeSidebarLayout.pages(sidebarOrder).filter { $0.section == section && NativeInstalledPages.destinations.contains($0) && NativeShellPolicy.admits($0.rawValue, batterySupported: batterySupported) }
+                        let pages = NativeSidebarLayout.pages(sidebarOrder).filter {
+                            $0.section == section
+                                && NativeInstalledPages.destinations.contains($0)
+                                && NativeShellPolicy.admits($0.rawValue, batterySupported: batterySupported)
+                                && NativeNavigationPreferences.isSidebarVisible($0.rawValue, hiddenPages: sidebarHidden)
+                        }
                         if !pages.isEmpty {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(section.uppercased()).font(Theme.ui(10.5, weight: .medium)).tracking(0.84).foregroundStyle(Theme.muted).padding(.horizontal, 8).padding(.top, 2).padding(.bottom, 4)
@@ -280,9 +308,11 @@ struct NativeShell: View {
                 } else { NativeIcon(page.symbol, size: 15, strokeWidth: 1.75) }
                 Text(page.title).font(Theme.ui(13, weight: destination == page ? .medium : .regular))
                 Spacer()
-                if page == .jobs && activeJobs > 0 { Text(String(activeJobs)).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
-                if [.code, .arena].contains(page), badges[page.rawValue].int > 0 { Text(badges[page.rawValue].string).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
-                if page == .battery, !badges["battery"].isNull { Text(badges["battery"].string + "%").font(Theme.mono(10)).foregroundStyle(Theme.muted) }
+                if sidebarBadges {
+                    if page == .jobs && activeJobs > 0 { Text(String(activeJobs)).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
+                    if [.code, .arena].contains(page), badges[page.rawValue].int > 0 { Text(badges[page.rawValue].string).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
+                    if page == .battery, !badges["battery"].isNull { Text(badges["battery"].string + "%").font(Theme.mono(10)).foregroundStyle(Theme.muted) }
+                }
             }.padding(.horizontal, 8).frame(height: 32)
                 .foregroundStyle(destination == page ? Theme.sidebarInk : Theme.sidebarMuted)
             .nativeSidebarRow(selected: destination == page) {

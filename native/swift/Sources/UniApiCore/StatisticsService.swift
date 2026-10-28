@@ -11,12 +11,16 @@ public actor NativeStatisticsService {
     private let environment: [String: String], calendar: Calendar
     private let clock: @Sendable () -> Double
     private let beforeScan: @Sendable () async throws -> Void
+    private let streamTimingPollNanoseconds: UInt64
+    private var streamTimingMonitor: Task<Void, Never>?
     private var initialized = false, loaded = false, lastCheck: Double = 0, generation = 0
     private var scanNeedsRebuild = false
     private struct ScanFlight { let id: UUID, full: Bool, task: Task<Void, Error> }
     private var scanTask: ScanFlight?
     private var stopping = false
     private var events: [StatisticsUsage] = [], cache: StatisticsCache?
+    private var streamTimingSignature = "", streamTimingGeneration = -1
+    private var streamTimingObservations: [String: NativeCodexStreamTimingObservation]?
     private var cacheDocument: JSONValue?
     private var importedFiles: [File] = []
     private var importedCacheFiles: [JSONObject] = []
@@ -35,18 +39,35 @@ public actor NativeStatisticsService {
         self.runtime = runtime; calendar = .current; clock = { Date().timeIntervalSince1970 * 1000 }
         publishedSummary = StatisticsPublishedSummary()
         beforeScan = {}
+        streamTimingPollNanoseconds = 10_000_000_000
         // A supplied test home must not accidentally import the process user's stores.
         environment = runtime.paths.home.standardizedFileURL == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL ? ProcessInfo.processInfo.environment : [:]
     }
     init(runtime: NativeRuntime, environment: [String: String], calendar: Calendar = .current, clock: @escaping @Sendable () -> Double,
+         streamTimingPollNanoseconds: UInt64 = 10_000_000_000,
          bootstrapQueue: DispatchQueue = .global(qos: .utility),
          bootstrapLoad: @escaping @Sendable (NativeRuntime, Double) throws -> JSONValue = { try StatisticsSummaryBootstrap.load(runtime: $0, now: $1) },
          beforeScan: @escaping @Sendable () async throws -> Void = {}) {
         self.runtime = runtime; self.environment = environment; self.calendar = calendar; self.clock = clock
+        self.streamTimingPollNanoseconds = max(1_000_000, streamTimingPollNanoseconds)
         publishedSummary = StatisticsPublishedSummary(queue: bootstrapQueue, load: bootstrapLoad)
         self.beforeScan = beforeScan
     }
-    public func start() async throws { try checkRunning(); try initialize(); try await ensureScan() }
+    public func start() async throws {
+        try checkRunning(); try initialize(); try await ensureScan()
+        _ = refreshNativeStreamTimings()
+        guard !runtime.paths.readOnly, streamTimingMonitor == nil, !stopping else { return }
+        let interval = streamTimingPollNanoseconds
+        // Check one tiny journal's metadata, not the transcript corpus. A weak
+        // capture lets fixture/services deallocate without a background cycle.
+        streamTimingMonitor = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: interval) } catch { break }
+                await self?.collectNativeStreamTimings()
+            }
+        }
+    }
+    deinit { streamTimingMonitor?.cancel() }
     /// Reserve before mounting the native page tree. This owns pending work,
     /// never a loaded generation; the app must immediately schedule the start.
     package nonisolated func reserveInitialGeneration() -> UUID? { publishedSummary.reserveInitial() }
@@ -67,6 +88,8 @@ public actor NativeStatisticsService {
     /// scan and await it. A running synchronous fallback must drain too.
     package func shutdownInitialGeneration() async {
         stopping = true; publishedSummary.stop()
+        let monitor = streamTimingMonitor; streamTimingMonitor = nil
+        monitor?.cancel(); await monitor?.value
         if let flight = scanTask {
             flight.task.cancel()
             do { try await flight.task.value; finishScan(flight.id) }
@@ -117,6 +140,7 @@ public actor NativeStatisticsService {
         // are consistent across files cached by the old web implementation.
         try runtime.db.migrate("native-statistics-readers-1", sql: "UPDATE stats_files SET mtime=-1,size=-1;")
         try runtime.db.migrate("stats-source-path-1", sql: "ALTER TABLE stats_files ADD COLUMN source_path TEXT NOT NULL DEFAULT '';")
+        try runtime.db.migrate("stats-native-stream-timing-1", sql: "CREATE TABLE IF NOT EXISTS stats_native_stream_timing(record_id TEXT PRIMARY KEY,observation TEXT NOT NULL,completed_at REAL NOT NULL); CREATE INDEX IF NOT EXISTS stats_native_stream_timing_recent ON stats_native_stream_timing(completed_at DESC,record_id ASC);")
         // Older metadata projection discarded explicit response-item turn IDs.
         // Only Codex records can contain clocks inferred under that projection.
         try runtime.db.migrate("native-statistics-turn-clocks-1", sql: "UPDATE stats_files SET mtime=-1,size=-1 WHERE path IN (SELECT path FROM stats_records WHERE source='codex');")
@@ -188,6 +212,7 @@ public actor NativeStatisticsService {
         if op == "bench" { return try benchmark(model: nil, range: 0) }
         if !loaded { try await ensureScan() }
         else if clock() - lastCheck >= 30_000 { Task { try? await self.ensureScan() } }
+        _ = refreshNativeStreamTimings()
         let now = clock()
         let requestedRange = (input["range"] ?? 0).int
         let requestedSource = (input["source"] ?? "all").string
@@ -263,6 +288,49 @@ public actor NativeStatisticsService {
         if let fold = folds[key] { return fold }
         let fold = StatisticsFold.sources(events, range: range, cache: cache, source: source, now: now, calendar: calendar)
         folds[key] = fold; return fold
+    }
+    private func collectNativeStreamTimings() async {
+        guard !stopping, !Task.isCancelled else { return }
+        if refreshNativeStreamTimings() { await runtime.events.publish("stats.scanned", scan) }
+    }
+    private func refreshNativeStreamTimings() -> Bool {
+        // A complete corpus generation owns publication. Never interfere with
+        // its cache consistency checks or expose partially folded records.
+        guard loaded, scanTask == nil else { return false }
+        let file = runtime.paths.data.appendingPathComponent("statistics/stream-timings.jsonl")
+        var info = stat()
+        let exists = lstat(file.path, &info) == 0
+        guard exists || errno == ENOENT else { return false }
+        let signature = exists
+            ? "\(info.st_dev):\(info.st_ino):\(info.st_size):\(info.st_mtimespec.tv_sec):\(info.st_mtimespec.tv_nsec):\(info.st_ctimespec.tv_sec):\(info.st_ctimespec.tv_nsec)" : "absent"
+        guard signature != streamTimingSignature || streamTimingGeneration != generation else { return false }
+        guard let fresh = try? NativeCodexStreamTimings.readSnapshot(paths: runtime.paths) else { return false }
+        // Load the bounded durable tail once, then merge only changed journals.
+        // Persist observations before matching: transcripts may not exist yet.
+        let stored: [String: NativeCodexStreamTimingObservation]
+        do { stored = try streamTimingObservations ?? StatisticsNativeStreamTiming.stored(runtime) }
+        catch { return false }
+        var observations = stored
+        let additions = fresh.filter { observations[$0.key] != $0.value }
+        observations.merge(additions) { _, next in next }
+        observations = StatisticsNativeStreamTiming.bounded(observations)
+        let saved = (try? StatisticsNativeStreamTiming.save(additions, runtime: runtime)) != nil
+        guard saved else { return false }
+        streamTimingObservations = observations
+        var changed = false
+        for index in events.indices where events[index].source == "codex" {
+            let original = events[index]
+            guard let observation = observations[original.id],
+                  let measured = StatisticsNativeStreamTiming.applying(observation, to: original) else { continue }
+            if original.streamDurationMs != measured.streamDurationMs || original.streamOutputTokens != measured.streamOutputTokens || original.streamTiming != measured.streamTiming {
+                events[index] = measured; changed = true
+            }
+        }
+        // Optional measurement storage cannot make historical usage disappear
+        // or turn a valid Statistics response into a failure.
+        if changed { generation += 1; clearQueries() }
+        if saved { streamTimingSignature = signature; streamTimingGeneration = generation }
+        return changed
     }
     private func overview(range: Int, source: String, now: Double) -> JSONValue {
         prepareQueryDay(now: now)
