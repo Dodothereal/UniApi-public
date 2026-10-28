@@ -23,7 +23,9 @@ struct StatisticsSpeed {
             // never enter either side of the ratio.
             let verified = e.source == "antigravity" && e.streamTiming == "antigravity-stream-duration"
                 || e.source == "dsh" && e.streamTiming == "dsh-host-chunk-clock"
-            guard verified, let matched = e.streamOutputTokens, matched == e.output else { return }
+            let native = e.source == "codex" && e.streamTiming == "uniapi-host-sse-clock"
+            guard verified || native, let matched = e.streamOutputTokens,
+                  matched == (native ? e.output - e.thinking : e.output) else { return }
             duration = e.streamDurationMs; output = matched
         } else { duration = e.durationMs; output = e.output }
         guard let duration, duration.isFinite, duration > 0, output.isFinite, output > 0 else { return }

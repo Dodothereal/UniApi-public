@@ -10,6 +10,8 @@ public struct ShimClientResponse: Sendable {
     public var status: Int, headers: [String: String], chunks: AsyncThrowingStream<Data, Error>
     public let cancel: @Sendable () -> Void
     public let waitForCompletion: @Sendable () async -> Void
+    var codexStreamTiming: NativeCodexStreamTimingContext? = nil
+    var codexProviderReasoning: NativeCodexReasoningCounter? = nil
     public init(status: Int, headers: [String: String] = [:], chunks: AsyncThrowingStream<Data, Error>, cancel: @escaping @Sendable () -> Void = {}, waitForCompletion: @escaping @Sendable () async -> Void = {}) { self.status = status; self.headers = headers; self.chunks = chunks; self.cancel = cancel; self.waitForCompletion = waitForCompletion }
     public func body() async throws -> Data { try await ShimUpstream(status: status, headers: headers, chunks: chunks, cancel: cancel, waitForCompletion: waitForCompletion).body() }
     static func bytes(_ status: Int, _ body: Data, type: String = "application/json") -> Self {
@@ -157,10 +159,12 @@ public actor NativeShimGateway {
         if counted(request), ticket == nil { return try .error(503, "Codex routing is being updated; retry when admission resumes") }
         let response = try await route(request, ticket: ticket)
         guard let client = ticket?.fork() else { return response }
-        return .init(status: response.status, headers: response.headers, chunks: response.chunks,
+        var countedResponse = ShimClientResponse(status: response.status, headers: response.headers, chunks: response.chunks,
                      cancel: { response.cancel(); client.finish() }, waitForCompletion: response.waitForCompletion)
+        countedResponse.codexStreamTiming = response.codexStreamTiming
+        return countedResponse
     }
-    private func route(_ request: ShimClientRequest, ticket: ShimRequestTicket?) async throws -> ShimClientResponse {
+    private func route(_ request: ShimClientRequest, ticket: ShimRequestTicket?, trackCodexReasoning: Bool = false) async throws -> ShimClientResponse {
         do { try ShimSecurity.guardRequest(request) }
         catch {
             let message = error.localizedDescription
@@ -172,7 +176,7 @@ public actor NativeShimGateway {
             return try activity.control(request, operation: String(route.dropFirst("/_uniapi/codex/control/".count)))
         }
         if let nativeCodex, NativeCodexRouter.matches(request.path) {
-            return try await nativeCodex.handle(request, ticket: ticket) { request in try await self.route(request, ticket: ticket) }
+            return try await nativeCodex.handle(request, ticket: ticket) { request in try await self.route(request, ticket: ticket, trackCodexReasoning: true) }
         }
         let document = try providers.document()
         let allRows = document["providers"]!.array.map(NativeProviderInfo.init), rows = allRows.filter(\.enabled)
@@ -236,7 +240,7 @@ public actor NativeShimGateway {
             let message = provider.format == "anthropic" ? value : try ShimTranslation.openAIToAnthropic(value, model: model)
             return try .json(200, responses ? ShimResponsesStream.nonstream(message, model: model, tools: toolMap) : message)
         }
-        return streamResponse(upstream, model: model, format: provider.format, responses: responses, tools: toolMap, ticket: ticket)
+        return streamResponse(upstream, model: model, format: provider.format, responses: responses, tools: toolMap, ticket: ticket, trackCodexReasoning: trackCodexReasoning)
     }
     private func openRetrying(_ request: ShimHTTPRequest) async throws -> ShimUpstream {
         var attempt = 0
@@ -255,11 +259,12 @@ public actor NativeShimGateway {
             try await dependencies.sleep(delay); attempt += 1
         }
     }
-    private func streamResponse(_ upstream: ShimUpstream, model: String, format: String, responses: Bool, tools: ShimToolMap, ticket: ShimRequestTicket?) -> ShimClientResponse {
+    private func streamResponse(_ upstream: ShimUpstream, model: String, format: String, responses: Bool, tools: ShimToolMap, ticket: ShimRequestTicket?, trackCodexReasoning: Bool) -> ShimClientResponse {
         let control = ShimStreamControl(), dependencies = dependencies
+        let reasoning = trackCodexReasoning && responses && format == "openai" ? NativeCodexReasoningCounter() : nil
         let producer = ticket?.fork()
         let output = AsyncThrowingStream<Data, Error>(bufferingPolicy: .bufferingOldest(512)) { continuation in
-            let writer = ShimStreamWriter(continuation: continuation, model: model, format: format, responses: responses, tools: tools, now: dependencies.now())
+            let writer = ShimStreamWriter(continuation: continuation, model: model, format: format, responses: responses, tools: tools, now: dependencies.now(), reasoning: reasoning)
             let task = Task {
                 let heartbeat = Task {
                     guard dependencies.heartbeatSeconds.isFinite && dependencies.heartbeatSeconds > 0 else { return }
@@ -285,7 +290,9 @@ public actor NativeShimGateway {
             control.install(task, cancel: upstream.cancel)
             continuation.onTermination = { reason in if case .cancelled = reason { control.cancel() } }
         }
-        return .init(status: 200, headers: ["content-type": "text/event-stream", "cache-control": "no-cache", "connection": "close"], chunks: output, cancel: { control.cancel() }, waitForCompletion: { await control.wait() })
+        var response = ShimClientResponse(status: 200, headers: ["content-type": "text/event-stream", "cache-control": "no-cache", "connection": "close"], chunks: output, cancel: { control.cancel() }, waitForCompletion: { await control.wait() })
+        response.codexProviderReasoning = reasoning
+        return response
     }
 }
 
@@ -298,9 +305,10 @@ private final class ShimStreamControl: @unchecked Sendable {
 
 private actor ShimStreamWriter {
     let continuation: AsyncThrowingStream<Data, Error>.Continuation, format: String, responses: Bool, began: Date
+    let reasoning: NativeCodexReasoningCounter?
     var response: ShimResponsesStream, anthropic: ShimAnthropicStream, relay = ShimRelayState(), held: [ShimSSEFrame] = [], raw = Data(), heldNative = Data(), holding = true, finished = false, sawDone = false, upstreamError = false, byteCount = 0
-    init(continuation: AsyncThrowingStream<Data, Error>.Continuation, model: String, format: String, responses: Bool, tools: ShimToolMap, now: Date) {
-        self.continuation = continuation; self.format = format; self.responses = responses; began = now; response = .init(model: model, tools: tools, now: now); anthropic = .init(model: model)
+    init(continuation: AsyncThrowingStream<Data, Error>.Continuation, model: String, format: String, responses: Bool, tools: ShimToolMap, now: Date, reasoning: NativeCodexReasoningCounter?) {
+        self.continuation = continuation; self.format = format; self.responses = responses; began = now; self.reasoning = reasoning; response = .init(model: model, tools: tools, now: now); anthropic = .init(model: model)
         // Silent upstreams still need a valid envelope before the first ping.
         // Native Anthropic passthrough waits for its own message identity.
         if responses { held = response.start() } else if format != "anthropic" { held = anthropic.start() }
@@ -333,6 +341,7 @@ private actor ShimStreamWriter {
     }
     func feed(_ frame: ShimSSEFrame, now: Date) throws {
         guard !finished else { return }; if frame.event == "done" { sawDone = true; return }
+        reasoning?.observe(frame.data["usage"])
         if !frame.data["error"].isNull || frame.data["type"] == "error" { upstreamError = true }
         var frames: [ShimSSEFrame]
         if responses { frames = format == "anthropic" ? response.feedAnthropic(frame.data) : response.feedOpenAI(frame.data) }

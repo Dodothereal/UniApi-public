@@ -10,7 +10,7 @@ package enum NativeStatsRateMetric: String, CaseIterable, Hashable, Sendable {
     package var emptyTitle: String { self == .streaming ? "Streaming timing unavailable" : "Response timing unavailable" }
     package var caption: String {
         self == .streaming
-            ? "Output tokens ÷ matched streaming duration. Excludes request latency and tool waits. Antigravity uses reported stream duration; DeepSeek Harness uses host-observed arrivals, affected by transport buffering. These are not server decode measurements. Historical Codex/Claude records without streaming clocks remain unavailable."
+            ? "Matched stream tokens ÷ streaming duration. Excludes request latency and tool waits. Antigravity uses reported stream duration; DeepSeek Harness uses host-observed arrivals. New Codex requests routed through UniApi use host send clocks and explicit visible-output counts, excluding hidden reasoning. Transport buffering affects host clocks; these are not server decode measurements. Historical Codex/Claude records without streaming clocks remain unmeasured."
             : "Output tokens ÷ elapsed response time, including request latency. Transcript-derived timings may be estimated. This secondary measure is not streaming speed."
     }
 
@@ -42,6 +42,22 @@ package enum NativeStatsRateMetric: String, CaseIterable, Hashable, Sendable {
 }
 
 package enum NativeStatsThroughputPresentation {
+    package static func hasMeasurements(_ board: JSONValue) -> Bool {
+        (count(board["summary"]["timedResponses"]) ?? 0) > 0 && rate(board["summary"]) != nil
+    }
+
+    package static func measuredRows(_ rows: [JSONValue]) -> [JSONValue] {
+        rows.filter { (count($0["timedResponses"]) ?? 0) > 0 && rate($0) != nil }
+    }
+
+    package static func missingClockLabel(source: String) -> String {
+        switch source {
+        case "codex": return "No streaming clock in Codex history"
+        case "claude": return "No streaming clock in Claude history"
+        default: return "No recorded streaming clock"
+        }
+    }
+
     package static func rate(_ speed: JSONValue) -> Double? {
         guard case .number(let value) = speed["avgTps"], value.isFinite, value >= 0 else { return nil }
         return value
