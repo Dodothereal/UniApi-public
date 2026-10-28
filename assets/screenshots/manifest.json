@@ -1,6 +1,6 @@
 {
-  "kind": "offscreen-native-views-empty-fixture",
-  "label": "Actual native views in offscreen viewports, empty fixture data; no full-shell or compositor claim.",
+  "kind": "offscreen-native-views-isolated-fixtures",
+  "label": "Actual native views in offscreen viewports with empty or explicitly labeled synthetic fixtures; no full-shell or compositor claim.",
   "requiresVisualReview": false,
   "parentVisualReviewed": true,
   "quiet": true,
@@ -192,6 +192,32 @@
       "sessionBypass": "No app session is constructed.",
       "parentVisualReviewed": true,
       "sourceSHA256": "f76ee3406fff5ca94e3dbead95dcc16630d48b884b3e461ee2a77bc269ff1f41"
+    },
+    {
+      "page": "stats",
+      "appearance": "dark",
+      "image": "stats-populated-dark.png",
+      "sha256": "5d4773c494ec1de6bdfa8a34aa5d584221fdbb4930b37bd6864b6d1d2c853bb2",
+      "viewport": [
+        1050,
+        800
+      ],
+      "label": "Complete native Statistics page; two synthetic Codex records, 1,320,000 tokens, 912,000 priced and 408,000 unpriced. Reference API estimate, not operator data or billed spend. Capture-only session bypass, no input.",
+      "parentVisualReviewed": true,
+      "sourceSHA256": "472becd9f249eb71906f175be0f2aafa0e32a8f1d2c6a12f70f4df3ece30f834"
+    },
+    {
+      "page": "stats",
+      "appearance": "light",
+      "image": "stats-populated-light.png",
+      "sha256": "0d8c3510606068cca369b0d4f9f9f0bd002adb5d42a1b1bc71246fb534904e2e",
+      "viewport": [
+        1050,
+        800
+      ],
+      "label": "Complete native Statistics page; two synthetic Codex records, 1,320,000 tokens, 912,000 priced and 408,000 unpriced. Reference API estimate, not operator data or billed spend. Capture-only session bypass, no input.",
+      "parentVisualReviewed": true,
+      "sourceSHA256": "472becd9f249eb71906f175be0f2aafa0e32a8f1d2c6a12f70f4df3ece30f834"
     }
   ],
   "onboardingReview": "All four steps reviewed in Light/Dark at820x660 and760x580; screenshots illustrate layout, not button or startup acceptance.",
