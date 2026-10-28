@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           bash tools/verify.sh 2>&1 | tee "$UNIAPI_CI_EVIDENCE/native-verification.log"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: native-arm64-ci-evidence
