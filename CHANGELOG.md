@@ -2,7 +2,7 @@
 
 User-facing changes are recorded here. Release entries should describe shipped behavior and actual validation, with unresolved limitations kept explicit.
 
-## Unreleased
+## 0.1.5 — preview
 
 - Reworked onboarding with a compact step rail, visual appearance previews, aligned controls and a final settings summary. Smaller windows retain accessible navigation and simplify decoration. Setup keeps the same preference, completion and navigation behavior.
 

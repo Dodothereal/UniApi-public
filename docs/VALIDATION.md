@@ -1,6 +1,6 @@
 # Preview validation
 
-## Onboarding presentation refinement (unreleased)
+## Onboarding presentation refinement (0.1.5 candidate)
 
 Only `NativeOnboardingView.swift` changes application behavior. The admission
 policy, preference keys, completion callbacks and destination handoff are
@@ -20,9 +20,19 @@ not compositor frame-rate, keyboard, VoiceOver or full-shell acceptance. At
 700×580 the optional Whisper note requires scrolling; normal app windows have
 a 900×600 minimum and Settings replays setup at 820×660.
 
-The public static checks and all 57 Python fixtures passed. Core and tests are
-unchanged; the prior 1,251 native test result below is not a new execution for
-this presentation change. Full app packaging and installation are separate.
+The public source-boundary and credential checks passed for the final tree.
+All 57 unchanged Python fixtures passed in the preceding presentation iteration;
+CI separately checks the submitted revision. Core and tests are unchanged; the
+prior 1,251 native test result below is not a new execution for this change.
+
+The full production app compiled in 137.53 seconds. The reviewed 0.1.5 package
+contains 18 app files totaling 29,866,377 logical bytes and five executables,
+all with macOS 14 minimum/SDK 26.5 headers. Strict ad-hoc signature checks passed.
+All 22 ZIP entries match staging byte for byte, with no CRC failures. The ZIP is
+12,574,785 bytes, SHA-256:
+`29253dd9c6785ab8d11d4494655d7d1c8730d823a2e45874f9796b15d54879cb`.
+This is build and artifact evidence, separate from installation, native input
+and notarization.
 
 ## Onboarding, Settings and streaming (0.1.4 candidate)
 
