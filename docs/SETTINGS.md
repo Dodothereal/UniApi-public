@@ -6,7 +6,9 @@ UniApi stores navigation preferences with macOS application preferences. They ar
 
 A fresh, unconfigured writable installation offers a four-step welcome: introduction, appearance, starting point and finish. Existing preferences or provider configuration keep it out of the way for existing users. `Settings > Show setup` reopens the same guide without resetting the workspace.
 
-If the app exits before Finish or Skip, the guide opens again on the next launch with its appearance choices retained. A separate started marker distinguishes those choices and the new window frame from an older installation's settings.
+If the app exits before completing or skipping setup, the guide opens again on the next launch with its appearance choices retained. A separate started marker distinguishes those choices and the new window frame from an older installation's settings.
+
+The guide uses a four-step progress rail, visual System/Light/Dark choices and a final preference summary. Narrow windows use compact progress marks; short windows omit the decorative workspace illustration. Navigation stays in a fixed footer with equal-height controls, and each step begins at the top. The last action names the page it will open.
 
 Theme, spacing and motion choices apply immediately. Transitions last 220 ms and respect both the app's reduced-motion preference and macOS Reduce Motion. The illustration is static; the guide has no animation timer or frame callback. Back retains your choices, and Skip leaves you in the workspace. Finishing can open Home, Switcher, Statistics or Transcribe; this is a one-time navigation choice, separate from the launch-page setting.
 

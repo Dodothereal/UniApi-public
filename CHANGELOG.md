@@ -2,6 +2,10 @@
 
 User-facing changes are recorded here. Release entries should describe shipped behavior and actual validation, with unresolved limitations kept explicit.
 
+## Unreleased
+
+- Reworked onboarding with a compact step rail, visual appearance previews, aligned controls and a final settings summary. Smaller windows retain accessible navigation and simplify decoration. Setup keeps the same preference, completion and navigation behavior.
+
 ## 0.1.4 — preview
 
 - Added a skippable four-step native welcome with immediate theme, spacing and reduced-motion choices, a starting-page selection and Settings replay. Setup does not connect providers, download models or change routing or hardware controls.

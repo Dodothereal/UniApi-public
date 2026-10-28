@@ -1,5 +1,29 @@
 # Preview validation
 
+## Onboarding presentation refinement (unreleased)
+
+Only `NativeOnboardingView.swift` changes application behavior. The admission
+policy, preference keys, completion callbacks and destination handoff are
+unchanged. A focused optimized link compiled nine actual UI sources with 159
+retained Core, Presentation and C objects using macOS 14/SDK 26.5. The isolated
+native preview produced 340 frames over 17 seconds and 24 static captures: four
+steps in Light/Dark at 820×660, 760×580 and 700×580 points. Static captures use
+reduced motion. The source and representative images received independent
+review; small-window findings were corrected before the final captures.
+
+The production view hash is
+`f76ee3406fff5ca94e3dbead95dcc16630d48b884b3e461ee2a77bc269ff1f41`.
+The recording scripts step and appearance changes in a private copy, using
+sample preferences and an invisible, unordered native host outside all displays.
+No app session, services or physical input are used. The video is a walkthrough,
+not compositor frame-rate, keyboard, VoiceOver or full-shell acceptance. At
+700×580 the optional Whisper note requires scrolling; normal app windows have
+a 900×600 minimum and Settings replays setup at 820×660.
+
+The public static checks and all 57 Python fixtures passed. Core and tests are
+unchanged; the prior 1,251 native test result below is not a new execution for
+this presentation change. Full app packaging and installation are separate.
+
 ## Onboarding, Settings and streaming (0.1.4 candidate)
 
 The gate's 372-input native source manifest has SHA-256
