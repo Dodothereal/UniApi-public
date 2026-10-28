@@ -8,7 +8,7 @@ A native macOS workspace for AI providers, coding tools, usage statistics and Ma
 - Intel and universal builds remain pending actual build and runtime verification. The deployment target does not mean every Mac or macOS version has been tested.
 - Source builds use the pinned macOS 26.5 SDK, the native SwiftPM build system, two compiler jobs and two backend threads.
 - Preview 0.1.0 is arm64 only, ad-hoc signed and not notarized. All five executables target macOS 14 with SDK 26.5; there is no Intel or universal binary.
-- Native Core/Presentation validation passed 1,176 tests with no failures, including the 50-test transcription/settings subset. Python packaging, installer and pricing fixtures passed 57 tests with no failures. These results do not establish every page, integration or device as verified.
+- Current native Core/Presentation validation passed 1,192 tests with no failures. The 0.1.0 preview passed 1,176, including its 50-test transcription/settings subset; Python packaging, installer and pricing fixtures passed 57 tests. These results do not establish every page, integration or device as verified.
 - The final packaged app passed real local Whisper CLI checks for model installation, file transcription, cross-process lease protection, cancellation, removal and child-process cleanup. Six final page captures passed quiet checks and visual review. See [validation scope](docs/VALIDATION.md).
 
 ## Pages
@@ -36,11 +36,13 @@ Hardware controls require compatible hardware and may require an explicitly inst
 
 ## Get started
 
-Download: [0.1.0 preview release](https://github.com/Dodothereal/UniApi-public/releases/tag/v0.1.0). Follow [Installation](docs/INSTALL.md) for source builds, archive verification and explicit installation. Read [Configuration](docs/CONFIGURATION.md) before connecting providers or coding tools.
+Download: [latest preview release](https://github.com/Dodothereal/UniApi-public/releases/latest). Follow [Installation](docs/INSTALL.md) for source builds, archive verification and explicit installation. Read [Configuration](docs/CONFIGURATION.md) before connecting providers or coding tools.
 
 For one canonical checkout powering your local app while retaining private runtime data, see [Local development](docs/LOCAL-DEVELOPMENT.md).
 
 UniApi runs native background services. Normal Quit hides the presentation and preserves background work; it does not stop the service owner. Updates and full shutdown must use the explicit owned-stop and installer admission mechanisms. Do not force a blocked update while jobs or coding turns are active.
+
+API and subscription models in Codex can use UniApi's native routing without the optional Web launcher. Activate it through the [guarded handoff](docs/CONFIGURATION.md#native-routing-from-the-command-line), then reload Codex/T3 Code metadata when idle. The documented CommandCode DeepSeek route advertises High/Low/Max; a stale bridge catalog can show only None. See [reasoning and refresh](docs/REASONING.md). Browser-only modes remain a separate optional integration.
 
 ## Local transcription
 
