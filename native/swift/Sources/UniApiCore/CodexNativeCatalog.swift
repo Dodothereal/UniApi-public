@@ -49,7 +49,9 @@ enum NativeCodexRouteCatalog {
             row["priority"] = .number(lastPriority + 1)
             row["context_window"] = .number(Double(route.context)); row["max_context_window"] = row["context_window"]
             row["effective_context_window_percent"] = 90; row["auto_compact_token_limit"] = .number((Double(route.context) * 0.9).rounded(.down))
-            row["supported_reasoning_levels"] = .array(route.efforts.map { ["effort": .string($0)] }); row["default_reasoning_level"] = .string(route.efforts[0])
+            // Codex requires a description on each preset; omitting it rejects
+            // the entire catalog, even when the effort itself is supported.
+            row["supported_reasoning_levels"] = .array(route.efforts.map { ["effort": .string($0), "description": .string($0 == "none" ? "No reasoning override" : $0)] }); row["default_reasoning_level"] = .string(route.efforts[0])
             row["input_modalities"] = route.provider.raw["codex"]["vision_models"].array.contains(.string(route.model)) ? ["text", "image"] : ["text"]
             row["additional_speed_tiers"] = []; row["service_tiers"] = []; row["default_service_tier"] = .null
             row["supports_search_tool"] = false; row["experimental_supported_tools"] = []; row["supports_image_detail_original"] = false

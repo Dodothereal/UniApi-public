@@ -2,11 +2,12 @@
 
 User-facing changes are recorded here. Release entries should describe shipped behavior and actual validation, with unresolved limitations kept explicit.
 
-## Unreleased
+## 0.1.2 — preview
 
 - Added window-free Codex routing status, connect and restore commands. An explicit bounded idle wait uses the existing journal-aware handoff and preserves active requests and independently changed settings.
 - Documented one maintained public source for local installations while retaining private runtime storage and preserved older checkouts.
 - Added a catalog regression for replacing a bridge's stale None-only DeepSeek row with the native model-specific High/Low/Max choices. Existing Codex/T3 Code metadata must be refreshed after native handoff; installing a bundle alone does not change an active bridge's catalog.
+- Fixed missing required reasoning-preset descriptions that caused Codex 0.165.0 to reject the entire native catalog. Added strict consumer-contract coverage and validated the correction against an actual Codex client.
 
 ## 0.1.0 — preview
 

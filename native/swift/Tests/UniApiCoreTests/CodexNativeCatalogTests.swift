@@ -3,7 +3,7 @@ import XCTest
 
 final class CodexNativeCatalogTests: XCTestCase {
     private func model(_ id: String, priority: Int = 0) -> JSONValue {
-        ["slug": .string(id), "display_name": .string(id), "priority": .number(Double(priority)), "visibility": "list", "supported_in_api": true, "multi_agent_version": "v2", "supported_reasoning_levels": [["effort": "high"]], "model_messages": ["retained": true], "native_extra": 42, "comp_hash": "native-hash", "availability_nux": ["native": true], "multi_agent_reasoning_effort": "high"]
+        ["slug": .string(id), "display_name": .string(id), "priority": .number(Double(priority)), "visibility": "list", "supported_in_api": true, "multi_agent_version": "v2", "supported_reasoning_levels": [["effort": "high", "description": "Native high"]], "model_messages": ["retained": true], "native_extra": 42, "comp_hash": "native-hash", "availability_nux": ["native": true], "multi_agent_reasoning_effort": "high"]
     }
     private func provider() -> JSONValue {
         ["id": "fixture", "name": "Fixture", "api_key": "fixture-key", "proxy": ["format": "openai", "models": ["glm:free", "sibling"], "model_context_tokens": ["glm:free": 1048576]], "codex": ["base_url": "http://127.0.0.1:8823/fixture/v1", "models": ["glm:free", "sibling"], "responses_verified": true, "tools_verified": true, "efforts": ["low", "high"]]]
@@ -20,7 +20,7 @@ final class CodexNativeCatalogTests: XCTestCase {
         XCTAssertEqual(rows[1]["display_name"], "Fixture — glm:free")
         XCTAssertEqual(rows[1]["model_messages"], .null); XCTAssertEqual(rows[1]["multi_agent_version"], "v1")
         XCTAssertNil(rows[1].object["comp_hash"]); XCTAssertNil(rows[1].object["availability_nux"]); XCTAssertNil(rows[1].object["multi_agent_reasoning_effort"])
-        XCTAssertEqual(rows[1]["supported_reasoning_levels"], [["effort": "low"], ["effort": "high"]])
+        XCTAssertEqual(rows[1]["supported_reasoning_levels"], [["effort": "low", "description": "low"], ["effort": "high", "description": "high"]])
         XCTAssertEqual(rows[2]["context_window"], 128000)
         XCTAssertFalse(String(decoding: try result.encoded(), as: UTF8.self).contains("fixture-key"))
     }
@@ -52,13 +52,45 @@ final class CodexNativeCatalogTests: XCTestCase {
             XCTAssertEqual(row["supported_reasoning_levels"].array.map { $0["effort"].string }, expected)
             XCTAssertEqual(row["default_reasoning_level"], .string(expected[0]))
             XCTAssertEqual(row["priority"], 1)
-            XCTAssertEqual(result["models"].array.first { $0["slug"] == "uniapi/fixture/sibling" }?["supported_reasoning_levels"], [["effort": "none"]])
+            XCTAssertEqual(result["models"].array.first { $0["slug"] == "uniapi/fixture/sibling" }?["supported_reasoning_levels"], [["effort": "none", "description": "No reasoning override"]])
             let bytes = try result.encoded()
             XCTAssertFalse(String(decoding: bytes, as: UTF8.self).contains("fixture-key"))
             try NativeFile.writeAtomic(bytes, to: file)
             let cached = try NativeCodexModelCache.rows(file).filter { $0["slug"] == .string(alias) }
             XCTAssertEqual(cached.count, 1)
             XCTAssertEqual(cached.first?["supported_reasoning_levels"].array.map { $0["effort"].string }, expected)
+        }
+    }
+    // Required fields from Codex 0.165.0's ReasoningEffortPreset wire contract:
+    // codex-rs/protocol/src/openai_models.rs. The picker cache deliberately
+    // drops descriptions, so its permissive decoder cannot prove acceptance.
+    private struct ReasoningPresetContract: Decodable {
+        let effort: String
+        let description: String
+    }
+    func testEveryProducedReasoningPresetDecodesWithRequiredDescription() throws {
+        var p = provider()
+        p["codex"]["efforts"] = []
+        let efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+        p["codex"]["model_efforts"]["glm:free"] = .array(efforts.map(JSONValue.string))
+        let result = try NativeCodexRouteCatalog.augment(["models": [model("native")]], providers: ["providers": [p]], choices: choices)
+        let providerRows = result["models"].array.filter { $0["slug"].string.hasPrefix("uniapi/") }
+        XCTAssertEqual(providerRows.count, 2)
+        for row in providerRows {
+            let bytes = try row["supported_reasoning_levels"].encoded()
+            let presets = try JSONDecoder().decode([ReasoningPresetContract].self, from: bytes)
+            let expected = row["slug"] == "uniapi/fixture/glm%3Afree" ? efforts : ["none"]
+            XCTAssertEqual(presets.map(\.effort), expected)
+            XCTAssertTrue(presets.allSatisfy { !$0.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+            // Deleting a required field or replacing it with null/non-string
+            // must fail, rather than silently default and mask this regression.
+            for invalid: JSONValue? in [nil, .some(.null), .some(42)] {
+                var levels = row["supported_reasoning_levels"].array
+                var entry = levels[0].object
+                entry["description"] = invalid
+                levels[0] = .object(entry)
+                XCTAssertThrowsError(try JSONDecoder().decode([ReasoningPresetContract].self, from: JSONValue.array(levels).encoded()))
+            }
         }
     }
     func testInvalidContextFallsBackWithoutInventingLimit() throws {

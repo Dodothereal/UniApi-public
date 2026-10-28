@@ -1,6 +1,22 @@
 # Preview validation
 
-## Native routing maintenance candidate
+## Catalog compatibility correction (0.1.2)
+
+The corrected 358-input source manifest has SHA-256
+`a05f49ffe75b188f47fce6d0834b62b7e33192c3ec58b45d5c56f86f79f093ef`.
+Its full optimized native gate passed 1,192 tests with zero failures in
+47.546 seconds (47.632 seconds including suite completion); full UI and three
+Swift products compiled in 159.73 seconds.
+
+A real Codex 0.165.0 client rejected the prior generated catalog. Per-process
+catalog controls kept global routing unchanged: adding reasoning-preset
+descriptions alone restored the model list and DeepSeek High/Low/Max, default
+High. Adding only the separately suspected availability field did not fix it.
+These metadata checks submitted no inference turns. The production correction
+changes only preset descriptions; final installed HTTP-catalog and inference
+checks remain separate from these controls.
+
+## Routing CLI validation (0.1.1)
 
 The routing command and catalog-refresh update passed the full optimized native
 suite on macOS 27.2/arm64: 1,191 tests, zero failures, in 43.019 seconds

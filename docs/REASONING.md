@@ -45,6 +45,15 @@ instructions or transcripts into diagnostics.
 
 ## Apply and verify a refresh
 
+Every generated `supported_reasoning_levels` entry must carry both string
+`effort` and string `description`, including the fallback `none` entry. Codex
+0.165.0's [ReasoningEffortPreset wire type](https://github.com/openai/codex/blob/rust-v0.165.0/codex-rs/protocol/src/openai_models.rs#L204)
+requires the description; an omitted field rejects the catalog rather than
+merely hiding its label. The native picker cache intentionally reads only the
+effort, so successfully parsing that cache does not verify Codex acceptance.
+Catalog tests therefore decode produced presets with required Codable strings
+and reject missing, null and non-string descriptions.
+
 1. Identify the installed producer and active route before changing anything.
    Confirm which provider document and catalog membership that producer reads.
 2. If moving to native routing, install a reviewed build containing the native
