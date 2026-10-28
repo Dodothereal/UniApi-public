@@ -174,7 +174,9 @@ records capture scope and image checksums.
 ![Native welcome guide, Dark appearance](assets/screenshots/onboarding-dark.png)
 
 [Welcome — Light](assets/screenshots/onboarding-light.png) ·
-[Appearance choices](assets/screenshots/onboarding-appearance-dark.png)
+[Appearance choices](assets/screenshots/onboarding-appearance-dark.png) ·
+[Starting page](assets/screenshots/onboarding-start-dark.png) ·
+[Ready summary](assets/screenshots/onboarding-ready-dark.png)
 
 **Statistics — Dark**
 

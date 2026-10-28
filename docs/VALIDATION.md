@@ -1,5 +1,39 @@
 # Preview validation
 
+## Onboarding presentation refinement (0.1.5 candidate)
+
+Only `NativeOnboardingView.swift` changes application behavior. The admission
+policy, preference keys, completion callbacks and destination handoff are
+unchanged. A focused optimized link compiled nine actual UI sources with 159
+retained Core, Presentation and C objects using macOS 14/SDK 26.5. The isolated
+native preview produced 340 frames over 17 seconds and 24 static captures: four
+steps in Light/Dark at 820×660, 760×580 and 700×580 points. Static captures use
+reduced motion. The source and representative images received independent
+review; small-window findings were corrected before the final captures.
+
+The production view hash is
+`f76ee3406fff5ca94e3dbead95dcc16630d48b884b3e461ee2a77bc269ff1f41`.
+The recording scripts step and appearance changes in a private copy, using
+sample preferences and an invisible, unordered native host outside all displays.
+No app session, services or physical input are used. The video is a walkthrough,
+not compositor frame-rate, keyboard, VoiceOver or full-shell acceptance. At
+700×580 the optional Whisper note requires scrolling; normal app windows have
+a 900×600 minimum and Settings replays setup at 820×660.
+
+The public source-boundary and credential checks passed for the final tree.
+All 57 unchanged Python fixtures passed in the preceding presentation iteration;
+CI separately checks the submitted revision. Core and tests are unchanged; the
+prior 1,251 native test result below is not a new execution for this change.
+
+The full production app compiled in 137.53 seconds. The reviewed 0.1.5 package
+contains 18 app files totaling 29,866,377 logical bytes and five executables,
+all with macOS 14 minimum/SDK 26.5 headers. Strict ad-hoc signature checks passed.
+All 22 ZIP entries match staging byte for byte, with no CRC failures. The ZIP is
+12,574,785 bytes, SHA-256:
+`29253dd9c6785ab8d11d4494655d7d1c8730d823a2e45874f9796b15d54879cb`.
+This is build and artifact evidence, separate from installation, native input
+and notarization.
+
 ## Onboarding, Settings and streaming (0.1.4 candidate)
 
 The gate's 372-input native source manifest has SHA-256

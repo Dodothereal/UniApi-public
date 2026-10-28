@@ -14,31 +14,46 @@
       "page": "onboarding-welcome",
       "appearance": "light",
       "image": "onboarding-light.png",
-      "sha256": "8cdc19a003645e277e5a9a6f62dc7adebe5120b418118badd7e294769790bada",
+      "sha256": "bedee7dfb734eacd9e107ec1e618dd47fd6fc6e4a009d3382192eb1889ad2f06",
       "viewport": [
         820,
         660
-      ]
+      ],
+      "label": "Actual native onboarding view; isolated sample preferences, capture-only step selection and reduced motion. No app session, services or physical input.",
+      "sessionInitializer": "none",
+      "sessionBypass": "No app session is constructed.",
+      "parentVisualReviewed": true,
+      "sourceSHA256": "f76ee3406fff5ca94e3dbead95dcc16630d48b884b3e461ee2a77bc269ff1f41"
     },
     {
       "page": "onboarding-welcome",
       "appearance": "dark",
       "image": "onboarding-dark.png",
-      "sha256": "8262a6b77358e40dc06e48d2a3ee92ab514562cd9e2b946c443dd75414903707",
+      "sha256": "c1cdb784cb4c76ded49756ced18b7da09f3d4040d1bb08b050f2e829a435d7c6",
       "viewport": [
         820,
         660
-      ]
+      ],
+      "label": "Actual native onboarding view; isolated sample preferences, capture-only step selection and reduced motion. No app session, services or physical input.",
+      "sessionInitializer": "none",
+      "sessionBypass": "No app session is constructed.",
+      "parentVisualReviewed": true,
+      "sourceSHA256": "f76ee3406fff5ca94e3dbead95dcc16630d48b884b3e461ee2a77bc269ff1f41"
     },
     {
       "page": "onboarding-appearance",
       "appearance": "dark",
       "image": "onboarding-appearance-dark.png",
-      "sha256": "9a43a0081cdc5ff6336e708a5e4683abfdfd25a3d632620b38f5e97650d4fd33",
+      "sha256": "c53dcc035448d964acbf2300b28452b4704654c9fbe96971e96fa5e2ae422103",
       "viewport": [
         820,
         660
-      ]
+      ],
+      "label": "Actual native onboarding view; isolated sample preferences, capture-only step selection and reduced motion. No app session, services or physical input.",
+      "sessionInitializer": "none",
+      "sessionBypass": "No app session is constructed.",
+      "parentVisualReviewed": true,
+      "sourceSHA256": "f76ee3406fff5ca94e3dbead95dcc16630d48b884b3e461ee2a77bc269ff1f41"
     },
     {
       "page": "transcribe",
@@ -147,6 +162,36 @@
         800
       ],
       "parentVisualReviewed": true
+    },
+    {
+      "page": "onboarding-starting-point",
+      "appearance": "dark",
+      "image": "onboarding-start-dark.png",
+      "viewport": [
+        820,
+        660
+      ],
+      "sha256": "40cd7680f56f03174da87a95b27fb63c7075e10c3bd43a8ea2f0d250e894fe13",
+      "label": "Actual native onboarding view; isolated sample preferences, capture-only step selection and reduced motion. No app session, services or physical input.",
+      "sessionInitializer": "none",
+      "sessionBypass": "No app session is constructed.",
+      "parentVisualReviewed": true,
+      "sourceSHA256": "f76ee3406fff5ca94e3dbead95dcc16630d48b884b3e461ee2a77bc269ff1f41"
+    },
+    {
+      "page": "onboarding-ready",
+      "appearance": "dark",
+      "image": "onboarding-ready-dark.png",
+      "viewport": [
+        820,
+        660
+      ],
+      "sha256": "d2a45371f3268e523cdcf31ed34c5fbecb903cf988340a00e37325b128f31a0f",
+      "label": "Actual native onboarding view; isolated sample preferences, capture-only step selection and reduced motion. No app session, services or physical input.",
+      "sessionInitializer": "none",
+      "sessionBypass": "No app session is constructed.",
+      "parentVisualReviewed": true,
+      "sourceSHA256": "f76ee3406fff5ca94e3dbead95dcc16630d48b884b3e461ee2a77bc269ff1f41"
     }
   ],
   "onboardingReview": "All four steps reviewed in Light/Dark at820x660 and760x580; screenshots illustrate layout, not button or startup acceptance.",
