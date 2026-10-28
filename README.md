@@ -38,6 +38,8 @@ Hardware controls require compatible hardware and may require an explicitly inst
 
 Download: [0.1.0 preview release](https://github.com/Dodothereal/UniApi-public/releases/tag/v0.1.0). Follow [Installation](docs/INSTALL.md) for source builds, archive verification and explicit installation. Read [Configuration](docs/CONFIGURATION.md) before connecting providers or coding tools.
 
+For one canonical checkout powering your local app while retaining private runtime data, see [Local development](docs/LOCAL-DEVELOPMENT.md).
+
 UniApi runs native background services. Normal Quit hides the presentation and preserves background work; it does not stop the service owner. Updates and full shutdown must use the explicit owned-stop and installer admission mechanisms. Do not force a blocked update while jobs or coding turns are active.
 
 ## Local transcription

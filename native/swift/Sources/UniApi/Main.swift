@@ -9,6 +9,21 @@ import UniApiPresentation
 @main
 @MainActor enum NativeEntry {
     static func main() {
+        if CommandLine.arguments.dropFirst().contains(where: { $0 == "--codex-routing" || $0.hasPrefix("--codex-routing=") }) {
+            let task = Task {
+                let result = await NativeCodexRoutingCommand.run(Array(CommandLine.arguments.dropFirst()))
+                do { print(String(decoding: try result.json.encoded(), as: UTF8.self)); exit(result.exitCode) }
+                catch { fputs("Codex routing output could not be encoded\n", stderr); exit(1) }
+            }
+            let signals = [SIGINT, SIGTERM].map { number -> DispatchSourceSignal in
+                signal(number, SIG_IGN)
+                let source = DispatchSource.makeSignalSource(signal: number, queue: .global(qos: .utility))
+                source.setEventHandler { task.cancel() }; source.resume(); return source
+            }
+            // Cancellation reaches the command without starting AppKit or an
+            // app session; an in-flight guarded action owns its own recovery.
+            withExtendedLifetime(signals) { dispatchMain() }
+        }
         NativeUIReadiness.shared.launched()
         if CommandLine.arguments.contains("--version") { print("UniApi " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development")); return }
         if ["--local-model", "--transcribe-file"].contains(CommandLine.arguments.dropFirst().first ?? "") {

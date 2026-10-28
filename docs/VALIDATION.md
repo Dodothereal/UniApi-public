@@ -1,5 +1,20 @@
 # Preview validation
 
+## Native routing maintenance candidate
+
+The routing command and catalog-refresh update passed the full optimized native
+suite on macOS 27.2/arm64: 1,191 tests, zero failures, in 43.019 seconds
+(43.104 seconds including suite completion). The full UI and three Swift
+products compiled in 153.43 seconds. The 358-input native source manifest has
+SHA-256 `a0894c65c94f8b551462e85afeb3818c7a8bb45b3ff8ee7871ba45bccfa3fa78`.
+This includes the new command policy, uncertain-postcondition and stale
+None-only catalog regressions. Independent source review covered the guarded
+delegation and safe output; no direct configuration writer or forced drain was
+introduced. These checks do not themselves establish an installed handoff or
+live provider reasoning behavior.
+
+## Published 0.1.0 preview
+
 Version 0.1.0 was validated on Apple Silicon (arm64), running macOS 27.2, with the macOS 26.5 SDK and a macOS 14 deployment target. This is not physical Intel or macOS 14 runtime verification.
 
 | Check | Result |
