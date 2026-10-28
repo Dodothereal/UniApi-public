@@ -12,6 +12,25 @@ private final class PublicCapturePanel: NSPanel {
     override func constrainFrameRect(_ rect: NSRect, to screen: NSScreen?) -> NSRect { rect }
 }
 
+// Inserted only into the temporary copies used by the Settings detail matrix.
+// The marker is transparent and participates only in locating a real section
+// in the production page's existing scroll view.
+struct PublicCaptureAnchor: NSViewRepresentable {
+    let name: String
+    init(_ name: String) { self.name = name }
+    func makeNSView(context: Context) -> PublicCaptureAnchorView {
+        let view = PublicCaptureAnchorView()
+        view.anchorName = name
+        return view
+    }
+    func updateNSView(_ view: PublicCaptureAnchorView, context: Context) { view.anchorName = name }
+}
+
+final class PublicCaptureAnchorView: NSView {
+    var anchorName = ""
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 @MainActor private final class PublicPageCapture {
     private var panel: PublicCapturePanel?
     private var host: NSHostingView<AnyView>?
@@ -20,6 +39,36 @@ private final class PublicCapturePanel: NSPanel {
     private var samples: [[String: Any]] = []
     private var preferences: UserDefaults?
     private var suite: String?
+
+    private func descendants(_ view: NSView) -> [NSView] {
+        [view] + view.subviews.flatMap { descendants($0) }
+    }
+
+    private func scrollToSettingsSection(_ name: String, host: NSHostingView<AnyView>) throws -> [String: Any] {
+        let matches = descendants(host).compactMap { $0 as? PublicCaptureAnchorView }.filter { $0.anchorName == name }
+        guard matches.count == 1, let anchor = matches.first, !anchor.bounds.isEmpty else {
+            throw NativeFailure("Expected exactly one laid-out Settings section anchor: \(name)")
+        }
+        var parent = anchor.superview
+        while parent != nil && !(parent is NSScrollView) { parent = parent?.superview }
+        guard let scroll = parent as? NSScrollView, let document = scroll.documentView else {
+            throw NativeFailure("Settings section anchor is not in the production scroll view")
+        }
+        let rect = anchor.convert(anchor.bounds, to: document)
+        let clip = scroll.contentView
+        let top = document.isFlipped ? rect.minY : rect.maxY
+        let y = document.isFlipped ? top - 16 : top - clip.bounds.height + 16
+        let proposed = NSRect(origin: NSPoint(x: clip.bounds.minX, y: y), size: clip.bounds.size)
+        let bounded = clip.constrainBoundsRect(proposed)
+        clip.scroll(to: bounded.origin)
+        scroll.reflectScrolledClipView(clip)
+        host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
+        guard rect.intersects(scroll.documentVisibleRect) else {
+            throw NativeFailure("Scrolled Settings section is not visible")
+        }
+        return ["section": name, "documentY": top, "scrollY": clip.bounds.minY,
+                "visibleHeight": clip.bounds.height, "anchorIntersectsViewport": true]
+    }
 
     private func sample(_ phase: String) throws {
         guard let panel else { throw NativeFailure("Capture panel missing") }
@@ -31,6 +80,15 @@ private final class PublicCapturePanel: NSPanel {
                         "key": panel.isKeyWindow, "main": panel.isMainWindow,
                         "active": NSApp.isActive, "frontmostIsOwn": frontmost, "quiet": quiet])
         guard quiet else { throw NativeFailure("Offscreen capture lost its quiet state") }
+    }
+
+    private func pricingFixture(_ state: String) -> JSONValue {
+        switch state {
+        case "empty": return ["pricedTokens": 0, "unpricedTokens": 0, "unpriced": [], "rows": []]
+        case "unknown": return ["pricedTokens": 0, "unpricedTokens": 1_000_000, "unpriced": .array((0..<19).map { .string("fixture-model-\($0)") }), "rows": []]
+        case "partial": return ["pricedTokens": 750_000, "unpricedTokens": 250_000, "unpriced": ["fixture-model"], "rows": []]
+        default: return ["pricedTokens": 1_000_000, "unpricedTokens": 0, "unpriced": [], "rows": []]
+        }
     }
 
     private func readiness(_ metrics: URL, visit: Int) throws -> Bool {
@@ -48,11 +106,36 @@ private final class PublicCapturePanel: NSPanel {
         return ready
     }
 
-    func capture(paths: NativePaths, output: URL, page: String, appearance: String) async throws {
-        guard paths.readOnly, ["stats", "transcribe", "settings"].contains(page),
+    func capture(paths: NativePaths, output: URL, page: String, appearance: String, width: Int, height: Int) async throws {
+        let detailSections = ["settings-sidebar": "sidebar", "settings-telegram": "telegram",
+                              "settings-theme-common": "theme-common", "settings-theme-advanced": "theme-advanced"]
+        let section = detailSections[page]
+        let onboarding = page.hasPrefix("onboarding-") ? NativeOnboardingStep.allCases.first {
+            String(describing: $0) == String(page.dropFirst("onboarding-".count))
+        } : nil
+        let pricing = ["pricing-empty": "empty", "pricing-unknown": "unknown", "pricing-partial": "partial", "pricing-priced": "priced"][page]
+        let viewportAllowed = pricing == nil
+            ? (640...1200).contains(width) && (500...1000).contains(height)
+            : (320...1200).contains(width) && (100...1000).contains(height)
+        guard paths.readOnly, ["stats", "transcribe", "settings"].contains(page) || onboarding != nil || section != nil || pricing != nil,
+              viewportAllowed,
               ["light", "dark"].contains(appearance),
+              ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] == section,
               let metricsPath = ProcessInfo.processInfo.environment["UNIAPI_NATIVE_UI_METRICS"] else {
             throw NativeFailure("Expected isolated read-only page capture arguments")
+        }
+        // Theme uses UserDefaults.standard, not the injected AppStorage suite.
+        // An argument-domain override is process-local and precedes persistent
+        // domains. Admit capture only if the singleton sees the empty palette.
+        let standard = UserDefaults.standard
+        var arguments = standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        let emptyTheme = NativeThemePreferences().serialized()
+        arguments[NativeThemePreferences.storageKey] = emptyTheme
+        standard.removeVolatileDomain(forName: UserDefaults.argumentDomain)
+        standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        guard standard.string(forKey: NativeThemePreferences.storageKey) == emptyTheme,
+              NativeThemeStore.shared.preferences == NativeThemePreferences() else {
+            throw NativeFailure("Capture theme isolation failed")
         }
         let metrics = URL(fileURLWithPath: metricsPath)
         let runtime = try NativeRuntime(paths: paths)
@@ -78,11 +161,15 @@ private final class PublicCapturePanel: NSPanel {
             throw NativeFailure("Production readiness instrumentation must be enabled")
         }
         let content: AnyView
-        switch page {
+        if let pricing {
+            content = AnyView(VStack { NativeStatsPricing(cost: pricingFixture(pricing)); Spacer(minLength: 0) }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Theme.bg))
+        } else if let onboarding {
+            content = AnyView(NativeOnboardingView(initialStep: onboarding) { _ in })
+        } else { switch page {
         case "stats": content = AnyView(NativeStatsPage(runtime: runtime))
         case "transcribe": content = AnyView(NativeTranscribePage(runtime: runtime))
         default: content = AnyView(NativeSettingsPage(runtime: runtime))
-        }
+        } }
         let scheme: ColorScheme = appearance == "dark" ? .dark : .light
         let view = AnyView(content.environmentObject(session).defaultAppStorage(defaults)
             .environment(\.nativePageVisit, visit)
@@ -97,7 +184,7 @@ private final class PublicCapturePanel: NSPanel {
             }
         let x = (NSScreen.screens.map { $0.frame.minX }.min() ?? 0) - 10_000
         let y = (NSScreen.screens.map { $0.frame.minY }.min() ?? 0) - 10_000
-        let panel = PublicCapturePanel(contentRect: NSRect(x: x, y: y, width: 1050, height: 800),
+        let panel = PublicCapturePanel(contentRect: NSRect(x: x, y: y, width: CGFloat(width), height: CGFloat(height)),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         self.panel = panel
         panel.isReleasedWhenClosed = false; panel.animationBehavior = .none
@@ -105,7 +192,7 @@ private final class PublicCapturePanel: NSPanel {
         panel.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
         let host = NSHostingView(rootView: view); self.host = host
         panel.contentView = host
-        host.frame = NSRect(x: 0, y: 0, width: 1050, height: 800)
+        host.frame = NSRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
         // The production page owns its NativePage/ScrollView. No extra scroll
         // container, artificial minimum height, sidebar, or ordering call.
         try sample("created-unordered")
@@ -120,13 +207,24 @@ private final class PublicCapturePanel: NSPanel {
             }
             host.cacheDisplay(in: host.bounds, to: discarded)
             try sample("after-readiness-bitmap")
+            if onboarding != nil || pricing != nil { break }
             if try readiness(metrics, visit: visit.id) { break }
             guard ProcessInfo.processInfo.systemUptime < deadline else {
                 throw NativeFailure("Page never reached ready; no screenshot accepted")
             }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
+        var scrollReport: [String: Any] = [:]
+        if let section {
+            host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
+            scrollReport = try scrollToSettingsSection(section, host: host)
+            try sample("after-programmatic-scroll")
+        }
         try await Task.sleep(nanoseconds: 300_000_000)
+        if let section {
+            scrollReport = try scrollToSettingsSection(section, host: host)
+            try sample("before-scrolled-bitmap")
+        }
         try sample("before-bitmap")
         host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
         guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
@@ -137,12 +235,14 @@ private final class PublicCapturePanel: NSPanel {
             throw NativeFailure("Cannot encode native page bitmap")
         }
         try sample("after-bitmap")
-        let report: [String: Any] = ["kind": "offscreen-native-page-empty-fixture", "page": page,
-            "appearance": appearance, "viewportWidth": 1050, "viewportHeight": 800,
+        let report: [String: Any] = ["kind": pricing == nil ? "offscreen-native-page-empty-fixture" : "offscreen-native-pricing-component-synthetic", "page": page,
+            "appearance": appearance, "viewportWidth": width, "viewportHeight": height,
             "pixelWidth": bitmap.pixelsWide, "pixelHeight": bitmap.pixelsHigh,
             "quiet": true, "samples": samples, "inputActions": 0,
+            "programmaticScroll": scrollReport,
+            "themePreferences": "isolated volatile standard-defaults override; original palette verified",
             "sessionInitializer": "captureRuntime", "readOnly": true,
-            "limits": "Page illustration only. No complete shell, compositor, layout parity, runtime feature or fresh-installed acceptance claim."]
+            "limits": "Page illustration only. Settings details use recorded capture-only expanded state and programmatic scrolling. No complete shell, compositor, layout parity, runtime feature or fresh-installed acceptance claim."]
         // Core's writer creates its temporary file beside the destination;
         // Foundation atomic writes can request an external replacement folder.
         let reportData = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])
@@ -166,7 +266,8 @@ private final class PublicCapturePanel: NSPanel {
         let env = ProcessInfo.processInfo.environment
         guard root.path == home.appendingPathComponent("UniApi").path,
               env["UNIAPI_ROOT"] == root.path, env["UNIAPI_NATIVE_HOME"] == home.path,
-              env["UNIAPI_NATIVE_READ_ONLY"] == "1", env["HOME"] == home.path else {
+              env["UNIAPI_NATIVE_READ_ONLY"] == "1", env["HOME"] == home.path,
+              env["CFFIXED_USER_HOME"] == home.path else {
             fputs("Isolated capture environment required\n", stderr); exit(64)
         }
         if args[0] == "--prepare-fixture", args.count == 3 {
@@ -187,14 +288,15 @@ private final class PublicCapturePanel: NSPanel {
             }
             dispatchMain()
         }
-        guard args[0] == "--capture", args.count == 6 else { exit(64) }
+        guard args[0] == "--capture", args.count == 8,
+              let width = Int(args[6]), let height = Int(args[7]) else { exit(64) }
         let app = NSApplication.shared
         guard app.setActivationPolicy(.prohibited) else { exit(65) }
         let capture = PublicPageCapture()
         Task { @MainActor in
             do {
                 try await capture.capture(paths: NativePaths(root: root, home: home, readOnly: true),
-                    output: URL(fileURLWithPath: args[3], isDirectory: true), page: args[4], appearance: args[5])
+                    output: URL(fileURLWithPath: args[3], isDirectory: true), page: args[4], appearance: args[5], width: width, height: height)
                 exit(0)
             } catch { fputs("Page capture failed: \(error.localizedDescription)\n", stderr); exit(1) }
         }

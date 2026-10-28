@@ -6,15 +6,12 @@ import UniApiPresentation
 struct NativeSettingsPage: View {
     let runtime: NativeRuntime
     @EnvironmentObject private var session: NativeAppSession
+    @Environment(\.nativeBatterySupported) private var batterySupported
     @AppStorage("uniapi-theme") private var appearance = "auto"
     @AppStorage("uniapi-density") private var density = "standard"
     @AppStorage("uniapi-motion") private var motion = "system"
-    @AppStorage("uniapi-sidebar") private var sidebarOpen = true
-    @AppStorage("uniapi-sidebar-width") private var sidebarWidth = NativeSidebarLayout.defaultWidth
-    @AppStorage("uniapi-sidebar-order") private var sidebarOrder = ""
-    @State private var notificationConfig = NativeNotifications.Configuration()
-    @State private var notificationStatus = "External delivery is off until explicitly configured and saved."
-    @State private var notificationLoaded = false
+    @AppStorage("uniapi-start-page") private var startPage = NativeNavigationPreferences.defaultStartPage.rawValue
+    @AppStorage("uniapi-restore-last-page") private var restoreLastPage = NativeNavigationPreferences.defaultRestoreLastPage
     @State private var diagnostics = ""
     @State private var activeJobs: Int?
     @State private var jobsError: String?
@@ -28,55 +25,67 @@ struct NativeSettingsPage: View {
             Button { Task { await reload() } } label: { HStack(spacing: 6) { NativeIcon("rotate-cw", size: 12); Text("Reload") } }
         }) {
             VStack(alignment: .leading, spacing: 20) {
+                SectionLabel("Setup")
+                SettingRow(title: "Guided setup", desc: "Review application basics, provider setup and where optional configuration lives.") {
+                    Button("Show setup") { session.showOnboarding() }
+                }
+            }
+            navigationSettings
+            Rectangle().fill(Theme.border).frame(height: 1)
+            VStack(alignment: .leading, spacing: 16) {
                 SectionLabel("Appearance")
-                SettingRow(title: "Color scheme", desc: appearanceDescription, descVariants: ["Follows the system appearance, and switches with it.", "T3 Code's light tokens; the window and the mark follow.", "The app was designed dark."]) {
+                SettingRow(title: "Color scheme", desc: "Choose a theme or follow macOS.") {
                     T3Segmented(options: [("dark", "Dark"), ("light", "Light"), ("auto", "Auto")], selection: appearance) { appearance = $0 }
                         .accessibilityLabel("Color scheme")
                 }
-                SettingRow(title: "Page spacing", desc: "Adjust page margins and card padding. Buttons keep the same consistent size.") {
+                SettingRow(title: "Page spacing", desc: "Adjust margins and card padding.") {
                     T3Segmented(options: [("compact", "Compact"), ("standard", "Default"), ("spacious", "Spacious")], selection: density) { density = $0 }
                         .accessibilityLabel("Page spacing")
                 }
-                SettingRow(title: "Motion", desc: "System respects macOS Reduce Motion. Reduced keeps animated readings and artwork still.") {
+                SettingRow(title: "Motion", desc: "System follows macOS Reduce Motion.") {
                     T3Segmented(options: [("system", "System"), ("reduced", "Reduced")], selection: motion) { motion = $0 }
                         .accessibilityLabel("Motion")
                 }
-                SettingRow(title: "Sidebar", desc: "Keep navigation visible. Command-B toggles it from any page.") {
-                    T3Switch(isOn: $sidebarOpen).accessibilityLabel("Show sidebar")
-                }
+                DisclosureGroup("Customize colors") {
+                    NativeThemeSettingsView().padding(.top, 12)
+                }.font(Theme.ui(12))
             }
-            sidebarSettings
             Rectangle().fill(Theme.border).frame(height: 1)
-            notificationSettings
+            NativeSidebarSettingsView()
+            Rectangle().fill(Theme.border).frame(height: 1)
+            NativeTelegramSettingsView(runtime: runtime)
             Rectangle().fill(Theme.border).frame(height: 1)
             VStack(alignment: .leading, spacing: 20) {
                 SectionLabel("Application")
-                SettingRow(title: "Status", desc: statusSummary) {
-                    VStack(alignment: .trailing, spacing: 8) {
-                        Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(diagnostics + "\nStatus: " + startupStatus, forType: .string) } label: {
-                            HStack(spacing: 6) { NativeIcon("copy", size: 12); Text("Copy diagnostics") }
-                        }
-                        Button {
-                            let panel = NSSavePanel(); panel.nameFieldStringValue = "UniApi-diagnostics.txt"
-                            panel.nativeBegin { response in
-                                guard response == .OK, let url = panel.url else { return }
-                                do { try (diagnostics + "\nStatus: " + startupStatus).write(to: url, atomically: true, encoding: .utf8) } catch { self.error = error.localizedDescription }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Status").font(Theme.ui(14, weight: .medium))
+                    Text(statusSummary).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                DisclosureGroup("Diagnostics and storage", isExpanded: $showDiagnostics) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(diagnostics + "\nStatus: " + startupStatus).font(Theme.mono(10.5)).foregroundStyle(Theme.muted)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                        HStack {
+                            Button("Copy diagnostics") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(diagnostics + "\nStatus: " + startupStatus, forType: .string) }
+                            Button("Save diagnostics") {
+                                let panel = NSSavePanel(); panel.nameFieldStringValue = "UniApi-diagnostics.txt"
+                                panel.nativeBegin { response in
+                                    guard response == .OK, let url = panel.url else { return }
+                                    do { try (diagnostics + "\nStatus: " + startupStatus).write(to: url, atomically: true, encoding: .utf8) } catch { self.error = error.localizedDescription }
+                                }
                             }
-                        } label: { HStack(spacing: 6) { NativeIcon("download", size: 12); Text("Save diagnostics") } }
-                    }
-                }.textSelection(.enabled)
-                DisclosureGroup("Diagnostic details", isExpanded: $showDiagnostics) {
-                    Text(diagnostics + "\nStatus: " + startupStatus).font(Theme.mono(10.5)).foregroundStyle(Theme.muted)
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
-                }.font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                        }
+                        storageRow("Data folder", "Results, transcripts, uploads, the database and job state.", runtime.paths.data)
+                        storageRow("Logs", "Local diagnostics and transport failure details.", runtime.paths.logs)
+                        storageRow("Config", "Providers and free API keys, copyable in the provider pages.", runtime.paths.providers)
+                    }.padding(.top, 12)
+                }.font(Theme.ui(12))
                 if let jobsError { NativeError(message: "Active jobs unavailable: " + jobsError) }
                 if let startupError = session.error { NativeError(message: "Startup failed: " + startupError) }
-                storageRow("Data folder", "Results, transcripts, uploads, the database and job state.", runtime.paths.data)
-                storageRow("Logs", "Local diagnostics and transport failure details.", runtime.paths.logs)
-                storageRow("Config", "Providers and free API keys, copyable in the provider pages.", runtime.paths.providers)
             }
             if let error { NativeError(message: error) }
-        }.onAppear { loadNotifications() }.nativePageTask {
+        }.nativePageTask {
             guard let listener = reads.begin("events") else { return }
             let events = await runtime.events.stream()
             guard reads.accepts(listener) else { return }
@@ -97,87 +106,43 @@ struct NativeSettingsPage: View {
             }
         }.nativePageActivity(reads: reads)
     }
-    private var sidebarSettings: some View {
+    private var navigationSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SectionLabel("Sidebar layout")
-            SettingRow(title: "Width", desc: "Choose a width between 180 and 320 points.") {
-                HStack {
-                    Slider(value: $sidebarWidth, in: 180...320).tint(Theme.accent).frame(width: 160).accessibilityLabel("Sidebar width")
-                    Text("\(Int(NativeSidebarLayout.width(sidebarWidth))) pt").font(Theme.mono(11))
-                }
+            SectionLabel("Navigation")
+            SettingRow(
+                title: "Launch page",
+                desc: startPage == "battery" && batterySupported == false ? "Battery is unavailable; fallback is Home. Choosing a page turns off Restore last visited page." : "Choosing a page turns off Restore last visited page.",
+                descVariants: ["Choosing a page turns off Restore last visited page.", "Battery is unavailable; fallback is Home. Choosing a page turns off Restore last visited page."]
+            ) {
+                NativeMenuSelect(
+                    title: "Launch page",
+                    selection: Binding(
+                        get: {
+                            NativeNavigationPreferences.initialPage(
+                                startPage: startPage,
+                                lastVisited: nil,
+                                restoreLastPage: false,
+                                installedPages: launchPages.map(\.rawValue)
+                            ).rawValue
+                        },
+                        set: {
+                            startPage = $0
+                            restoreLastPage = false
+                        }
+                    ),
+                    options: launchPages.map { ($0.rawValue, $0.title) },
+                    width: 170
+                )
             }
-            Text("Reorder sections and their pages. Home, Jobs and Settings stay anchored.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            ForEach(NativeSidebarLayout.orderedSections(sidebarOrder), id: \.self) { section in
-                let sections = NativeSidebarLayout.orderedSections(sidebarOrder)
-                let pages = NativeSidebarLayout.pages(sidebarOrder).filter { $0.section == section }
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(section).font(Theme.ui(13, weight: .medium)); Spacer()
-                        Button("Up") { moveSection(section, by: -1) }.disabled(sections.first == section).accessibilityLabel("Move " + section + " section up")
-                        Button("Down") { moveSection(section, by: 1) }.disabled(sections.last == section).accessibilityLabel("Move " + section + " section down")
-                    }
-                    ForEach(pages) { page in
-                        HStack {
-                            Text(page.title).font(Theme.ui(12)); Spacer()
-                            Button("Up") { movePage(page, by: -1) }.disabled(pages.first == page).accessibilityLabel("Move " + page.title + " up")
-                            Button("Down") { movePage(page, by: 1) }.disabled(pages.last == page).accessibilityLabel("Move " + page.title + " down")
-                        }.padding(.leading, 12)
-                    }
-                }
+            SettingRow(title: "Restore last visited page", desc: "On by default. The launch page is used when this is off or no valid previous page is stored.") {
+                T3Switch(isOn: $restoreLastPage).accessibilityLabel("Restore last visited page")
             }
-            Button("Restore sidebar layout defaults") { sidebarWidth = NativeSidebarLayout.defaultWidth; sidebarOrder = "" }
         }
     }
-    private func movePage(_ page: NativeDestination, by offset: Int) {
-        var pages = NativeSidebarLayout.pages(sidebarOrder)
-        let siblings = pages.indices.filter { pages[$0].section == page.section }
-        guard let index = pages.firstIndex(of: page), let rank = siblings.firstIndex(of: index), siblings.indices.contains(rank + offset) else { return }
-        pages.swapAt(index, siblings[rank + offset]); sidebarOrder = pages.map(\.rawValue).joined(separator: ",")
-    }
-    private func moveSection(_ section: String, by offset: Int) {
-        var sections = NativeSidebarLayout.orderedSections(sidebarOrder)
-        guard let index = sections.firstIndex(of: section), sections.indices.contains(index + offset) else { return }
-        sections.swapAt(index, index + offset)
-        let pages = NativeSidebarLayout.pages(sidebarOrder)
-        sidebarOrder = sections.flatMap { section in pages.filter { $0.section == section } }.map(\.rawValue).joined(separator: ",")
-    }
-    private var notificationSettings: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SectionLabel("Telegram notifications")
-            Text("Optional external delivery uses only this app's saved configuration. Saving does not send a test message.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            SettingRow(title: "Enable external delivery", desc: "Off by default. Enabling requires a bot token and chat ID, then Save.") {
-                T3Switch(isOn: $notificationConfig.enabled).accessibilityLabel("Enable Telegram delivery")
-            }
-            SecureField("Bot token", text: $notificationConfig.token).textFieldStyle(.roundedBorder).accessibilityLabel("Telegram bot token")
-            TextField("Chat ID", text: $notificationConfig.chat).textFieldStyle(.roundedBorder).accessibilityLabel("Telegram chat ID")
-            Text("Stored privately in Library/Application Support/UniApi/notifications.json under this app's home.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            HStack {
-                Button("Save notification settings") { saveNotifications() }
-                Button("Reload saved settings") { notificationLoaded = false; loadNotifications() }
-            }
-            Text(notificationStatus).font(Theme.ui(12)).foregroundStyle(Theme.muted).accessibilityLabel("Notification status: " + notificationStatus)
-        }.disabled(runtime.paths.readOnly)
-    }
-    private func loadNotifications() {
-        guard !notificationLoaded else { return }
-        notificationLoaded = true
-        do {
-            notificationConfig = try NativeNotifications.configuration(home: runtime.paths.home)
-            notificationStatus = notificationConfig.enabled ? "Saved configuration enables Telegram delivery. Delivery has not been tested." : "Saved configuration has external delivery off."
-        } catch {
-            notificationConfig = .init()
-            notificationStatus = "Notification configuration could not be loaded. Delivery requires valid saved configuration."
+    private var launchPages: [NativeDestination] {
+        NativeDestination.allCases.filter {
+            NativeInstalledPages.destinations.contains($0) && NativeShellPolicy.admits($0.rawValue, batterySupported: batterySupported)
         }
-    }
-    private func saveNotifications() {
-        do {
-            try runtime.paths.assertWritable()
-            try NativeNotifications.save(notificationConfig, home: runtime.paths.home)
-            notificationStatus = notificationConfig.enabled ? "Saved: Telegram delivery enabled. Delivery has not been tested." : "Saved: external delivery off."
-        } catch { notificationStatus = "Could not save notification settings. Check the fields and private storage access." }
-    }
-    private var appearanceDescription: String {
-        appearance == "auto" ? "Follows the system appearance, and switches with it." : appearance == "light" ? "T3 Code's light tokens; the window and the mark follow." : "The app was designed dark."
     }
     private var startupStatus: String {
         NativeShellPolicy.startup(readOnly: runtime.paths.readOnly, prepared: session.preferencesPrepared, sessionError: session.error, health: health, pid: Int(ProcessInfo.processInfo.processIdentifier), instance: NativeHealth.instance)

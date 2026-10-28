@@ -47,6 +47,8 @@ Install the optional 574 MB model separately using **Install model** in Transcri
 
 ## Release downloads
 
+Use the [latest preview release](https://github.com/Dodothereal/UniApi-public/releases/latest) and its exact versioned checksum and validation assets. The table below preserves the original 0.1.0 artifact record; its byte counts and checksum do not apply to newer packages.
+
 Download `UniApi-macos-0.1.0.zip` from the [v0.1.0 preview release](https://github.com/Dodothereal/UniApi-public/releases/tag/v0.1.0).
 
 | Artifact | 0.1.0 preview |

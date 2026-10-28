@@ -16,6 +16,12 @@ actor NativeCodexRouter {
             try Self.guardBrowserRequest(request)
             let token = try NativeCodexRoutingSecret.load(paths)
             let (endpoint, incoming) = try Self.endpoint(request, token: token)
+            // Codex may probe WebSockets even with an HTTP-only catalog. It
+            // recognizes 426 as permission to retry the same turn over HTTP;
+            // a generic 400 aborts turns and remote context compaction.
+            if endpoint == .responses, request.method == "GET" {
+                return try .error(426, "Responses WebSocket transport is unavailable; use HTTP POST")
+            }
             let selection = try choices(), document = JSONValue.object(try providers.document())
             if endpoint == .models {
                 guard Self.authorized(request) else { return try .error(401, "Native Codex requires incoming authorization") }
@@ -63,17 +69,32 @@ actor NativeCodexRouter {
                 if !route.provider.key.isEmpty { headers["authorization"] = "Bearer " + route.provider.key }
                 let providerRequest = ShimClientRequest(method: "POST", path: "/" + NativeProviderInfo.encoded(route.provider.id) + "/v1/responses", version: "HTTP/1.0", headers: headers, body: try body.encoded())
                 let response = try await forwardProvider(providerRequest)
+                if response.status == 401 {
+                    response.cancel(); await response.waitForCompletion(); try Task.checkCancellation()
+                    let id = route.provider.key.isEmpty ? route.provider.id : route.provider.id.replacingOccurrences(of: route.provider.key, with: "<redacted>")
+                    let message = "Provider \(id) rejected its saved credential. Replace it in UniApi's provider editor. UniApi does not retry this 401 or fall back to another provider."
+                    return try .json(401, ["type": "error", "error": ["type": "authentication_error", "message": .string(message)]])
+                }
                 if compact { return try await NativeCodexRouteResponses.compact(response, raw: raw, unary: endpoint == .compact, context: route.context) }
-                return try await NativeCodexRouteResponses.wrap(response, alias: model, ticket: ticket)
+                return timed(try await NativeCodexRouteResponses.wrap(response, alias: model, ticket: ticket), streaming: raw["stream"] != false, requestedModel: model, reasoning: response.codexProviderReasoning)
             }
             let clean = try NativeCodexRouteHistory.nativeInput(raw)
             guard Self.authorized(request) else { return try .error(401, "Native Codex requires incoming authorization") }
             var native = try Self.nativeRequest(request, incoming: incoming, endpoint: endpoint, body: clean.changed ? try clean.value.encoded() : request.body)
             if clean.changed { native.headers.removeValue(forKey: "content-encoding") }
-            return relay(try await dependencies.transport.open(native), ticket: ticket)
+            let response = relay(try await dependencies.transport.open(native), ticket: ticket)
+            let compaction = raw["input"].array.contains { $0["type"] == "compaction_trigger" }
+            return endpoint == .responses && !compaction ? timed(response, streaming: raw["stream"] != false, requestedModel: model) : response
         } catch is CancellationError { throw CancellationError() }
         catch is NativeFailure { return try .error(400, "Native Codex routing refused an invalid request or configuration; no fallback was submitted") }
         catch { return try .error(502, "Native Codex transport failed; no fallback was submitted") }
+    }
+    private func timed(_ response: ShimClientResponse, streaming: Bool, requestedModel: String, reasoning: NativeCodexReasoningCounter? = nil) -> ShimClientResponse {
+        var result = response
+        if streaming && response.status == 200 && (response.headers["content-type"] ?? "").lowercased().contains("text/event-stream") {
+            result.codexStreamTiming = NativeCodexStreamTimingContext(paths: paths, requestedModel: requestedModel, reasoning: reasoning)
+        }
+        return result
     }
     private static func authorized(_ request: ShimClientRequest) -> Bool { (request.headers["authorization"] ?? "").hasPrefix("Bearer ") && (request.headers["authorization"] ?? "").utf8.count > 7 }
     static func endpoint(_ request: ShimClientRequest, token: String) throws -> (Endpoint, URLComponents) {
@@ -86,7 +107,7 @@ actor NativeCodexRouter {
         var difference: UInt8 = 0
         for i in expected.indices { difference |= supplied[i] ^ expected[i] }
         guard difference == 0, let endpoint = Endpoint(rawValue: components.dropFirst(2).joined(separator: "/")),
-              request.method == (endpoint == .models ? "GET" : "POST") else { throw NativeFailure("Unsupported native Codex endpoint") }
+              request.method == (endpoint == .models ? "GET" : "POST") || (endpoint == .responses && request.method == "GET") else { throw NativeFailure("Unsupported native Codex endpoint") }
         return (endpoint, parts)
     }
     private static func guardBrowserRequest(_ request: ShimClientRequest) throws {

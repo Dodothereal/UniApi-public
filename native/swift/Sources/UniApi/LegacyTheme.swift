@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniApiCore
+import Observation
 
 // Native counterpart of client/src/theme.css. Dynamic NSColors resolve against
 // the hosting window's appearance; no global theme mutation is needed. The shell
@@ -38,6 +39,22 @@ extension EnvironmentValues {
     }
 }
 
+/// Token reads participate in SwiftUI Observation in the view that reads them.
+/// Each adaptive NSColor captures that read's values, rather than reaching back
+/// into mutable state later when AppKit resolves its appearance.
+@Observable final class NativeThemeStore {
+    static let shared = NativeThemeStore()
+    private(set) var preferences = NativeThemePreferences(serialized: UserDefaults.standard.string(forKey: NativeThemePreferences.storageKey))
+
+    func update(_ change: (inout NativeThemePreferences) -> Void) {
+        var next = preferences
+        change(&next)
+        guard next != preferences else { return }
+        preferences = next
+        UserDefaults.standard.set(next.serialized(), forKey: NativeThemePreferences.storageKey)
+    }
+}
+
 enum Theme {
     static func adaptive(light: UInt32, dark: UInt32,
                          lightAlpha: Double = 1, darkAlpha: Double = 1) -> Color {
@@ -50,17 +67,26 @@ enum Theme {
                            alpha: isDark ? darkAlpha : lightAlpha)
         })
     }
-    static let bg = adaptive(light: 0xfcfcfc, dark: 0x0a0a0a)
-    static let surface = adaptive(light: 0xffffff, dark: 0x111111)
-    static let popover = adaptive(light: 0xffffff, dark: 0x191919)
-    static let ink = adaptive(light: 0x18181b, dark: 0xf5f5f5)
-    static let dim = adaptive(light: 0x47464e, dark: 0xa8a8a8)
-    static let muted = adaptive(light: 0x71717b, dark: 0x818181)
+    private static func token(_ token: NativeThemePreferences.Token, light: UInt32, dark: UInt32,
+                              lightAlpha: Double = 1, darkAlpha: Double = 1) -> Color {
+        let preferences = NativeThemeStore.shared.preferences
+        let lightOverride = preferences.colorOverride(token, .light).flatMap { UInt32($0, radix: 16) }
+        let darkOverride = preferences.colorOverride(token, .dark).flatMap { UInt32($0, radix: 16) }
+        return adaptive(light: lightOverride ?? light, dark: darkOverride ?? dark,
+                        lightAlpha: lightOverride == nil ? lightAlpha : 1,
+                        darkAlpha: darkOverride == nil ? darkAlpha : 1)
+    }
+    static var bg: Color { token(.background, light: 0xfcfcfc, dark: 0x0a0a0a) }
+    static var surface: Color { token(.surface, light: 0xffffff, dark: 0x111111) }
+    static var popover: Color { token(.popover, light: 0xffffff, dark: 0x191919) }
+    static var ink: Color { token(.text, light: 0x18181b, dark: 0xf5f5f5) }
+    static var dim: Color { token(.secondaryText, light: 0x47464e, dark: 0xa8a8a8) }
+    static var muted: Color { token(.mutedText, light: 0x71717b, dark: 0x818181) }
     static let subtle = adaptive(light: 0x000000, dark: 0xffffff, lightAlpha: 0.04, darkAlpha: 0.04)
     static let subtle2 = adaptive(light: 0x000000, dark: 0xffffff, lightAlpha: 0.07, darkAlpha: 0.07)
-    static let border = adaptive(light: 0xe4e4e7, dark: 0xffffff, darkAlpha: 0.06)
-    static let input = adaptive(light: 0xd4d4d8, dark: 0xffffff, darkAlpha: 0.08)
-    static let field = adaptive(light: 0xffffff, dark: 0xffffff, darkAlpha: 0.035)
+    static var border: Color { token(.border, light: 0xe4e4e7, dark: 0xffffff, darkAlpha: 0.06) }
+    static var input: Color { token(.input, light: 0xd4d4d8, dark: 0xffffff, darkAlpha: 0.08) }
+    static var field: Color { token(.field, light: 0xffffff, dark: 0xffffff, darkAlpha: 0.035) }
     static let well = adaptive(light: 0x000000, dark: 0x000000, lightAlpha: 0.04, darkAlpha: 0.3)
     static let track = adaptive(light: 0x000000, dark: 0xffffff, lightAlpha: 0.07, darkAlpha: 0.05)
     static let segTrack = adaptive(light: 0x000000, dark: 0x000000, lightAlpha: 0.045, darkAlpha: 0.5)
@@ -69,22 +95,22 @@ enum Theme {
     static let crosshair = adaptive(light: 0x000000, dark: 0xf5f5f5, lightAlpha: 0.28, darkAlpha: 0.18)
     static let shadow = adaptive(light: 0x000000, dark: 0x000000, lightAlpha: 0.12, darkAlpha: 0.55)
     static let overlay = adaptive(light: 0x000000, dark: 0x000000, lightAlpha: 0.28, darkAlpha: 0.55)
-    static let accent = adaptive(light: 0x1447e6, dark: 0x346bf1)
-    static let link = adaptive(light: 0x1447e6, dark: 0x8fb2ff)
-    static let onAccent = Color.white
+    static var accent: Color { token(.accent, light: 0x1447e6, dark: 0x346bf1) }
+    static var link: Color { token(.highlight, light: 0x1447e6, dark: 0x8fb2ff) }
+    static var onAccent: Color { token(.onAccent, light: 0xffffff, dark: 0xffffff) }
     static let controlStroke = Color.white.opacity(0.12)
     static let controlShadow = Color.black.opacity(0.3)
-    static let ok = Color(hex: 0x00bc7d)
-    static let okFg = adaptive(light: 0x047857, dark: 0x00d492)
-    static let warn = Color(hex: 0xfe9a00)
-    static let warnFg = adaptive(light: 0xbb4d00, dark: 0xffb900)
-    static let fail = Color(hex: 0xfb2c36)
-    static let failFg = adaptive(light: 0xc10007, dark: 0xff6467)
-    static let sidebarAccent = adaptive(light: 0xf1f1f4, dark: 0x191a1d)
-    static let sidebarBG = bg
-    static let sidebarInk = adaptive(light: 0x18181b, dark: 0xf1f3f7)
-    static let sidebarMuted = adaptive(light: 0x71717b, dark: 0xa3a3a3)
-    static let sidebarBorder = adaptive(light: 0xe4e4e7, dark: 0xffffff, darkAlpha: 0.08)
+    static var ok: Color { token(.success, light: 0x00bc7d, dark: 0x00bc7d) }
+    static var okFg: Color { token(.success, light: 0x047857, dark: 0x00d492) }
+    static var warn: Color { token(.warning, light: 0xfe9a00, dark: 0xfe9a00) }
+    static var warnFg: Color { token(.warning, light: 0xbb4d00, dark: 0xffb900) }
+    static var fail: Color { token(.failure, light: 0xfb2c36, dark: 0xfb2c36) }
+    static var failFg: Color { token(.failure, light: 0xc10007, dark: 0xff6467) }
+    static var sidebarAccent: Color { token(.sidebarSelection, light: 0xf1f1f4, dark: 0x191a1d) }
+    static var sidebarBG: Color { token(.sidebar, light: 0xfcfcfc, dark: 0x0a0a0a) }
+    static var sidebarInk: Color { token(.text, light: 0x18181b, dark: 0xf1f3f7) }
+    static var sidebarMuted: Color { token(.mutedText, light: 0x71717b, dark: 0xa3a3a3) }
+    static var sidebarBorder: Color { token(.border, light: 0xe4e4e7, dark: 0xffffff, darkAlpha: 0.08) }
     static func surfaceFor(_ color: Color) -> Color { color.opacity(0.16) }
     static let radiusSm: CGFloat = 6
     static let radiusMd: CGFloat = 8

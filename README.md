@@ -1,56 +1,180 @@
 # UniApi
 
-A native macOS workspace for AI providers, coding tools, usage statistics and Mac utilities. This repository is an MIT-licensed public preview built with SwiftUI and Swift. Providers and vendor accounts are supplied by you.
+UniApi is a native macOS workspace for AI providers, coding tools, usage statistics and Mac utilities. Bring your own providers and accounts, choose the
+integrations you need, and keep your work in one SwiftUI app.
 
-## Preview status
+**[Download the latest preview](https://github.com/Dodothereal/UniApi-public/releases/latest)** ·
+[Installation](docs/INSTALL.md) · [Configuration](docs/CONFIGURATION.md) ·
+[Validation](docs/VALIDATION.md)
 
-- Minimum deployment target: macOS 14. Validation has run on macOS 27.2 with Apple Silicon (arm64); macOS 14 runtime behavior has not been verified.
-- Intel and universal builds remain pending actual build and runtime verification. The deployment target does not mean every Mac or macOS version has been tested.
-- Source builds use the pinned macOS 26.5 SDK, the native SwiftPM build system, two compiler jobs and two backend threads.
-- Preview 0.1.0 is arm64 only, ad-hoc signed and not notarized. All five executables target macOS 14 with SDK 26.5; there is no Intel or universal binary.
-- Native Core/Presentation validation passed 1,176 tests with no failures, including the 50-test transcription/settings subset. Python packaging, installer and pricing fixtures passed 57 tests with no failures. These results do not establish every page, integration or device as verified.
-- The final packaged app passed real local Whisper CLI checks for model installation, file transcription, cross-process lease protection, cancellation, removal and child-process cleanup. Six final page captures passed quiet checks and visual review. See [validation scope](docs/VALIDATION.md).
+## Before you install
 
-## Pages
+The preview is for Apple Silicon (arm64). Setup and the navigation controls
+described below require **0.1.4 or newer**; the release page identifies the
+currently downloadable version. The app
+targets macOS 14 and was validated on macOS 27.2 with Apple Silicon; physical
+macOS 14 runtime behavior, Intel and universal builds remain unverified. Source
+builds require the pinned macOS 26.5 SDK and matching toolchain.
 
-The native app has 14 pages. Availability of individual actions depends on your configured providers, installed tools and hardware.
+The preview is ad-hoc signed and **not notarized**. Ad-hoc signing does not verify the publisher. Fresh-user installation acceptance remains open; see
+[installation and Gatekeeper guidance](docs/INSTALL.md). No account, provider
+subscription or model weights are included.
 
-| Page | Purpose |
-| --- | --- |
-| Home | Overview and shortcuts |
-| Speed | Provider benchmarks |
-| Results | Benchmark history and comparisons |
-| Prompts | Benchmark prompt management |
-| Arena | Blind model comparisons and rankings |
-| Switcher | Provider and coding-tool configuration |
-| Code | Coding sessions and their workspaces |
-| Statistics | Usage history from supported local coding-tool stores |
-| Activity | Mac process activity |
-| Fan Control | Fan monitoring and supported hardware controls |
-| Battery | Battery status and supported charge controls |
-| Transcribe | Optional local Whisper transcription with model install/remove controls |
-| Jobs | Background work and progress |
-| Settings | App configuration |
+## Install the preview
 
-Hardware controls require compatible hardware and may require an explicitly installed helper. A visible page is not a guarantee of device support.
+1. Download the latest release and its matching checksum. Compare the archive's
+   SHA-256 with the checksum for that exact asset before extracting it. A
+   checksum published alongside the archive does not independently establish
+   its publisher.
+2. Read the extracted package's `INSTALL.md`. For an existing installation,
+   back up your configuration and data, finish queued and running jobs and
+   coding turns, and use normal Quit to dismiss the presentation.
+3. From the extracted package directory, inspect the read-only installation plan:
 
-## Get started
+   ```sh
+   ./install.sh --plan
+   ```
 
-Download: [0.1.0 preview release](https://github.com/Dodothereal/UniApi-public/releases/tag/v0.1.0). Follow [Installation](docs/INSTALL.md) for source builds, archive verification and explicit installation. Read [Configuration](docs/CONFIGURATION.md) before connecting providers or coding tools.
+4. If the plan admits installation and you choose to proceed, run:
 
-UniApi runs native background services. Normal Quit hides the presentation and preserves background work; it does not stop the service owner. Updates and full shutdown must use the explicit owned-stop and installer admission mechanisms. Do not force a blocked update while jobs or coding turns are active.
+   ```sh
+   ./install.sh --install
+   ```
+
+Do not bypass a refusal or manually replace an existing app. The installer
+checks ownership and active work and preserves existing data and providers;
+read the [update and recovery details](docs/INSTALL.md#background-work-and-updates)
+before changing an existing installation. Normal Quit keeps background work
+running; closing a window does not prove services have stopped.
+
+For source builds and separate runtime data, see [local development](docs/LOCAL-DEVELOPMENT.md).
+
+## Your first five minutes
+
+New, unconfigured installations offer a skippable four-step welcome.
+It offers theme, spacing and motion choices and starting-point
+cards to help you find your way around. Opening welcome itself never signs you
+in, downloads a model, changes hardware controls or changes routing. Existing
+installations are not forced through setup; use **Settings > Show setup** to
+replay it. If setup is interrupted, its appearance choices are retained and
+the guide opens again at the next launch.
+
+Once in the app, start with whichever part is useful:
+
+1. **Home** gives you an overview and shortcuts. Explore without connecting a
+   provider or installing a transcription model.
+2. **Switcher** is where you can configure your own provider endpoint, model
+   and credentials, or manage an optional coding-tool route.
+3. **Statistics** reads supported local coding-tool usage stores; configure
+   only the tools you use. **Speed** and **Arena** offer benchmarks and blind
+   comparisons when you have configured suitable providers.
+4. **Transcribe** can install an optional local Whisper model when you choose
+   to use it. **Settings** lets you adjust appearance and other preferences.
+
+Provider requests, link retrieval, model downloads and optional summaries are
+separate actions. Requests sent to a provider can incur charges under its terms.
+See [Configuration](docs/CONFIGURATION.md) for the details.
+
+## Providers and coding tools
+
+UniApi starts with an empty provider template. Supply your own endpoint, model identifiers and credentials; vendor accounts, quotas and subscriptions are not
+included. Formats, discovery and tool support vary, and discovering a model
+does not prove that coding tools work with it. Test the action you intend to use.
+
+Provider keys are stored locally in `providers.json` as plaintext by design.
+Protect that file and its backups, and never attach them to a report. Optional
+browser credentials belong in their dedicated credential store, not provider
+key fields. See [provider configuration](docs/CONFIGURATION.md#providers).
+
+### Codex and reasoning
+
+API and subscription models can use UniApi's native Codex routing independently
+of the optional Web GPT bridge. Connecting or restoring a route is an explicit,
+guarded handoff; let active work finish and reload Codex's model metadata when
+needed. Other coding integrations have their own setup and capabilities.
+
+Reasoning choices depend on the provider and model. The documented CommandCode
+DeepSeek route offers Low, High and Max, with High as its default. A stale
+catalog can show different choices; discovery alone does not verify inference.
+See [native routing](docs/CONFIGURATION.md#coding-tools-and-codex) and
+[reasoning and catalog refresh](docs/REASONING.md).
 
 ## Local transcription
 
-In Transcribe, choose **Install model** to download optional Whisper `large-v3-turbo` Q5 weights: 574,041,195 bytes (about 574 MB). **Remove model** deletes the installed weights when they are not in use. No account, Wispr login or cloud transcription credentials are required.
+Transcribe uses the bundled Whisper CLI locally. Select **Install model** to
+explicitly download the optional `large-v3-turbo` Q5 weights, approximately
+574 MB. Opening the page does not download them. No vendor account, Wispr login
+or cloud transcription credentials are required. **Remove model** removes the
+weights when they are not in use.
 
-WAV, MP3 and M4A use the native audio decoder. Other formats may need optional ffmpeg; links require optional yt-dlp. Each transcription job runs the bundled Whisper CLI in a child process, loading one model for its audio chunks and releasing model memory when the child exits. There is no always-on Whisper process.
+WAV, MP3 and M4A use the native decoder; other formats may need ffmpeg, and
+links require yt-dlp. Each job runs an owned Whisper child process and releases
+model memory when it exits. Link retrieval uses the network, and an optional
+provider summary sends text to the provider you select. See
+[model setup and provenance](docs/CONFIGURATION.md#local-transcribe).
 
-The app bundles the pinned upstream v1.9.4 CLI; the optional model weights are not included in the package. See [model provenance and setup](docs/CONFIGURATION.md#local-transcribe) and [explicit CLI commands](docs/CONFIGURATION.md#command-line-without-a-window) for model management and file transcription without a window. Optional provider-based summaries send text to the selected provider.
+## Usage and costs
+
+Statistics collects usage from supported local coding-tool stores. Provider/API costs are estimates based on the available pricing catalog: unpriced usage is
+**unknown**, not free or zero. Provider invoices and subscription charges are
+separate, and local history may be incomplete. Treat project names, transcripts
+and usage records as private when sharing diagnostics.
+
+The cost summary separates missing prices from empty usage. **View prices**
+opens the model breakdown; partially priced usage is labeled as a partial
+estimate, with unknown costs excluded rather than counted as zero.
+
+Streaming speed is separate from response averages. New eligible Codex Responses
+streams routed through UniApi can record a host send-completion clock, excluding
+tool waits between requests and explicitly counted hidden reasoning tokens.
+Historical records without that clock stay unmeasured; the app explains the gap
+and offers response averages separately. No missing clock is replaced with zero.
+
+## Settings and navigation
+
+Settings includes Light/Dark palettes with Original, Ocean, Forest and Plum
+presets, plus color pickers and hex fields for text, highlights, surfaces and
+other roles. Common colors appear first; advanced controls and contrast checks
+are available without leaving the page. Spacing and motion are also adjustable.
+
+Choose the launch page, restore the last visited page, and customize sidebar
+visibility, order, width and badges. The sidebar editor supports drag targets
+and a keyboard-accessible Move menu. Telegram setup walks through creating a
+bot, explicitly finding destination chats, and saving optional delivery.
+Home, Jobs and Settings stay available in the sidebar. See
+[setup and navigation settings](docs/SETTINGS.md) for the controls and defaults.
+
+## Explore the app
+
+| Page | What it does |
+| --- | --- |
+| Home | Overview and shortcuts |
+| Speed, Results, Prompts | Benchmark providers, compare history and manage prompts |
+| Arena | Blind model comparisons and rankings |
+| Switcher, Code | Configure providers and coding tools; work in coding sessions |
+| Statistics | Review supported local coding-tool usage history |
+| Transcribe | Run optional local Whisper transcription |
+| Activity, Fan Control, Battery | Inspect activity and supported Mac hardware controls |
+| Jobs, Settings | Follow background work and configure the app |
+
+Actions depend on your configured providers, installed tools and hardware.
+Hardware controls may require compatible devices and an explicitly installed helper; a visible page does not guarantee device support.
 
 ## Screenshots
 
-Actual complete native page views in an offscreen viewport, empty fixture data; no full-shell or compositor claim. Each page retains its production scrolling container at 1050×800 points. The capture-only session bypasses normal background-service startup; these illustrations do not establish fresh-install or functional acceptance.
+These are native views captured offscreen with empty fixture data. Setup uses
+820×660 and 760×580 viewports; the page views use 1050×800 points.
+The capture-only session bypasses normal background-service
+startup. They illustrate views, not full-shell interaction, fresh-install
+acceptance or compositor behavior. The [sanitized manifest](assets/screenshots/manifest.json)
+records capture scope and image checksums.
+
+**Welcome — Dark**
+
+![Native welcome guide, Dark appearance](assets/screenshots/onboarding-dark.png)
+
+[Welcome — Light](assets/screenshots/onboarding-light.png) ·
+[Appearance choices](assets/screenshots/onboarding-appearance-dark.png)
 
 **Statistics — Dark**
 
@@ -70,10 +194,25 @@ Actual complete native page views in an offscreen viewport, empty fixture data; 
 
 [Settings — Light](assets/screenshots/settings-light.png)
 
-All six images were visually reviewed. The [sanitized manifest](assets/screenshots/manifest.json) records image checksums and capture scope.
+[Color customization](assets/screenshots/settings-theme-common-dark-1050x800.png) ·
+[Sidebar editor](assets/screenshots/settings-sidebar-dark-1050x800.png) ·
+[Telegram setup](assets/screenshots/settings-telegram-dark-1050x800.png)
 
-## Contributing and security
+## Help, validation and contributing
 
-See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md) and the [Changelog](CHANGELOG.md). Keep reports and contributions free of credentials, personal transcripts and machine-specific data.
+Start with [Installation](docs/INSTALL.md), [Configuration](docs/CONFIGURATION.md)
+and [Local development](docs/LOCAL-DEVELOPMENT.md). When reporting a problem,
+include the preview version, macOS version and architecture, and a sanitized
+reproduction. Keep credentials, private histories and personal data out of reports.
 
-UniApi is licensed under [MIT](LICENSE). Bundled third-party components retain their own licenses; see the license references in [Contributing](CONTRIBUTING.md#licenses). Model weights and optional external tools have separate terms.
+The onboarding and settings update passed **1,251 native tests with zero
+failures** and 57 Python fixture tests. Those checks apply to the recorded
+revision and scopes; they do not establish every device or integration.
+See [validation and its limits](docs/VALIDATION.md).
+
+Contributions are welcome: read [Contributing](CONTRIBUTING.md) and the
+[agent guide](AGENTS.md), keep changes focused, and request independent review.
+For vulnerability reports, follow the private reporting guidance in
+[Security](SECURITY.md). See the [Changelog](CHANGELOG.md) for release history.
+
+UniApi is licensed under [MIT](LICENSE). Bundled third-party components retain their own licenses; optional model weights and external tools have separate terms.
