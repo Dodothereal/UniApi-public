@@ -145,7 +145,7 @@ final class CodexNativeRouterTests: XCTestCase {
         XCTAssertEqual(free["context_window"], 1048576); XCTAssertEqual(free["max_context_window"], 1048576)
         XCTAssertEqual(free["auto_compact_token_limit"], 943718); XCTAssertEqual(free["effective_context_window_percent"], 90)
         XCTAssertEqual(free["multi_agent_version"], "v1"); XCTAssertEqual(free["model_messages"], .null)
-        XCTAssertEqual(free["supported_reasoning_levels"], [["effort": "low"], ["effort": "high"]])
+        XCTAssertEqual(free["supported_reasoning_levels"], [["effort": "low", "description": "low"], ["effort": "high", "description": "high"]])
         XCTAssertEqual(value["models"].array.last?["context_window"], 128000)
         let published = String(decoding: try value.encoded(), as: UTF8.self)
         for secret in ["private-router-provider-key", "incoming-native-oauth", "incoming-account", "incoming-cookie"] { XCTAssertFalse(published.contains(secret)) }

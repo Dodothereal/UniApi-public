@@ -53,10 +53,10 @@ final class ProviderReasoningTests: XCTestCase {
         let native: JSONValue = ["models": [["slug": "native", "visibility": "list", "supported_in_api": true, "priority": 0, "multi_agent_version": "v1"]]]
         let rows = try NativeCodexRouteCatalog.augment(native, providers: ["providers": [provider()]], choices: ["providerIds": ["fixture"], "workerModels": []])["models"].array
         let deepseek = try XCTUnwrap(rows.first { $0["slug"] == .string(NativeCodexCatalogStore.id(provider: "fixture", model: model)) })
-        XCTAssertEqual(deepseek["supported_reasoning_levels"], [["effort": "high"], ["effort": "low"], ["effort": "max"]])
+        XCTAssertEqual(deepseek["supported_reasoning_levels"], [["effort": "high", "description": "high"], ["effort": "low", "description": "low"], ["effort": "max", "description": "max"]])
         XCTAssertEqual(deepseek["default_reasoning_level"], "high")
         let sibling = try XCTUnwrap(rows.first { $0["slug"] == "uniapi/fixture/sibling" })
-        XCTAssertEqual(sibling["supported_reasoning_levels"], [["effort": "none"]])
+        XCTAssertEqual(sibling["supported_reasoning_levels"], [["effort": "none", "description": "No reasoning override"]])
         XCTAssertFalse(String(decoding: try JSONValue.array(rows).encoded(), as: UTF8.self).contains("fixture-key"))
     }
     func testActualResponsesGatewayForwardsEachSupportedEffortToOpenAI() async throws {
