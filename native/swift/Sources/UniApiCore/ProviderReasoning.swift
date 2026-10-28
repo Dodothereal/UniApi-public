@@ -14,12 +14,21 @@ enum NativeProviderReasoning {
     }
 
     static func efforts(_ provider: NativeProviderInfo, model: String) -> [String] {
+        capabilities(provider, model: model).efforts
+    }
+
+    // Display order need not put the default first. Explicit declarations
+    // retain their order and first valid effort as the default.
+    static func capabilities(_ provider: NativeProviderInfo, model: String) -> (efforts: [String], defaultEffort: String?) {
         let codex = provider.raw["codex"]
         // A present empty or malformed model override must not inherit another
         // model's capabilities, including the documented fallback below.
-        if let own = codex["model_efforts"].object[model] { return levels(own) }
+        if let own = codex["model_efforts"].object[model] {
+            let declared = levels(own)
+            return (declared, declared.first)
+        }
         let declared = levels(codex["efforts"])
-        if !declared.isEmpty { return declared }
+        if !declared.isEmpty { return (declared, declared.first) }
         // CommandCode documents an OpenAI-compatible endpoint; DeepSeek's
         // documented discrete API efforts are low/high/max, not its numeric
         // open-weight control. Keep this fallback bound to the exact route.
@@ -29,9 +38,9 @@ enum NativeProviderReasoning {
         let documentedBases = ["https://api.commandcode.ai/provider/v1", "https://api.commandcode.ai/provider/v1/",
                                "https://api.commandcode.ai:443/provider/v1", "https://api.commandcode.ai:443/provider/v1/"]
         if provider.format == "openai", model == "deepseek/deepseek-v4.1-flash", documentedBases.contains(endpoint) {
-            return ["high", "low", "max"]
+            return (["low", "high", "max"], "high")
         }
-        return []
+        return ([], nil)
     }
 
     static func apply(request: JSONValue, responses: Bool, provider: NativeProviderInfo,

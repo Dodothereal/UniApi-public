@@ -16,6 +16,12 @@ actor NativeCodexRouter {
             try Self.guardBrowserRequest(request)
             let token = try NativeCodexRoutingSecret.load(paths)
             let (endpoint, incoming) = try Self.endpoint(request, token: token)
+            // Codex may probe WebSockets even with an HTTP-only catalog. It
+            // recognizes 426 as permission to retry the same turn over HTTP;
+            // a generic 400 aborts turns and remote context compaction.
+            if endpoint == .responses, request.method == "GET" {
+                return try .error(426, "Responses WebSocket transport is unavailable; use HTTP POST")
+            }
             let selection = try choices(), document = JSONValue.object(try providers.document())
             if endpoint == .models {
                 guard Self.authorized(request) else { return try .error(401, "Native Codex requires incoming authorization") }
@@ -86,7 +92,7 @@ actor NativeCodexRouter {
         var difference: UInt8 = 0
         for i in expected.indices { difference |= supplied[i] ^ expected[i] }
         guard difference == 0, let endpoint = Endpoint(rawValue: components.dropFirst(2).joined(separator: "/")),
-              request.method == (endpoint == .models ? "GET" : "POST") else { throw NativeFailure("Unsupported native Codex endpoint") }
+              request.method == (endpoint == .models ? "GET" : "POST") || (endpoint == .responses && request.method == "GET") else { throw NativeFailure("Unsupported native Codex endpoint") }
         return (endpoint, parts)
     }
     private static func guardBrowserRequest(_ request: ShimClientRequest) throws {

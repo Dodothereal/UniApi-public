@@ -104,6 +104,7 @@ final class CodexNativeRouterTests: XCTestCase {
     private func nativeCatalog() -> JSONValue {
         ["catalog_revision": "from-upstream", "models": [
             ["slug": "native-anchor", "display_name": "Native anchor", "priority": 0, "visibility": "list",
+             "prefer_websockets": true,
              "supported_in_api": true, "multi_agent_version": "v2", "supported_reasoning_levels": [["effort": "high"]],
              "model_messages": ["native_only": true], "native_extra": ["keep": 42]],
             ["slug": "chatgpt-web/high", "visibility": "list"], ["slug": "uniapi/stale/model", "visibility": "list"]]]
@@ -147,11 +148,46 @@ final class CodexNativeRouterTests: XCTestCase {
         XCTAssertEqual(free["multi_agent_version"], "v1"); XCTAssertEqual(free["model_messages"], .null)
         XCTAssertEqual(free["supported_reasoning_levels"], [["effort": "low", "description": "low"], ["effort": "high", "description": "high"]])
         XCTAssertEqual(value["models"].array.last?["context_window"], 128000)
+        XCTAssertTrue(value["models"].array.allSatisfy { $0["prefer_websockets"] == false })
         let published = String(decoding: try value.encoded(), as: UTF8.self)
         for secret in ["private-router-provider-key", "incoming-native-oauth", "incoming-account", "incoming-cookie"] { XCTAssertFalse(published.contains(secret)) }
         XCTAssertEqual(f.gateway.activeRequests, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: f.paths.home.appendingPathComponent(".codex").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: f.paths.home.appendingPathComponent(".codex-chatgpt-web").path))
+    }
+    func testWebSocketProbeReturnsFallbackStatusWithoutUpstreamAndHTTPStillWorks() async throws {
+        let reply = Data("{\"http_fallback\":true}".utf8)
+        let transport = CodexRouterTransport { _ in codexRouterUpstream(reply) }, f = try fixture(transport)
+        var headers = nativeHeaders
+        headers["connection"] = "Upgrade"; headers["upgrade"] = "websocket"
+        headers["sec-websocket-version"] = "13"; headers["sec-websocket-key"] = "dGhlIHNhbXBsZSBub25jZQ=="
+        let probe = try await f.gateway.handle(request(method: "GET", headers: headers))
+        XCTAssertEqual(probe.status, 426)
+        _ = try await probe.body()
+        let before = await transport.captured(); XCTAssertTrue(before.isEmpty)
+        let response = try await f.gateway.handle(request(body: input("native-anchor")))
+        XCTAssertEqual(response.status, 200)
+        let received = try await response.body(); XCTAssertEqual(received, reply)
+        let after = await transport.captured(); XCTAssertEqual(after.count, 1)
+        XCTAssertEqual(after.first?.method, "POST")
+        XCTAssertEqual(after.first?.url.absoluteString, "https://chatgpt.com/backend-api/codex/responses")
+        XCTAssertEqual(f.gateway.activeRequests, 0)
+    }
+
+    func testWebSocketFallbackDoesNotAdmitWrongCapabilityOriginOrOtherGetEndpoints() async throws {
+        let transport = CodexRouterTransport(), f = try fixture(transport)
+        for path in ["responses/compact", "alpha/search"] {
+            let response = try await f.gateway.handle(request("/_uniapi/codex/v1/" + path, method: "GET"))
+            XCTAssertEqual(response.status, 400); _ = try await response.body()
+        }
+        let wrong = "/_uniapi/codex/" + String(repeating: "b", count: 64) + "/v1/responses"
+        let unauthorized = try await f.gateway.handle(.init(method: "GET", path: wrong, headers: nativeHeaders))
+        XCTAssertEqual(unauthorized.status, 400); _ = try await unauthorized.body()
+        var cross = nativeHeaders; cross["origin"] = "https://foreign.invalid"
+        let rejected = try await f.gateway.handle(request(method: "GET", headers: cross))
+        XCTAssertEqual(rejected.status, 403); _ = try await rejected.body()
+        let calls = await transport.captured(); XCTAssertTrue(calls.isEmpty)
+        XCTAssertEqual(f.gateway.activeRequests, 0)
     }
     func testPrivatePathCapabilityAndExactBrowserPerimeterRefuseBeforeTransport() async throws {
         let transport = CodexRouterTransport(), f = try fixture(transport)

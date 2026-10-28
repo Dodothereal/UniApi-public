@@ -1,5 +1,45 @@
 # Preview validation
 
+## Native Responses transport correction (0.1.3)
+
+The 358-input source manifest has SHA-256
+`6fbbfd6d794a6f8594a03171fcef281e34f2055bdbc24dcf0d9dd42906388e52`.
+The full optimized native gate passed 1,196 tests with zero failures in
+45.835 seconds (45.919 seconds including suite completion). Regression coverage
+checks the exact GET Responses fallback status, refusal of invalid capabilities
+and foreign origins, HTTP-only native/provider catalog rows, ordered DeepSeek
+presets and the independent High default.
+
+The earlier 0.1.2 metadata checks did not exercise a real Codex turn or remote
+compaction. A WebSocket probe could receive HTTP 400 and abort instead of
+falling back to HTTP. The corrected route returns 426 after its existing
+capability/origin checks, and publishes `prefer_websockets: false`. Direct HTTP
+inference alone is insufficient validation of this client behavior.
+
+The final packaged shim also passed three real Codex 0.165.0 client
+scenarios using private test configuration and data homes: a native subscription
+model, the documented CommandCode DeepSeek model, and a native model with a
+forced WebSocket catalog preference. Each completed an actual shell/file-tool
+turn, explicit context compaction and a subsequent turn recalling the test
+value. The client logs confirm HTTP fallback. Both the client and shim were
+denied access to the optional Web bridge port. All owned processes exited
+successfully; copied test credentials were removed and the global Codex
+configuration remained byte-identical during the proof.
+
+The outer port-denial sandbox used a full-access Codex tool policy to avoid
+unsupported nested sandbox application. This is isolated routing/configuration
+validation, not a filesystem-confinement, GUI or every-provider certificate.
+The first controls retained fixture failures involving a prompt that did not
+execute the requested action, nested sandbox application, and submitting a
+continuation before compaction's terminal notification. The final proof waits
+for that terminal notification and verifies the actual file contents.
+
+The packaged app contains 18 regular files and five macOS 14/SDK 26.5 arm64
+executables. All 22 ZIP entries match the staged package, with no CRC failures.
+ZIP SHA-256: `dcc3814f104e9952857b17c2c894623ae7b887f36dc7bf65b55dc30977899ffb`.
+Signing remains ad-hoc; notarization and Intel/macOS 14 physical runtime
+acceptance remain unverified.
+
 ## Catalog compatibility correction (0.1.2)
 
 The corrected 358-input source manifest has SHA-256

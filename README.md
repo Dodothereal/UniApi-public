@@ -42,7 +42,7 @@ For one canonical checkout powering your local app while retaining private runti
 
 UniApi runs native background services. Normal Quit hides the presentation and preserves background work; it does not stop the service owner. Updates and full shutdown must use the explicit owned-stop and installer admission mechanisms. Do not force a blocked update while jobs or coding turns are active.
 
-API and subscription models in Codex can use UniApi's native routing without the optional Web launcher. Activate it through the [guarded handoff](docs/CONFIGURATION.md#native-routing-from-the-command-line), then reload Codex/T3 Code metadata when idle. The documented CommandCode DeepSeek route advertises High/Low/Max; a stale bridge catalog can show only None. See [reasoning and refresh](docs/REASONING.md). Browser-only modes remain a separate optional integration.
+API and subscription models in Codex can use UniApi's native routing without the optional Web launcher. Activate it through the [guarded handoff](docs/CONFIGURATION.md#native-routing-from-the-command-line), then reload Codex/T3 Code metadata when idle. The documented CommandCode DeepSeek route advertises Low/High/Max with High as its default; a stale bridge catalog can show only None. See [reasoning and refresh](docs/REASONING.md). Browser-only modes remain a separate optional integration.
 
 ## Local transcription
 
