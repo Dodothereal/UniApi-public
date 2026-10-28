@@ -1,5 +1,59 @@
 # Preview validation
 
+## Onboarding, Settings and streaming (0.1.4 candidate)
+
+The gate's 372-input native source manifest has SHA-256
+`2db4552c9222e28a272127ca2fc1f0a1b6c0a2b59498c7fabbeb88dd65c672c9`.
+The optimized gate passed **1,251 tests, zero failures**, in 48.820 seconds
+(48.920 seconds including suite completion). All UI and three Swift products
+compiled in 152.53 seconds; the complete command exited successfully after
+204.496 seconds. The 57 isolated Python fixtures also passed.
+
+New coverage includes first-run admission and interrupted setup, launch-page
+precedence and anchored destinations, theme parsing/presets/undo/contrast,
+explicit Telegram chat discovery and redacted failures, provider HTTP 401,
+actual response send-loop completion and cancellation, and exact stream-clock
+identity/counter matching. Persistence fixtures cover new responses arriving
+while Statistics is closed, journal rotation before transcript import, database
+read/save failure retries, and consistent bounded warm/cold retention.
+Translated Responses retain an upstream's explicitly reported reasoning count;
+missing counters remain unknown. Synthetic transcript fixtures establish the
+join contract; they do not establish every actual client/provider combination.
+
+Four UI-only files were polished after that gate: the read-only Settings
+status row, theme variant label, Statistics cost tile and price disclosure.
+The final 372-input source manifest is
+`eea33c5f295ff370565af9d063f2b0ddf8e9762d69c3ab167fdb03e36138a688`.
+Core and tests are unchanged. The final production package compiles these UI
+sources; their layout was recaptured separately.
+
+Twenty-two final native bitmaps cover complete empty Statistics, Transcribe
+and Settings pages plus expanded sidebar, Telegram and common/advanced theme
+sections in Light/Dark at wide and narrow widths. The Settings detail copies
+only initialize disclosure state and add transparent scroll anchors. Eighteen
+additional captures cover the complete empty Statistics page and synthetic
+empty, unknown, partial and fully priced cost-summary components in both
+appearances at 420/720-point widths. Components do not prove full-page layout.
+Each capture records an invisible, unordered panel outside all displays without
+app activation or global input. Selected images and scope labels are published
+in the screenshot manifest. No operator data or hardware is used.
+
+A separate isolated Settings app compiled, but the native UI tool could not
+discover its offscreen application. No interaction success is inferred; the
+owned fixture processes were stopped. Earlier capture-tool build errors were
+also preserved and excluded. Native bitmaps do not establish button/drag input,
+animation frame rates, compositor behavior or fresh-user installation.
+
+The final arm64 production package contains 18 app files and five executables,
+all targeting macOS 14/SDK 26.5. All 22 ZIP entries match staging byte for byte,
+with no CRC failures. The app occupies 29,766,697 logical bytes; the ZIP is
+12,536,146 bytes. ZIP SHA-256:
+`70634bc61bdb3c3f0ebe6dc474a6ed3ccdf60d291f213f14b126d594386dbc84`.
+Strict ad-hoc signature verification passed. Signing is not notarized and does
+not establish a verified publisher. Existing-user installation remains separate
+from source, fixture and artifact validation; guarded updates can refuse active
+calls or an active presentation.
+
 ## Native Responses transport correction (0.1.3)
 
 The 358-input source manifest has SHA-256

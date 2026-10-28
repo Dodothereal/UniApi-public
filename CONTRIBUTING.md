@@ -25,7 +25,7 @@ bash native/swift/build.sh
 python3 tools/scan_secrets.py
 ```
 
-Run the checks appropriate to your change and report their actual results. The preview has passed 1,176 native Core/Presentation tests (including the 50-test transcription/settings subset) and 57 Python fixture tests on macOS 27.2/arm64; contributors must validate their own changes rather than inherit those results. Never install, restart services or change hardware as a side effect of testing. Coordinate any necessary runtime validation separately with the installation's owner.
+Run the checks appropriate to your change and report their actual results. The 0.1.4 onboarding/settings candidate passed 1,251 native tests and 57 Python fixture tests on macOS 27.2/arm64; contributors must validate their own changes rather than inherit those results. Never install, restart services or change hardware as a side effect of testing. Coordinate any necessary runtime validation separately with the installation's owner.
 
 For UI changes, inspect actual native rendering and relevant accessibility behavior. README illustrations use complete production pages in offscreen viewports with empty fixtures and a documented capture-only session bypass. Preserve that label; page bitmaps do not verify full-shell interaction or fresh-user installation. For platform changes, report the macOS version and architecture used. A successful arm64 build does not verify Intel, universal binaries, fresh-user installation or notarization.
 

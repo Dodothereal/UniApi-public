@@ -1,6 +1,6 @@
 {
-  "kind": "offscreen-native-page-empty-fixture",
-  "label": "Actual complete native page views in an offscreen viewport, empty fixture data; no full-shell or compositor claim.",
+  "kind": "offscreen-native-views-empty-fixture",
+  "label": "Actual native views in offscreen viewports, empty fixture data; no full-shell or compositor claim.",
   "requiresVisualReview": false,
   "parentVisualReviewed": true,
   "quiet": true,
@@ -11,64 +11,144 @@
   "sessionBypass": "Capture-only session initializer; normal background-service startup is bypassed.",
   "cases": [
     {
-      "page": "stats",
+      "page": "onboarding-welcome",
       "appearance": "light",
-      "image": "stats-light.png",
-      "sha256": "6b04e58da3c76b196e926ded3cf6a44c196e3a8de200f1cdc3b64e4001b81e88",
+      "image": "onboarding-light.png",
+      "sha256": "8cdc19a003645e277e5a9a6f62dc7adebe5120b418118badd7e294769790bada",
       "viewport": [
-        1050,
-        800
+        820,
+        660
       ]
     },
     {
-      "page": "stats",
+      "page": "onboarding-welcome",
       "appearance": "dark",
-      "image": "stats-dark.png",
-      "sha256": "2caa0687da9b570accd64d6362184f0965b16bfbdce36de898714cce4126a2e0",
+      "image": "onboarding-dark.png",
+      "sha256": "8262a6b77358e40dc06e48d2a3ee92ab514562cd9e2b946c443dd75414903707",
       "viewport": [
-        1050,
-        800
+        820,
+        660
       ]
     },
     {
-      "page": "transcribe",
-      "appearance": "light",
-      "image": "transcribe-light.png",
-      "sha256": "3e1cf6ab5fdf072c01eada8e3bc3553f184acea7b6c60cc2b0ba8ddadc8ecd45",
+      "page": "onboarding-appearance",
+      "appearance": "dark",
+      "image": "onboarding-appearance-dark.png",
+      "sha256": "9a43a0081cdc5ff6336e708a5e4683abfdfd25a3d632620b38f5e97650d4fd33",
       "viewport": [
-        1050,
-        800
+        820,
+        660
       ]
     },
     {
       "page": "transcribe",
       "appearance": "dark",
       "image": "transcribe-dark.png",
-      "sha256": "6d24f369741e5599a1df360ba6dc6588dc753e631abca23f83c4dbbfd333518a",
+      "label": "Offscreen native page, empty fixture; capture-only session and Settings-state instrumentation",
+      "sha256": "b6ce451f1a3f7810d726f384ed56a675a5f676a8e79edce60ee962cc273dd8de",
       "viewport": [
         1050,
         800
-      ]
+      ],
+      "parentVisualReviewed": true
     },
     {
-      "page": "settings",
+      "page": "transcribe",
       "appearance": "light",
-      "image": "settings-light.png",
-      "sha256": "0e74a091f5f7fac395d4c61fe4e424a3dadc750892965ee30e3d857b81e63dd4",
+      "image": "transcribe-light.png",
+      "label": "Offscreen native page, empty fixture; capture-only session and Settings-state instrumentation",
+      "sha256": "0f8cf286da0358694ff84efa486e75776d23f736404492a5b7ad0303dd5403f8",
       "viewport": [
         1050,
         800
-      ]
+      ],
+      "parentVisualReviewed": true
     },
     {
       "page": "settings",
       "appearance": "dark",
       "image": "settings-dark.png",
-      "sha256": "6e9d56f7a5483812fb4f1541fdc5f5b9b590416ae3ef7bba40eb54b2e1ab4b96",
+      "label": "Offscreen native page, empty fixture; capture-only session and Settings-state instrumentation",
+      "sha256": "368004131209db768180311f0ae1bc1f0da82c2ed9a8d9e8b1a4137c3d057fed",
       "viewport": [
         1050,
         800
-      ]
+      ],
+      "parentVisualReviewed": true
+    },
+    {
+      "page": "settings",
+      "appearance": "light",
+      "image": "settings-light.png",
+      "label": "Offscreen native page, empty fixture; capture-only session and Settings-state instrumentation",
+      "sha256": "d16fe31c50e236e6212a0ab35b03b91fef0e0b389a68bd2c8ee7841c7e39a07b",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true
+    },
+    {
+      "page": "settings-sidebar",
+      "appearance": "dark",
+      "image": "settings-sidebar-dark-1050x800.png",
+      "label": "Offscreen native Settings page, empty fixture; capture-only expanded state and scroll",
+      "sha256": "9400cf499fe3c46e3503a8f404d5715bd47365ffa5b1b673228f6f95f8869876",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true
+    },
+    {
+      "page": "settings-telegram",
+      "appearance": "dark",
+      "image": "settings-telegram-dark-1050x800.png",
+      "label": "Offscreen native Settings page, empty fixture; capture-only expanded state and scroll",
+      "sha256": "d0d208a214ad9e1087fb690e915519d55805ca02bc33aee28968fe4791eea382",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true
+    },
+    {
+      "page": "settings-theme-common",
+      "appearance": "dark",
+      "image": "settings-theme-common-dark-1050x800.png",
+      "label": "Offscreen native Settings page, empty fixture; capture-only expanded state and scroll",
+      "sha256": "0c93f77c50c6e94a82552129f9f7c2b5e4170bb767727e47162f6b917d8128bb",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true
+    },
+    {
+      "page": "stats",
+      "appearance": "dark",
+      "image": "stats-dark.png",
+      "label": "Offscreen complete native Statistics page; empty fixture",
+      "sha256": "2517ea5c70666c20032f46302483f49ddb0d82568fc093eeda79044095abc78c",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true
+    },
+    {
+      "page": "stats",
+      "appearance": "light",
+      "image": "stats-light.png",
+      "label": "Offscreen complete native Statistics page; empty fixture",
+      "sha256": "02ac92a12fac205ad10f72bec66db9eb8d9dc02c4e5a6db62fd4f4b7088b94a2",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true
     }
-  ]
+  ],
+  "onboardingReview": "All four steps reviewed in Light/Dark at820x660 and760x580; screenshots illustrate layout, not button or startup acceptance.",
+  "settingsCaptureScope": "Default pages plus disclosure state and programmatic scrolling in detail captures; no interaction proof."
 }
