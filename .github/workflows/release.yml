@@ -20,7 +20,7 @@ jobs:
     env:
       UNIAPI_PREVIEW_VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Select the runner-owned evidence directory
         shell: bash
         run: echo "UNIAPI_CI_EVIDENCE=$RUNNER_TEMP/uniapi-ci-evidence" >> "$GITHUB_ENV"
