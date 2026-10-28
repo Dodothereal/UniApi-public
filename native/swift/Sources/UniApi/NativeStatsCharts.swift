@@ -361,7 +361,8 @@ struct NativeStatsThroughput: View {
     }
     private var board: JSONValue { metric.board(data) }
     private func projectRanking() -> NativeStatsSpeedRanking {
-        let rows = board[by].array.map { NativeStatsSpeedRow(data: $0, group: by, colors: colors, metric: metric) }.sorted {
+        let available = metric == .streaming ? NativeStatsThroughputPresentation.measuredRows(board[by].array) : board[by].array
+        let rows = available.map { NativeStatsSpeedRow(data: $0, group: by, colors: colors, metric: metric) }.sorted {
             let a = $0.speed ?? -1, b = $1.speed ?? -1
             return a == b ? $0.label < $1.label : a > b
         }
@@ -407,6 +408,22 @@ struct NativeStatsThroughput: View {
         let summary = board["summary"]
         T3Segmented(options: NativeStatsRateMetric.allCases.map { ($0, $0.shortTitle) }, selection: metric) { metric = $0 }
             .accessibilityLabel("Speed measurement")
+        if metric == .streaming && !NativeStatsThroughputPresentation.hasMeasurements(board) {
+            NativeCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    NativeChartHeading(title: "Streaming speed needs token-arrival timestamps",
+                        caption: "These responses have token totals but no matching streaming clock. That is a history limitation, not zero speed. Tool waits and total response time cannot be used as streaming time.")
+                    Text("Antigravity and DeepSeek Harness can supply streaming clocks. Older Codex, Claude Code and other histories may not contain them.")
+                        .font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    if NativeStatsThroughputPresentation.hasMeasurements(data) {
+                        Button("Show response averages instead") { metric = .response }
+                            .buttonStyle(T3Button(.outline))
+                        Text("Response averages include latency and are a different measurement.")
+                            .font(Theme.ui(11)).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+        } else {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: availableWidth >= 780 ? 3 : 1), spacing: 10) {
             NativeStatsValueTile(label: metric.title, value: NativeStatsThroughputPresentation.rate(summary), unit: "tok/s", detail: metric == .streaming ? "Output ÷ matched streaming duration" : "Includes request latency; may be estimated", accent: nativeStatsColor("10b981"), format: { String(format: "%.1f", $0) })
             NativeStatsValueTile(label: metric == .streaming ? "Streaming clock coverage" : "Response timing coverage", value: summary["timedResponses"].isNull ? nil : summary["timedResponses"].double, detail: metric.coverage(summary))
@@ -424,6 +441,10 @@ struct NativeStatsThroughput: View {
                     }
                 }.accessibilityElement(children: .contain)
             }.frame(height: min(420, CGFloat(ranking.rows.count) * 44)).scrollIndicators(.visible)
+            if metric == .streaming && board[by].array.count > ranking.rows.count {
+                Text("\(board[by].array.count - ranking.rows.count) more entries have token totals without a usable streaming clock.")
+                    .font(Theme.ui(11)).foregroundStyle(Theme.muted)
+            }
         } else if summary["timedResponses"].int > 0 {
             NativeEmptyState(title: "No responses in this range", detail: "Choose a longer range or another coding harness.")
         }
@@ -446,6 +467,7 @@ struct NativeStatsThroughput: View {
             }
             NativeStatsLegend(entries: trend.legend, selection: Binding(get: { trend.isolation }, set: { isolated = $0 }))
         } else { NativeEmptyState(title: metric.emptyTitle, detail: metric == .streaming ? "Token usage is retained. Days without streaming clocks are left unplotted." : "Token usage is retained. Response averages need usable response durations.") }
+        }
         }
     }.onChange(of: trendBy) { _, _ in seriesChoice = "top"; isolated = nil }
         .onChange(of: metric) { _, _ in seriesChoice = "top"; isolated = nil }

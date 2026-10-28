@@ -46,6 +46,7 @@ public struct ShimResponsesStream: Sendable {
     private var openKind = "", openID = "", openText = "", outputIndex = 0
     private var tools: [String: JSONValue] = [:], toolOrder: [String] = [], splitter = ShimThinkSplitter()
     private var toolFailure: String?
+    private var reasoningOutputTokens: Int?
     private let map: ShimToolMap
     public init(model: String, tools: ShimToolMap, now: Date = Date()) { self.model = model; map = tools; id = "resp_" + UUID().uuidString; created = Int(now.timeIntervalSince1970) }
     private mutating func event(_ name: String, _ fields: JSONObject) -> ShimSSEFrame {
@@ -55,7 +56,11 @@ public struct ShimResponsesStream: Sendable {
         var value: JSONObject = ["id": .string(id), "object": "response", "created_at": .number(Double(created)), "status": .string(status), "model": .string(model), "output": .array(items), "usage": .null]
         for (key, field) in extra { value[key] = field }; return .object(value)
     }
-    private var usage: JSONValue { ["input_tokens": .number(Double(inputTokens)), "output_tokens": .number(Double(outputTokens)), "total_tokens": .number(Double(inputTokens + outputTokens))] }
+    private var usage: JSONValue {
+        var result: JSONObject = ["input_tokens": .number(Double(inputTokens)), "output_tokens": .number(Double(outputTokens)), "total_tokens": .number(Double(inputTokens + outputTokens))]
+        if let reasoningOutputTokens { result["output_tokens_details"] = ["reasoning_tokens": .number(Double(reasoningOutputTokens))] }
+        return .object(result)
+    }
     public mutating func start() -> [ShimSSEFrame] { guard !started else { return [] }; started = true; return [event("response.created", ["response": snapshot("in_progress")])] }
     public mutating func heartbeat() -> [ShimSSEFrame] { started && !terminated ? [event("response.heartbeat", [:])] : [] }
     private mutating func close() -> [ShimSSEFrame] {
@@ -97,7 +102,18 @@ public struct ShimResponsesStream: Sendable {
     }
     public mutating func feedOpenAI(_ object: JSONValue) -> [ShimSSEFrame] {
         guard !terminated else { return [] }
-        let usage = object["usage"]; if !usage["prompt_tokens"].isNull { inputTokens = usage["prompt_tokens"].int }; if !usage["completion_tokens"].isNull { outputTokens = usage["completion_tokens"].int }
+        let usage = object["usage"]; if !usage["prompt_tokens"].isNull { inputTokens = usage["prompt_tokens"].int }
+        if !usage["completion_tokens"].isNull {
+            outputTokens = usage["completion_tokens"].int
+            // The detail is usable only when it is explicit and belongs to this
+            // same total; a later total without details invalidates the pair.
+            reasoningOutputTokens = nil
+            if case .number(let total) = usage["completion_tokens"], case .number(let reasoning) = usage["completion_tokens_details"]["reasoning_tokens"],
+               total.isFinite, reasoning.isFinite, total >= 0, total <= 1_000_000_000,
+               total.rounded(.towardZero) == total, reasoning >= 0, reasoning <= total, reasoning.rounded(.towardZero) == reasoning {
+                reasoningOutputTokens = Int(reasoning)
+            }
+        }
         guard let choice = object["choices"].array.first else { return [] }; let change = choice["delta"]
         let reasoning = change["reasoning"].string.isEmpty ? change["reasoning_content"].string : change["reasoning"].string
         var frames = delta(reasoning, reasoning: true)

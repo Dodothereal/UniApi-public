@@ -114,6 +114,26 @@ private final class ShimListenerReady: @unchecked Sendable {
     func install(_ continuation: CheckedContinuation<Void, Error>) { lock.lock(); if let result { lock.unlock(); continuation.resume(with: result) } else { self.continuation = continuation; lock.unlock() } }
     func finish(_ error: Error?) { lock.lock(); guard result == nil else { lock.unlock(); return }; let value: Result<Void, Error> = error.map(Result.failure) ?? .success(()); result = value; let continuation = continuation; self.continuation = nil; lock.unlock(); continuation?.resume(with: value) }
 }
+
+/// The same send loop serves observed and ordinary responses. The callback is
+/// the host's send-completion boundary, not a claim of receipt by the peer.
+enum ShimResponseTransmission {
+    static func send(_ response: ShimClientResponse, using send: (Data, Bool) async throws -> Void) async throws -> NativeCodexStreamTimingObservation? {
+        var observer = response.codexStreamTiming.map { NativeCodexStreamTimingObserver(requestedModel: $0.requestedModel, uptime: $0.uptime) }
+        var header = "HTTP/1.1 \(response.status) Response\r\nServer: uniapi-native-shim\r\nConnection: close\r\n"
+        for (key, value) in response.headers.sorted(by: { $0.key < $1.key }) where key != "connection" { header += key + ": " + value + "\r\n" }; header += "\r\n"
+        try await send(Data(header.utf8), false)
+        for try await data in response.chunks {
+            try await send(data, false)
+            if let context = response.codexStreamTiming { observer?.feedDelivered(data, at: context.uptime()) }
+        }
+        try await send(Data(), true)
+        guard !Task.isCancelled, let context = response.codexStreamTiming,
+              let observation = observer?.finish(success: true, providerReasoning: context.reasoning?.snapshot()) else { return nil }
+        return observation
+    }
+}
+
 final class ShimSocket: @unchecked Sendable {
     let connection: NWConnection, gateway: NativeShimGateway, queue: DispatchQueue, ended: @Sendable () -> Void
     private let lock = NSLock(); private var task: Task<Void, Never>?, response: ShimClientResponse?, closed = false, endedSent = false, readDeadline: DispatchWorkItem?, readGeneration: UUID?, readStarted = false
@@ -199,16 +219,20 @@ final class ShimSocket: @unchecked Sendable {
         task = Task { [weak self] in guard let self else { return }; defer { self.taskFinished() }; guard let response else { self.cancel(); return }; do { try await transmit(response) } catch { cancel() } }
         lock.unlock()
     }
-    private func transmit(_ response: ShimClientResponse) async throws {
+    func transmit(_ response: ShimClientResponse, using overrideSend: ((Data, Bool) async throws -> Void)? = nil) async throws {
         let stopped = lock.withLock { self.response = response; return closed }
         if stopped { response.cancel(); await response.waitForCompletion(); throw CancellationError() }
+        let observation: NativeCodexStreamTimingObservation?
         do {
-        var header = "HTTP/1.1 \(response.status) Response\r\nServer: uniapi-native-shim\r\nConnection: close\r\n"
-        for (key, value) in response.headers.sorted(by: { $0.key < $1.key }) where key != "connection" { header += key + ": " + value + "\r\n" }; header += "\r\n"
-        try await send(Data(header.utf8))
-        for try await data in response.chunks { try await send(data) }
-        try await send(Data(), final: true)
+        observation = try await ShimResponseTransmission.send(response) { data, final in
+            if let overrideSend { try await overrideSend(data, final) }
+            else { try await self.send(data, final: final) }
+        }
         } catch { response.cancel(); await response.waitForCompletion(); cancel(); throw error }
-        response.cancel(); await response.waitForCompletion(); cancel()
+        response.cancel(); await response.waitForCompletion()
+        if let observation, let context = response.codexStreamTiming {
+            lock.withLock { if !closed && !Task.isCancelled { context.record(observation) } }
+        }
+        cancel()
     }
 }
