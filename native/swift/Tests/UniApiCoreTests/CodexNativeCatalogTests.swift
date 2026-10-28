@@ -21,6 +21,7 @@ final class CodexNativeCatalogTests: XCTestCase {
         XCTAssertEqual(rows[1]["model_messages"], .null); XCTAssertEqual(rows[1]["multi_agent_version"], "v1")
         XCTAssertNil(rows[1].object["comp_hash"]); XCTAssertNil(rows[1].object["availability_nux"]); XCTAssertNil(rows[1].object["multi_agent_reasoning_effort"])
         XCTAssertEqual(rows[1]["supported_reasoning_levels"], [["effort": "low", "description": "low"], ["effort": "high", "description": "high"]])
+        XCTAssertEqual(rows[1]["default_reasoning_level"], "low")
         XCTAssertEqual(rows[2]["context_window"], 128000)
         XCTAssertFalse(String(decoding: try result.encoded(), as: UTF8.self).contains("fixture-key"))
     }
@@ -41,8 +42,12 @@ final class CodexNativeCatalogTests: XCTestCase {
         let file = root.appendingPathComponent("models_cache.json")
         // Exercise the catalog producer and picker decoder together: refreshing
         // a cache must replace old provider rows, rather than merge their None.
-        let cases: [(JSONValue?, [String])] = [(nil, ["high", "low", "max"]), ([], ["none"]), (["max"], ["max"])]
-        for (override, expected) in cases {
+        let cases: [(JSONValue?, [String], String)] = [
+            (nil, ["low", "high", "max"], "high"), ([], ["none"], "none"),
+            ("high", ["none"], "none"), (.some(.null), ["none"], "none"),
+            (["max", "low", "high"], ["max", "low", "high"], "max")
+        ]
+        for (override, expected, defaultEffort) in cases {
             var changed = p
             if let override { changed["codex"]["model_efforts"][modelID] = override }
             let result = try NativeCodexRouteCatalog.augment(input, providers: ["providers": [changed]], choices: selected)
@@ -50,7 +55,7 @@ final class CodexNativeCatalogTests: XCTestCase {
             XCTAssertEqual(providerRows.count, 1)
             let row = try XCTUnwrap(providerRows.first)
             XCTAssertEqual(row["supported_reasoning_levels"].array.map { $0["effort"].string }, expected)
-            XCTAssertEqual(row["default_reasoning_level"], .string(expected[0]))
+            XCTAssertEqual(row["default_reasoning_level"], .string(defaultEffort))
             XCTAssertEqual(row["priority"], 1)
             XCTAssertEqual(result["models"].array.first { $0["slug"] == "uniapi/fixture/sibling" }?["supported_reasoning_levels"], [["effort": "none", "description": "No reasoning override"]])
             let bytes = try result.encoded()
@@ -59,6 +64,25 @@ final class CodexNativeCatalogTests: XCTestCase {
             let cached = try NativeCodexModelCache.rows(file).filter { $0["slug"] == .string(alias) }
             XCTAssertEqual(cached.count, 1)
             XCTAssertEqual(cached.first?["supported_reasoning_levels"].array.map { $0["effort"].string }, expected)
+        }
+    }
+    func testDeclaredOrderAndFirstValidDefaultsSurviveModelOverrides() throws {
+        var p = provider()
+        p["codex"]["efforts"] = ["invalid", 42, "high", "low", "high", "max"]
+        let cases: [(JSONValue, [String], String)] = [
+            (["invalid", 42, "max", "low", "max", "high"], ["max", "low", "high"], "max"),
+            ([], ["none"], "none")
+        ]
+        for (override, expected, defaultEffort) in cases {
+            p["codex"]["model_efforts"]["glm:free"] = override
+            let result = try NativeCodexRouteCatalog.augment(["models": [model("native")]], providers: ["providers": [p]], choices: choices)
+            let rows = result["models"].array
+            let selected = try XCTUnwrap(rows.first { $0["slug"] == "uniapi/fixture/glm%3Afree" })
+            XCTAssertEqual(selected["supported_reasoning_levels"].array.map { $0["effort"].string }, expected)
+            XCTAssertEqual(selected["default_reasoning_level"], .string(defaultEffort))
+            let sibling = try XCTUnwrap(rows.first { $0["slug"] == "uniapi/fixture/sibling" })
+            XCTAssertEqual(sibling["supported_reasoning_levels"].array.map { $0["effort"].string }, ["high", "low", "max"])
+            XCTAssertEqual(sibling["default_reasoning_level"], "high")
         }
     }
     // Required fields from Codex 0.165.0's ReasoningEffortPreset wire contract:

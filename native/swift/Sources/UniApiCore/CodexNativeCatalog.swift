@@ -2,6 +2,7 @@ import Foundation
 
 struct NativeCodexProviderRoute: Sendable {
     let alias: String, provider: NativeProviderInfo, model: String, context: Int, efforts: [String]
+    let defaultEffort: String
 }
 
 /// API keys belong to request routing and never enter Codex model metadata.
@@ -11,17 +12,16 @@ enum NativeCodexRouteCatalog {
         try NativeCodexCatalogStore.validate(choices)
         guard case .array(let rows) = providers["providers"] else { throw NativeFailure("Missing provider document") }
         var result: [NativeCodexProviderRoute] = []
-        let allowed: Set<String> = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
         for id in choices["providerIds"].array.map(\.string) {
             let matches = rows.filter { $0["id"] == .string(id) }
             guard matches.count == 1, let row = matches.first else { continue }
             let provider = NativeProviderInfo(row)
             guard provider.codexEnabled, provider.verified, provider.catalogIssue(port: port) == nil else { continue }
             for model in provider.codexModels {
-                var seen = Set<String>()
-                let efforts = provider.efforts(for: model).filter { allowed.contains($0) && seen.insert($0).inserted }
+                let reasoning = NativeProviderReasoning.capabilities(provider, model: model)
                 let context = positiveInteger(row["proxy"]["model_context_tokens"][model]) ?? positiveInteger(row["proxy"]["context_tokens"]) ?? 128000
-                result.append(.init(alias: NativeCodexCatalogStore.id(provider: id, model: model), provider: provider, model: model, context: context, efforts: efforts.isEmpty ? ["none"] : efforts))
+                result.append(.init(alias: NativeCodexCatalogStore.id(provider: id, model: model), provider: provider, model: model, context: context,
+                                    efforts: reasoning.efforts.isEmpty ? ["none"] : reasoning.efforts, defaultEffort: reasoning.defaultEffort ?? "none"))
             }
         }
         return result
@@ -51,7 +51,7 @@ enum NativeCodexRouteCatalog {
             row["effective_context_window_percent"] = 90; row["auto_compact_token_limit"] = .number((Double(route.context) * 0.9).rounded(.down))
             // Codex requires a description on each preset; omitting it rejects
             // the entire catalog, even when the effort itself is supported.
-            row["supported_reasoning_levels"] = .array(route.efforts.map { ["effort": .string($0), "description": .string($0 == "none" ? "No reasoning override" : $0)] }); row["default_reasoning_level"] = .string(route.efforts[0])
+            row["supported_reasoning_levels"] = .array(route.efforts.map { ["effort": .string($0), "description": .string($0 == "none" ? "No reasoning override" : $0)] }); row["default_reasoning_level"] = .string(route.defaultEffort)
             row["input_modalities"] = route.provider.raw["codex"]["vision_models"].array.contains(.string(route.model)) ? ["text", "image"] : ["text"]
             row["additional_speed_tiers"] = []; row["service_tiers"] = []; row["default_service_tier"] = .null
             row["supports_search_tool"] = false; row["experimental_supported_tools"] = []; row["supports_image_detail_original"] = false
@@ -61,7 +61,13 @@ enum NativeCodexRouteCatalog {
             remainingBytes -= bytes
             output.append(row)
         }
-        for i in output.indices where output[i]["multi_agent_version"] != "disabled" { output[i]["multi_agent_version"] = "v1" }
+        for i in output.indices {
+            // The local router serves Responses over HTTP. Upstream transport
+            // preferences must not make native or cloned provider rows require
+            // WebSockets at this different endpoint.
+            output[i]["prefer_websockets"] = false
+            if output[i]["multi_agent_version"] != "disabled" { output[i]["multi_agent_version"] = "v1" }
+        }
         let anchor = sorted.first(where: eligible)?["slug"].string
         var priorities: [String: Int] = [:]
         if let anchor { priorities[anchor] = 0 }

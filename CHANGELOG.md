@@ -2,6 +2,11 @@
 
 User-facing changes are recorded here. Release entries should describe shipped behavior and actual validation, with unresolved limitations kept explicit.
 
+## 0.1.3 — preview
+
+- Fixed native Codex WebSocket probes aborting normal turns and compaction: the HTTP-only route now returns HTTP 426 for the exact Responses probe, and all routed catalog rows advertise HTTP transport.
+- Ordered the documented CommandCode DeepSeek reasoning choices Low/High/Max while retaining High as the independent default.
+
 ## 0.1.2 — preview
 
 - Added window-free Codex routing status, connect and restore commands. An explicit bounded idle wait uses the existing journal-aware handoff and preserves active requests and independently changed settings.

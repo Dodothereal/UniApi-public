@@ -44,6 +44,15 @@ Use the staged executable after building, or substitute the installed/extracted 
 
 `connect` delegates to the same guarded native handoff as the app: it drains the Swift shim, then the integrated Web bridge, uses the bridge's journal-aware route disconnect, and transfers catalog membership through the existing ownership checks. `restore` uses the normal guarded restore action. Neither command stops Web services, cancels active turns, sends inference, edits configuration directly or weakens admission checks. Once connected, API and subscription routing are independent of the optional Web bridge.
 
+The native route uses HTTP Responses for both normal turns and compaction. It
+publishes `prefer_websockets: false` and answers a valid-capability
+`GET /responses` probe with HTTP 426, so clients with stale WebSocket
+preferences can retry with POST instead of aborting the turn. The probe does
+not submit an upstream request; invalid capabilities and cross-origin probes
+remain refused. A manually stopped or unloaded native shim cannot serve routed
+models: restore the route through its guarded journal before removing its owner.
+Normal UniApi Quit keeps that background owner running.
+
 Without a wait option, busy required owners cause immediate refusal. Only `connect` accepts `--wait-for-idle SECONDS`, an explicit integer from 1 through 600. It observes healthy required owners once per second, holding no drain while waiting. Before waiting it pins the exact bytes and presence of Codex `config.toml`, `providers.json`, bridge `config.json`, bridge `uniapi-catalog.json` and the destination native catalog. Each poll rechecks those fingerprints, including the last idle observation before invoking the normal action. A changed file, unreadable fingerprint, unhealthy or unknown required owner, unexpected error, cancellation or deadline ends the command without retrying the mutation. Codex's naturally refreshed `models_cache.json` is excluded. An already connected native route never waits: it runs the normal action when idle or immediately reports busy. A disconnected optional Web installation is not a required owner. The guarded action still checks admission again, so traffic arriving after an idle poll can cause refusal.
 
 The wait deadline bounds polling; an in-flight status read or guarded action must finish its existing transport timeout or recovery. SIGINT and SIGTERM cancel the wait with exit 130. Cancellation before the action leaves routing untouched; after an action starts, allow its owned recovery to finish and inspect status before retrying. Do not force-kill a handoff or automatically replay a failed mutation.

@@ -10,9 +10,16 @@ the native Switcher, Codex catalog and shim request mapping. Precedence is:
    `deepseek/deepseek-v4.1-flash` at
    `https://api.commandcode.ai/provider/v1` (also its trailing-slash and explicit
    HTTPS port 443 spellings). An effective `proxy.direct_url` takes precedence
-   over `base_url` when matching the endpoint. The fallback is `high`, `low`,
-   `max`, with `high` first as the catalog default. Other models and endpoints
+   over `base_url` when matching the endpoint. The fallback display order is
+   `low`, `high`, `max`, with `high` separately retained as the catalog default.
+   Other models and endpoints
    do not inherit it.
+
+Explicit provider and per-model declarations retain their declared order and
+use their first valid, deduplicated effort as the catalog default. Empty or
+malformed model overrides still suppress inheritance; their catalog row uses
+`none` with default `none`. Display order and default selection are separate
+capability values, so the documented fallback does not need to put High first.
 
 CommandCode documents its [OpenAI-compatible provider endpoint](https://commandcode.ai/docs/provider).
 DeepSeek documents [low/high/max effort and default high](https://api-docs.deepseek.com/guides/thinking_mode).
@@ -34,7 +41,7 @@ change an independent bridge's catalog implementation.
 Older optional Web bridges construct provider rows from `codex.efforts` alone,
 replacing an empty list with `none` and the description "No reasoning override".
 They do not consult the native fallback or per-model overrides. Thus the native
-Switcher can advertise High/Low/Max while a bridge-generated Codex cache still
+Switcher can advertise Low/High/Max while a bridge-generated Codex cache still
 shows only None. Do not broaden provider-wide efforts as a workaround: it would
 advertise the DeepSeek settings for unrelated models too.
 
@@ -66,7 +73,7 @@ and reject missing, null and non-string descriptions.
 4. Refresh Codex's model catalog through the active producer. A custom
    `model_catalog_json` snapshot must also be refreshed by its owner; a file
    snapshot cannot pick up new service metadata on its own. Confirm the exact
-   routed slug has `high`, `low`, `max` and default `high` in the returned/cache
+   routed slug has `low`, `high`, `max` and default `high` in the returned/cache
    row. Preserve other models' capabilities and provider membership.
 5. Recreate the affected task's worker roster after refresh. Existing advertised
    tool definitions can retain the old None-only metadata. Consumers such as
