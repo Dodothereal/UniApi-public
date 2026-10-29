@@ -394,3 +394,64 @@ Version 0.1.15 carries the same Core/Presentation sources and adds the welcome
 refinement. It was guarded-installed afterward; the 0.1.14 table is not relabelled
 as a 0.1.15 measurement. The next optimization remains subject to controlled
 correctness/resource checks and another installed-app follow-up.
+
+
+## Conservative append publication
+
+A second optimization targets the global cache reassembly seen in the installed
+profile. It applies only to the already loaded writable generation when every
+changed file is one of the four eligible plain Codex ledgers. The reader must
+prove a byte-identical decoded record prefix, including floating-point bits and
+the provisional EOF row. Unchanged cache revisions, source paths, schema and
+`data_version` are required; the version is rechecked inside the file transaction.
+The SQL path retains old rows and inserts only the admitted suffix.
+
+Publication reads the new rows back through the existing SQLite conversions.
+Every timestamp must be strictly after the old global maximum. A 1 MiB in-process
+membership filter uses the existing canonical String equality; any positive,
+including a false positive, forces full assembly. Long-string spelling and
+path-order provenance share the existing interner namespace, with a separate
+16 MiB retention estimate. Provenance overflow disables reuse for that generation.
+A native stream-clock overlay changes the generation and conservatively disables
+this shortcut. No observation or timing value is invented to retain eligibility.
+
+Unknown table layouts, TEMP shadows, PK/rowid aliases, triggers, changed schemas,
+rowid exhaustion, failed reads, foreign revisions, duplicate IDs, Unicode spelling
+precedence changes, archives and retroactive accounting all retain the full path.
+Its SQL ordering, deduplication, Claude lifetime reconciliation and benchmark
+invalidation semantics remain authoritative. Rebuild and read-only imports do not
+use append publication. All throwing consistency checks finish before replacing
+the old complete board.
+
+The scan diagnostics distinguish `assemblyMode` (`metadata`, `append`, `full`),
+`assembledRecords` (rows consumed for the current assembly), `reusedRecords`
+(retained raw-row count), and `codexSQLAppendFiles` (file transactions that inserted
+only the suffix). Parser byte counters remain separate. A SQL append can still
+fall back to full global assembly; its file counter alone is not proof of event
+reuse or a speed measurement. These counters do not report disk I/O, GPU work or
+physical memory.
+
+
+A six-process ABBAAB control used the real Statistics actor and SQLite cache with
+160 synthetic plain Codex files and 160,000 modern usage records. Both arms
+already used the validated append parser. After priming the full All-apps board,
+a 456-byte suffix added two strictly later responses to one eligible ledger.
+Timing covers the actual refresh plus its All-apps overview; fixture creation,
+priming, the append write and output hashing are outside the clock. The candidate
+assembled two SQL-decoded rows and retained 160,000 raw rows. All six complete
+board digests and base digests matched; all run logs were empty.
+
+| Metric | Full assembly | Admitted append publication | Reduction |
+| --- | ---: | ---: | ---: |
+| Median elapsed | 427.056 ms | 192.046 ms | 55.03% |
+| Median process CPU | 422.325 ms | 191.299 ms | 54.70% |
+| Median process peak RSS | 220,643,328 B | 178,225,152 B | 19.22% |
+
+The actual optimized executable has macOS 14 minimum/SDK 26.5 headers. Source,
+module and linked-object hashes bind it to the successful native gate. Runs used
+an isolated private home, denied network and child processes, and deleted only
+their completed synthetic corpus/cache between invocations. The peak includes
+process initialization and priming; it is not timed allocation, an installed-page
+memory measurement or physical system memory. The control uses modern, later-only
+appends and does not establish admission rates for every source or history. It is
+not an installed Reload, GPU/FPS, cold-disk, energy or whole-app improvement claim.

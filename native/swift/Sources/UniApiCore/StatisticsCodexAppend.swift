@@ -34,6 +34,9 @@ struct StatisticsCodexAppendRead: Sendable {
     let result: StatisticsReadResult
     let checkpoint: StatisticsCodexCheckpoint?
     let validatedPrefixBytes: Int64, decodedBytes: Int64
+    // Byte-identical decoded records, including the previous provisional EOF
+    // row. A validated file prefix alone does not establish this property.
+    var appendedRecordOffset: Int? = nil
 }
 
 /// Only the service actor owns this cache. Commit after the corresponding file
@@ -42,6 +45,7 @@ struct StatisticsCodexAppendCache {
     static let maximumFiles = 4
     private struct Entry {
         let sourcePath: String, revision: String, checkpoint: StatisticsCodexCheckpoint
+        let rowOrderSchema: String?
         var access: UInt64
     }
     private let maximumBytes: Int, maximumEntries: Int
@@ -63,7 +67,11 @@ struct StatisticsCodexAppendCache {
         serial &+= 1; entry.access = serial; entries[path] = entry
         return entry.checkpoint
     }
-    mutating func commit(_ checkpoint: StatisticsCodexCheckpoint?, path: String, sourcePath: String, revision: String, mtime: Double, size: Double) {
+    func hasOrderedRows(path: String, revision: String, schema: String) -> Bool {
+        guard let entry = entries[path] else { return false }
+        return entry.revision == revision && entry.rowOrderSchema == schema
+    }
+    mutating func commit(_ checkpoint: StatisticsCodexCheckpoint?, path: String, sourcePath: String, revision: String, mtime: Double, size: Double, rowOrderSchema: String? = nil) {
         remove(path)
         guard let checkpoint, maximumEntries > 0, !revision.isEmpty, checkpoint.path == sourcePath,
               checkpoint.mtime == mtime, Double(checkpoint.length) == size,
@@ -73,7 +81,7 @@ struct StatisticsCodexAppendCache {
             remove(oldest)
         }
         serial &+= 1
-        entries[path] = Entry(sourcePath: sourcePath, revision: revision, checkpoint: checkpoint, access: serial)
+        entries[path] = Entry(sourcePath: sourcePath, revision: revision, checkpoint: checkpoint, rowOrderSchema: rowOrderSchema, access: serial)
         estimatedBytes += checkpoint.estimatedBytes
     }
 }
@@ -139,6 +147,11 @@ enum StatisticsCodexAppend {
         var hasher = initialHasher, tail = initialTail
         var length = checkpoint?.length ?? 0, decodedBytes = Int64(tail.count)
         let decoder = JSONDecoder()
+        let previous: StatisticsReadResult? = checkpoint.map {
+            let old = StatisticsCodexReader(snapshot: $0.state)
+            if !initialTail.isEmpty, let row = try? decoder.decode(StatisticsEnvelope.self, from: initialTail).value { old.push(row) }
+            return old.finish()
+        }
         func push(_ bytes: Data) { if let row = try? decoder.decode(StatisticsEnvelope.self, from: bytes).value { reader.push(row) } }
         while true {
             try Task.checkCancellation()
@@ -177,7 +190,14 @@ enum StatisticsCodexAppend {
                                                    state: state, estimatedBytes: stateBytes + url.path.utf8.count + 512)
         }
         if !tail.isEmpty { push(tail) }
-        return (StatisticsCodexAppendRead(result: reader.finish(), checkpoint: candidate,
-                                          validatedPrefixBytes: checkpoint?.length ?? 0, decodedBytes: decodedBytes), stable)
+        let result = reader.finish()
+        let offset: Int?
+        if stable, let previous, previous.records.count <= result.records.count,
+           zip(previous.records, result.records).allSatisfy({ $0.matchesBytes(of: $1) }) {
+            offset = previous.records.count
+        } else { offset = nil }
+        return (StatisticsCodexAppendRead(result: result, checkpoint: candidate,
+                                          validatedPrefixBytes: checkpoint?.length ?? 0, decodedBytes: decodedBytes,
+                                          appendedRecordOffset: offset), stable)
     }
 }

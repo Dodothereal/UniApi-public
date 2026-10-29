@@ -181,9 +181,11 @@ The Switcher's Codex tab also offers **Add provider** directly in its API-provid
 section; route checks and model selection remain separate steps.
 
 Statistics Reload checks changed history; warm, growing plain Codex files can
-reuse bounded parser state after validating their old bytes. Rebuild forces the
-full reader. This reduces repeated parsing without claiming instant whole-app
-Reload; see [performance scope](docs/PERFORMANCE.md).
+reuse bounded parser state after validating their old bytes. Strictly later,
+unchanged-prefix appends can also retain committed old rows and their published
+usage. Duplicates, retroactive changes, other source changes and uncertain cache
+state use full assembly. Rebuild forces the full reader. These optimizations do
+not imply instant whole-app Reload; see [performance scope](docs/PERFORMANCE.md).
 
 Actions depend on your configured providers, installed tools and hardware.
 Hardware controls may require compatible devices and an explicitly installed helper; a visible page does not guarantee device support.
