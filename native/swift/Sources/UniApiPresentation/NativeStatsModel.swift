@@ -22,6 +22,56 @@ package struct NativeStatsSnapshot: Sendable {
     package let benchmark: JSONValue
 }
 
+/// A successful forced scan and its visible publication can arrive in either
+/// order: stats.scanned may replace the manual read before its receipt returns.
+/// Only a new coherent publication with that exact scan identity is admissible.
+package struct NativeStatsRefreshAdmission {
+    package enum Status: Equatable { case pending, ready, failed, incomplete, cancelled }
+    package let scope: NativeStatsScope
+    package private(set) var status: Status = .pending
+    private var scanID: String?
+    private var returned = false, busy = false, publicationFailed = false
+    private var publication: NativeStatsSnapshot?
+    package init(scope: NativeStatsScope) { self.scope = scope }
+    package mutating func readStarted() {
+        guard status != .cancelled, status != .incomplete else { return }
+        busy = true; publication = nil; publicationFailed = false; status = .pending
+    }
+    package mutating func published(payload: JSONValue, benchmark: JSONValue, failed: Bool) {
+        guard status != .cancelled, status != .incomplete, busy else { return }
+        busy = false; publicationFailed = failed
+        publication = NativeStatsSnapshot(payload: payload, benchmark: benchmark)
+        reconcile()
+    }
+    package mutating func operationCompleted(scanID: String) {
+        guard status != .cancelled, status != .incomplete, !scanID.isEmpty else { return }
+        self.scanID = scanID; reconcile()
+    }
+    package mutating func operationReturned() { returned = true; reconcile() }
+    package mutating func cancel() { publication = nil; status = .cancelled }
+    private mutating func reconcile() {
+        guard status != .cancelled, status != .incomplete else { return }
+        guard let scanID else {
+            status = returned ? publicationFailed ? .failed : .incomplete : .pending
+            return
+        }
+        guard !busy else { status = .pending; return }
+        if publicationFailed { status = .failed; return }
+        guard let publication else { status = .pending; return }
+        let payload = publication.payload
+        guard payload["loaded"].bool, !publication.benchmark.isNull else { status = .incomplete; return }
+        guard payload["source"].string == scope.source, payload["range"].int == scope.range,
+              scope.model == nil ? payload["model"].isNull : payload["model"].string == scope.model else {
+            status = .cancelled; return
+        }
+        let publishedID = payload["scan"]["scanId"].string
+        // Detail responses currently have no scan identity. Never infer one
+        // from retained data or a progress event belonging to another read.
+        guard !publishedID.isEmpty else { status = .incomplete; return }
+        status = publishedID == scanID ? .ready : .pending
+    }
+}
+
 package enum NativeStatsLoadMode: Sendable {
     case cached, refresh, rebuild
 
@@ -128,7 +178,8 @@ package enum NativeStatsLoadMode: Sendable {
         catch { /* The visible page retries and presents its own read error. */ }
     }
 
-    package func load(source: String, range: Int, model: String?, mode: NativeStatsLoadMode = .cached) async {
+    package func load(source: String, range: Int, model: String?, mode: NativeStatsLoadMode = .cached,
+                      operationCompleted: (@MainActor (String) -> Void)? = nil) async {
         if mode.operation != nil { invalidateSnapshots() }
         request &+= 1; let own = request
         // The retained payload can outlive a read; its file counter cannot.
@@ -137,7 +188,14 @@ package enum NativeStatsLoadMode: Sendable {
         await lifecycle.perform(read: {
             guard own == self.request else { throw CancellationError() }
             if let operation = mode.operation {
-                _ = try await self.service.handle(operation, input: [:])
+                let result = try await self.service.handle(operation, input: [:])
+                // The scan's event read may already own the visible request.
+                // Its successful operation receipt remains useful independently
+                // of whether this older request is still allowed to commit.
+                if let operationCompleted {
+                    let scanID = result["scan"]["scanId"].string
+                    if result["ok"].bool, !scanID.isEmpty { operationCompleted(scanID) }
+                }
                 guard own == self.request else { throw CancellationError() }
                 try Task.checkCancellation()
                 // Never reuse a request begun before the completed forced scan.
