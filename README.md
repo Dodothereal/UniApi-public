@@ -51,7 +51,7 @@ For source builds and separate runtime data, see [local development](docs/LOCAL-
 
 ## Your first five minutes
 
-New, unconfigured installations offer a skippable four-step welcome.
+New, unconfigured installations offer a skippable two-step welcome.
 It offers theme, spacing and motion choices and starting-point
 cards to help you find your way around. Opening welcome itself never signs you
 in, downloads a model, changes hardware controls or changes routing. Existing
@@ -192,15 +192,13 @@ records capture scope and image checksums.
 
 **Welcome — Dark**
 
-The four-step guide keeps progress compact, previews appearance choices and
-finishes at your chosen first page. Setup can be replayed from Settings.
+Choose a first task, adjust appearance, then open that page directly. The
+two-step guide can be skipped or replayed from Settings.
 
 ![Native welcome guide, Dark appearance](assets/screenshots/onboarding-dark.png)
 
 [Welcome — Light](assets/screenshots/onboarding-light.png) ·
-[Appearance choices](assets/screenshots/onboarding-appearance-dark.png) ·
-[Starting page](assets/screenshots/onboarding-start-dark.png) ·
-[Ready summary](assets/screenshots/onboarding-ready-dark.png)
+[Appearance choices](assets/screenshots/onboarding-appearance-dark.png)
 
 **Statistics — sample usage, Dark**
 

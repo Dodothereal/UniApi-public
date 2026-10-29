@@ -9,7 +9,7 @@ for example:
 
 The default set hosts three complete production page views, with their existing
 NativePage scrolling containers at 1050x800 points. --onboarding instead captures
-all four setup steps in two sizes plus Settings in both appearances.
+both setup steps in two sizes plus Settings in both appearances.
 --settings-details captures the default pages plus expanded sidebar, Telegram,
 and common/advanced theme sections in both appearances at 1050x800 and 720x700. Its copied sources
 receive recorded capture-only disclosure state and transparent scroll anchors;
@@ -142,7 +142,7 @@ def main():
     parser.add_argument("--app-bundle", type=Path, default=native / "build.noindex/UniApi Native.app")
     parser.add_argument("--execute", action="store_true", help="Explicitly authorize compilation and the selected isolated view captures")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--onboarding", action="store_true", help="Capture four setup steps at 820x660 and 760x580, plus Settings")
+    mode.add_argument("--onboarding", action="store_true", help="Capture two setup steps at 820x660 and 760x580, plus Settings")
     mode.add_argument("--settings-details", action="store_true", help="Capture default pages and expanded Settings sections in two appearances and sizes")
     mode.add_argument("--pricing", action="store_true", help="Capture synthetic pricing components and the complete empty Statistics page")
     args = parser.parse_args()
@@ -304,7 +304,7 @@ def main():
     viewports = [(page, 1050, 800) for page in ("stats", "transcribe", "settings")]
     if args.onboarding:
         viewports = [("onboarding-" + step, width, height)
-                     for step in ("welcome", "appearance", "connections", "ready")
+                     for step in ("welcome", "appearance")
                      for width, height in ((820, 660), (760, 580))]
         viewports += [("settings", 1050, 800)]
     if args.settings_details:

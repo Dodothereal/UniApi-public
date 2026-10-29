@@ -21,12 +21,12 @@ final class NativeOnboardingPolicyTests: XCTestCase {
         }
     }
 
-    func testBackAndNextStayInsideTheActualFourStepFlow() {
+    func testBackAndNextStayInsideTheTwoStepFlow() {
         XCTAssertEqual(NativeOnboardingStep.welcome.previous, .welcome)
-        XCTAssertEqual(NativeOnboardingStep.ready.next, .ready)
+        XCTAssertEqual(NativeOnboardingStep.appearance.next, .appearance)
         var step = NativeOnboardingStep.welcome
         var visited = [step]
-        while step != .ready { step = step.next; visited.append(step) }
+        while step != .appearance { step = step.next; visited.append(step) }
         XCTAssertEqual(visited, NativeOnboardingStep.allCases)
         while step != .welcome { step = step.previous }
         XCTAssertEqual(step, .welcome)

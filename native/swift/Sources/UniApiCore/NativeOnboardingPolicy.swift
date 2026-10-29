@@ -1,13 +1,11 @@
 import Foundation
 
 public enum NativeOnboardingStep: Int, CaseIterable, Sendable {
-    case welcome, appearance, connections, ready
+    case welcome, appearance
     public var title: String {
         switch self {
-        case .welcome: return "Welcome"
+        case .welcome: return "Choose your starting point"
         case .appearance: return "Make it yours"
-        case .connections: return "Choose your starting point"
-        case .ready: return "Ready when you are"
         }
     }
     public var next: Self { Self(rawValue: rawValue + 1) ?? self }

@@ -41,19 +41,23 @@ add frame timers or repeat entrance animations on background refreshes.
 
 ## Welcome guide
 
-Setup uses one centered content column with a compact four-step header. Header,
-content and footer share the same 636-point maximum width and outer inset. Keep
-Skip setup in one place, the header; Back and the primary action stay in the
-fixed footer at 40 points high. Content may scroll in short viewports without
-moving these actions offscreen.
+Setup has two steps: a first task, then appearance. Do not add a ceremonial
+welcome screen or repeat choices in a separate completion screen. Header,
+content and footer share a 600-point column and 32-point outer inset. Skip setup
+stays in the header; Back and the destination action stay in a fixed footer at
+40 points high. Short viewports scroll content without losing those actions.
 
-Use the shared theme, type and Lucide icons. Only selected choice cards receive
-an accent outline; neutral cards use a quiet surface. Appearance previews depict
-both palettes deliberately, while their surrounding controls use live theme
-tokens. Destination cards reserve equal space for their descriptions. Avoid a
-second navigation rail, a mock dashboard and repeated setup explanations.
-Step transitions are a 200 ms opacity/offset change, with no ongoing animation
-work and an immediate reduced-motion path.
+Present destinations as a single list of aligned rows, with a consistent icon
+slot, title, explanation and selected indicator. Use a soft accent surface for
+the selected row, without enclosing every row in an outline. Selection must not
+imply that a provider has connected or a model has downloaded. The final action
+names the selected page. Appearance uses compact System/Light/Dark choices and
+aligned spacing/motion controls. Keep defaults immediately usable.
+
+Use the shared theme, typography and Lucide icons. Step headings have heading
+semantics and receive accessibility focus when the step changes. Transitions
+are a 180 ms opacity/offset change with no ongoing animation work and an
+immediate reduced-motion path. Hover and press feedback belong to the control.
 
 ## Job history cleanup
 
