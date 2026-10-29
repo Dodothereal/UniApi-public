@@ -64,6 +64,7 @@ struct NativeSettingsPage: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 DisclosureGroup("Diagnostics and storage", isExpanded: $showDiagnostics) {
                     VStack(alignment: .leading, spacing: 16) {
+                        NativeUIRecordingControls(runtime: runtime)
                         Text(diagnostics + "\nStatus: " + startupStatus).font(Theme.mono(10.5)).foregroundStyle(Theme.muted)
                             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                         HStack {
@@ -178,6 +179,41 @@ struct NativeSettingsPage: View {
             Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: {
                 HStack(spacing: 6) { NativeIcon("folder-open", size: 12); Text("Reveal") }
             }.accessibilityLabel(title == "Config" ? "Reveal provider configuration" : title == "Logs" ? "Reveal logs" : "Reveal data folder")
+        }
+    }
+}
+
+private struct NativeUIRecordingControls: View {
+    let runtime: NativeRuntime
+    @ObservedObject private var recorder = NativeUIReadiness.shared
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Performance recording").font(Theme.ui(14, weight: .medium))
+            Text("Record page changes and Statistics header Reload for up to 5 minutes. Timing, process CPU and lifetime peak memory stay on this Mac.")
+                .font(Theme.ui(12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            Text("No prompts, model names or page content. Measures the running app, not startup.")
+                .font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                if recorder.manualRecording {
+                    Button("Stop recording") { recorder.stopRecording() }
+                } else {
+                    Button("Start recording") { recorder.startRecording(runtime: runtime) }
+                        .disabled(runtime.paths.readOnly || recorder.automaticRecording)
+                }
+                if let url = recorder.lastURL {
+                    Button("Show recording") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                }
+            }
+            if recorder.manualRecording {
+                Text("Recording current app · stops automatically after 5 minutes").font(Theme.ui(12)).foregroundStyle(Theme.accent)
+            } else if recorder.automaticRecording {
+                Text("Automatic read-only recording is active.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+            } else if runtime.paths.readOnly {
+                Text("Manual recording is unavailable in read-only mode.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+            } else {
+                Text("Not recording").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+            }
+            if let error = recorder.recordingError { NativeError(message: error) }
         }
     }
 }

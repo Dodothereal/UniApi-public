@@ -60,3 +60,26 @@ Settings shows the saved delivery state: Not configured, Off, or Ready. Ready me
 Changes are drafts until Save, with an unsaved-changes notice. Closing the form keeps the draft while Settings stays open; leaving Settings can discard it. Saving uses the app-owned private configuration and validates enabled credentials. Disconnect asks for confirmation before disabling delivery and clearing the saved token and chat ID. Discard changes restores the last saved values. A failed read offers Retry loading. No credentials are imported from other apps. Lookup happens only when requested; configuring or saving does not send a message or run a network test. A read-only session cannot save changes.
 
 Application diagnostics and storage actions are available under the Diagnostics and storage disclosure.
+
+## Performance recording
+
+Under Diagnostics and storage, Start recording saves page timing and process
+resource metadata locally for up to five minutes. Use the normal sidebar to
+navigate from Speed to Statistics, then use the Statistics header Reload action.
+Stop recording closes the file; Show recording reveals it in Finder only when
+you ask. Starting a recording does not reopen pages or clear retained data.
+
+Recording is off by default and cannot be started in a read-only session. Each
+explicit recording creates a fresh owner-only file under
+`UNIAPI_DATA/logs/ui-recordings/`; no path is chosen by a request or webpage.
+The recording stops at five minutes, 4 MiB or 4,096 records. An unsafe or changed
+output file or a write failure stops it without affecting the page operation.
+Files remain local until you choose to share or remove them.
+
+Rows contain a session ID, page name, navigation/refresh/rebuild trigger, phase,
+elapsed time, process CPU counters, lifetime peak resident memory and a recording
+timestamp. Prompts, model names, provider keys, paths and page contents are not
+recorded. Session IDs and page/timing history can still be private. Manual
+recordings measure the currently running app; they do not measure cold startup.
+View commits and drawing callbacks do not establish GPU presentation or frame
+rate, and process CPU or lifetime peak memory are not isolated per-page costs.
