@@ -61,6 +61,24 @@ Every command prints one JSON result with `command`, `outcome`, `reloadRequired`
 
 Statistics reads supported coding tools' local stores. It does not require configuring every supported tool. Imported history may include private project names and paths; redact it before sharing screenshots or diagnostics.
 
+Reload still discovers source changes. For up to four recent plain Codex JSONL
+files, the native reader can reuse an in-memory parser checkpoint after verifying
+every old byte with SHA-256. It rereads the old prefix but avoids decoding its
+JSON again. The cache has a 16 MiB aggregate retention estimate and collection
+limits; it does not retain raw EOF-tail bytes or write checkpoints to disk.
+The estimate is not a hard process-RAM limit. Cold/evicted entries use the full
+reader. Rebuild, reader migration repair, read-only imports and compressed files
+bypass this optimization. A rewritten prefix, truncation, replacement or detected
+concurrent mutation also falls back to a full read.
+
+A checkpoint becomes reusable only after its complete file transaction succeeds
+and remains bound to that transaction's opaque revision. Full-file row replacement,
+record ordering, global deduplication and publication checks are unchanged. The
+native scan diagnostics report reused-file count, validated-prefix bytes and
+bytes processed by the final accepted eligible-reader attempt, not cumulative
+retry I/O; zero does not mean no source work occurred. Ordinary metadata checks still cannot detect a hidden
+same-size/same-mtime rewrite; Rebuild is the explicit full-read action.
+
 ### Streaming measurements
 
 New successful streaming Responses routed through UniApi can contribute a
