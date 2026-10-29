@@ -4,13 +4,25 @@ UniApi stores navigation preferences with macOS application preferences. They ar
 
 ## Guided setup
 
-A fresh, unconfigured writable installation offers a two-step welcome: choose a first task, then appearance. Existing preferences or provider configuration keep it out of the way for existing users. `Settings > Show setup` reopens the same guide without resetting the workspace.
+A fresh, unconfigured writable installation offers a single-screen welcome: choose a starting page, appearance and spacing, then open that page directly. A labelled layout illustration is shown when the viewport has room. Existing preferences or provider configuration keep it out of the way for existing users. `Settings > Show setup` reopens the same guide without resetting the workspace.
 
 If the app exits before completing or skipping setup, the guide opens again on the next launch with its appearance choices retained. A separate started marker distinguishes those choices and the new window frame from an older installation's settings.
 
-The first screen offers four aligned choices: Connect a model, Understand your usage, Transcribe locally, or Just look around. These select a first page, without connecting or downloading anything. The second screen offers System/Light/Dark, page spacing and motion. There is no extra introduction or confirmation screen. Navigation stays in a fixed footer with 40-point controls; Skip setup stays in the header. Short windows scroll content while keeping navigation available. Each new step returns to the top and requests accessibility focus on its heading. The last action names the page it will open.
+The guide offers Home, Switcher, Statistics and Transcribe as starting pages,
+without connecting or downloading anything. Appearance and spacing share this
+same screen. Larger viewports show an inert layout illustration; smaller ones
+use a two-column task grid. The Open action stays in a fixed footer at 40 points
+high and names the selected page. Skip for now stays in the header. Short
+windows can scroll content while keeping the primary action available. The
+heading requests accessibility focus on entry.
 
-Theme, spacing and motion choices apply immediately. Transitions last 180 ms and respect both the app's reduced-motion preference and macOS Reduce Motion. The guide has no animation timer or frame callback. Back retains your choices, and Skip leaves you in the workspace. Return advances, Escape skips, and Command-Left goes back. Finishing can open Home, Switcher, Statistics or Transcribe; this is a one-time navigation choice, separate from the launch-page setting.
+Theme and spacing choices apply immediately and remain saved when you finish
+or skip. Density changes the guide's real choice spacing as well as its layout
+illustration. Motion keeps the existing preference and always respects macOS
+Reduce Motion; its controls remain in Settings. Hover/press feedback has no
+animation timer or frame callback. Return opens the selected page and Escape
+skips; there are no extra steps or Back action. The selected starting page is
+a one-time navigation choice, separate from the launch-page setting.
 
 The guide does not sign in, connect providers, download a model, start inference or change routing or hardware controls. Optional integrations remain explicit actions on their own pages.
 

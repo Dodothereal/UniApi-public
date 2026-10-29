@@ -110,14 +110,12 @@ final class PublicCaptureAnchorView: NSView {
         let detailSections = ["settings-sidebar": "sidebar", "settings-telegram": "telegram",
                               "settings-theme-common": "theme-common", "settings-theme-advanced": "theme-advanced"]
         let section = detailSections[page]
-        let onboarding = page.hasPrefix("onboarding-") ? NativeOnboardingStep.allCases.first {
-            String(describing: $0) == String(page.dropFirst("onboarding-".count))
-        } : nil
+        let onboarding = page == "onboarding-welcome"
         let pricing = ["pricing-empty": "empty", "pricing-unknown": "unknown", "pricing-partial": "partial", "pricing-priced": "priced"][page]
         let viewportAllowed = pricing == nil
             ? (640...1200).contains(width) && (500...1000).contains(height)
             : (320...1200).contains(width) && (100...1000).contains(height)
-        guard paths.readOnly, ["stats", "transcribe", "settings"].contains(page) || onboarding != nil || section != nil || pricing != nil,
+        guard paths.readOnly, ["stats", "transcribe", "settings"].contains(page) || onboarding || section != nil || pricing != nil,
               viewportAllowed,
               ["light", "dark"].contains(appearance),
               ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] == section,
@@ -163,8 +161,8 @@ final class PublicCaptureAnchorView: NSView {
         let content: AnyView
         if let pricing {
             content = AnyView(VStack { NativeStatsPricing(cost: pricingFixture(pricing)); Spacer(minLength: 0) }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Theme.bg))
-        } else if let onboarding {
-            content = AnyView(NativeOnboardingView(initialStep: onboarding) { _ in })
+        } else if onboarding {
+            content = AnyView(NativeOnboardingView { _ in })
         } else { switch page {
         case "stats": content = AnyView(NativeStatsPage(runtime: runtime))
         case "transcribe": content = AnyView(NativeTranscribePage(runtime: runtime))
@@ -191,6 +189,8 @@ final class PublicCaptureAnchorView: NSView {
         panel.isExcludedFromWindowsMenu = true
         panel.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
         let host = NSHostingView(rootView: view); self.host = host
+        // AppKit must not enlarge an allegedly finite viewport to fit content.
+        host.sizingOptions = []
         panel.contentView = host
         host.frame = NSRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
         // The production page owns its NativePage/ScrollView. No extra scroll
@@ -207,7 +207,7 @@ final class PublicCaptureAnchorView: NSView {
             }
             host.cacheDisplay(in: host.bounds, to: discarded)
             try sample("after-readiness-bitmap")
-            if onboarding != nil || pricing != nil { break }
+            if onboarding || pricing != nil { break }
             if try readiness(metrics, visit: visit.id) { break }
             guard ProcessInfo.processInfo.systemUptime < deadline else {
                 throw NativeFailure("Page never reached ready; no screenshot accepted")
@@ -227,6 +227,10 @@ final class PublicCaptureAnchorView: NSView {
         }
         try sample("before-bitmap")
         host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
+        guard host.bounds.size == NSSize(width: CGFloat(width), height: CGFloat(height)),
+              panel.contentView?.bounds.size == host.bounds.size else {
+            throw NativeFailure("Capture viewport resized; no screenshot accepted")
+        }
         guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
             throw NativeFailure("Cannot allocate native page bitmap")
         }

@@ -13,53 +13,53 @@
     {
       "page": "onboarding-welcome",
       "appearance": "dark",
-      "image": "onboarding-dark.png",
-      "sha256": "e75c0f68d93c321e038bdd6f07a427fd54a874986a6f5cbc01c3f47e15c47200",
+      "image": "onboarding-compact-dark.png",
+      "sha256": "a0850e4e2abf57c9e68cd4e464f05992ff761046f06cbc94d861eadbc2d7c74e",
       "viewport": [
-        820,
-        660
+        640,
+        520
       ],
-      "label": "Exact two-step production onboarding view; private preferences and reduced motion, no app session or services.",
+      "label": "Single-screen production onboarding with inert layout illustration, private preferences and reduced motion; no app session or services. Exact finite host size asserted.",
       "sessionInitializer": "none",
       "sessionBypass": "No app session is constructed.",
       "parentVisualReviewed": true,
-      "sourceSHA256": "b63c40a45f60c714fd2beb751e8c77b081352332aa484c073d5c4f23e1ffe75d",
-      "compositionSHA256": "69122495c3f6768daea7a401000a2fcbeafc5c8540488fd3ebe15e7e5e95c3dc",
-      "harnessSHA256": "655eac5185d077467ebe66e2f299577237da1bb48f907d29eee3026513f78424"
+      "sourceSHA256": "075580ed683292429107c7bdcaef4b908702fb4c13d7b0bfa2b6d1e3ddbb75ad",
+      "compositionSHA256": "bd74363d74512640ad111aa5353f86b1658afef26dcb4a208625348f5cd3fefc",
+      "harnessSHA256": "c4f01761e2ac914422712c0a1adf6f9242cf88221cea0be6ba47f6b2d0682ea6"
     },
     {
       "page": "onboarding-welcome",
       "appearance": "light",
       "image": "onboarding-light.png",
-      "sha256": "58437a92d8806a798b60066025c7255fb2c14d658dccb1d0e53e36ef67afa751",
+      "sha256": "231e6bec1b8d5b63120f27351e67a617062dea880d0253aa93eac2ea6f8bdfe3",
       "viewport": [
         820,
         660
       ],
-      "label": "Exact two-step production onboarding view; private preferences and reduced motion, no app session or services.",
+      "label": "Single-screen production onboarding with inert layout illustration, private preferences and reduced motion; no app session or services. Exact finite host size asserted.",
       "sessionInitializer": "none",
       "sessionBypass": "No app session is constructed.",
       "parentVisualReviewed": true,
-      "sourceSHA256": "b63c40a45f60c714fd2beb751e8c77b081352332aa484c073d5c4f23e1ffe75d",
-      "compositionSHA256": "69122495c3f6768daea7a401000a2fcbeafc5c8540488fd3ebe15e7e5e95c3dc",
-      "harnessSHA256": "655eac5185d077467ebe66e2f299577237da1bb48f907d29eee3026513f78424"
+      "sourceSHA256": "075580ed683292429107c7bdcaef4b908702fb4c13d7b0bfa2b6d1e3ddbb75ad",
+      "compositionSHA256": "bd74363d74512640ad111aa5353f86b1658afef26dcb4a208625348f5cd3fefc",
+      "harnessSHA256": "c4f01761e2ac914422712c0a1adf6f9242cf88221cea0be6ba47f6b2d0682ea6"
     },
     {
-      "page": "onboarding-appearance",
+      "page": "onboarding-welcome",
       "appearance": "dark",
-      "image": "onboarding-appearance-dark.png",
-      "sha256": "6af9055ef10d77bdcf78ca948751d6f34993c3112440d8dfaecaa6bfcb40057f",
+      "image": "onboarding-dark.png",
+      "sha256": "898844366b79681d7d11ec2adf17f6992561ee281231b9561cfedb264a554d32",
       "viewport": [
         820,
         660
       ],
-      "label": "Exact two-step production onboarding view; private preferences and reduced motion, no app session or services.",
+      "label": "Single-screen production onboarding with inert layout illustration, private preferences and reduced motion; no app session or services. Exact finite host size asserted.",
       "sessionInitializer": "none",
       "sessionBypass": "No app session is constructed.",
       "parentVisualReviewed": true,
-      "sourceSHA256": "b63c40a45f60c714fd2beb751e8c77b081352332aa484c073d5c4f23e1ffe75d",
-      "compositionSHA256": "69122495c3f6768daea7a401000a2fcbeafc5c8540488fd3ebe15e7e5e95c3dc",
-      "harnessSHA256": "655eac5185d077467ebe66e2f299577237da1bb48f907d29eee3026513f78424"
+      "sourceSHA256": "075580ed683292429107c7bdcaef4b908702fb4c13d7b0bfa2b6d1e3ddbb75ad",
+      "compositionSHA256": "bd74363d74512640ad111aa5353f86b1658afef26dcb4a208625348f5cd3fefc",
+      "harnessSHA256": "c4f01761e2ac914422712c0a1adf6f9242cf88221cea0be6ba47f6b2d0682ea6"
     },
     {
       "page": "transcribe",
@@ -260,6 +260,6 @@
       "retainedCorePresentation": "Earlier retained objects; current UI compiled separately. No current service or compositor claim."
     }
   ],
-  "onboardingReview": "Two steps in Light/Dark at 820x660, 760x580, 700x580 and 640x520. All four first-task choices and footer actions remain visible at the smallest size; secondary notes can scroll. These unordered view bitmaps do not establish input, compositor smoothness or fresh-install acceptance.",
+  "onboardingReview": "Single-screen welcome: eight exact finite Default-spacing Light/Dark captures at 820x660, 760x580, 700x580 and 640x520, visually reviewed; no compositor or fresh-user acceptance.",
   "settingsCaptureScope": "Default pages plus disclosure state and programmatic scrolling in detail captures; no interaction proof."
 }

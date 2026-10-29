@@ -48,6 +48,46 @@ and no provider/model action occurred. This is thin compilation/static evidence,
 not physical Intel/macOS 14 runtime, translated runtime, universal packaging,
 fresh-user installation or device acceptance. Public downloads remain arm64.
 
+## Single-screen onboarding revision
+
+The welcome guide now places first-page selection, appearance and spacing on
+one screen. Open names and enters the selected destination directly. Larger
+viewports show an inert, labelled layout illustration using the real theme
+and density values; smaller windows use a two-column task grid. Setup still
+performs no connection, download or permission action. Existing admission and
+completion markers and all stored preference keys are unchanged. The old
+step enum and its obsolete navigation test were removed, rather than counted
+as coverage for a flow that no longer exists.
+
+The optimized native command exited successfully in 180.325 seconds, built
+all UI and three product links in 128.93 seconds, and passed 1,290 tests with
+zero failures in 46.568 seconds (46.650 including all-suite completion). All
+five admission-policy methods passed. Frozen compiler inputs remained unchanged.
+The separate public static gate passed all 72 Python fixtures.
+
+Eight exact-source native bitmaps cover Light/Dark at 820×660, 760×580,
+700×580 and 640×520. The final nine-file presentation link took 13.971 seconds
+and its executable has macOS 14 minimum/SDK 26.5 headers. All task choices,
+appearance and spacing controls and the primary action are visible at the
+smallest Default-spacing viewport. AppKit auto-sizing is disabled and the
+host bounds are asserted before capture. An earlier capture that enlarged its
+small viewport and an intermediate short-window layout were rejected; neither
+is part of the final screenshot set. Independent source and image review found
+no blocking issue in these final Default-spacing layouts. Quiet, unordered
+bitmaps establish layout, not input, VoiceOver delivery, compositor smoothness
+or installed/fresh-user acceptance.
+
+A separate exact-view native preview exercised Statistics selection, Light and
+Compact, then Dark and Roomy through computer use. Return produced the `stats`
+callback directly. Reopening retained Dark/Roomy in its private preference suite;
+Escape produced the skip callback. Both callbacks are present in the bound
+process log, and the own Close action exited that process. The live Light/Compact
+screen was inspected. This preview constructs no app session or services and
+was not sandboxed. Earlier private harness attempts with overriding volatile
+defaults or an invalid suite did not establish appearance input and were
+superseded; no production change was needed for them. Installed-shell behavior,
+VoiceOver and compositor smoothness remain separate acceptance layers.
+
 ## Two-step onboarding revision (0.1.12)
 
 The guide now starts with four first-task choices, then offers appearance,

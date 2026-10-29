@@ -52,9 +52,9 @@ For source builds and separate runtime data, see [local development](docs/LOCAL-
 
 ## Your first five minutes
 
-New, unconfigured installations offer a skippable two-step welcome.
-It offers theme, spacing and motion choices and starting-point
-cards to help you find your way around. Opening welcome itself never signs you
+New, unconfigured installations offer a skippable single-screen welcome.
+Choose a starting page, adjust appearance and spacing, and open that page
+directly. Larger windows show a labelled layout preview. Opening welcome itself never signs you
 in, downloads a model, changes hardware controls or changes routing. Existing
 installations are not forced through setup; use **Settings > Show setup** to
 replay it. If setup is interrupted, its appearance choices are retained and
@@ -185,7 +185,7 @@ Hardware controls may require compatible devices and an explicitly installed hel
 ## Screenshots
 
 These are native views captured offscreen with empty fixture data. Setup uses
-820×660 and 760×580 viewports; the page views use 1050×800 points.
+820×660 and 640×520 viewports; the page views use 1050×800 points.
 The capture-only session bypasses normal background-service
 startup. They illustrate views, not full-shell interaction, fresh-install
 acceptance or compositor behavior. The [sanitized manifest](assets/screenshots/manifest.json)
@@ -193,13 +193,13 @@ records capture scope and image checksums.
 
 **Welcome — Dark**
 
-Choose a first task, adjust appearance, then open that page directly. The
-two-step guide can be skipped or replayed from Settings.
+Choose a starting page, preview the appearance and spacing, then open that page
+directly. The single-screen guide can be skipped or replayed from Settings.
 
 ![Native welcome guide, Dark appearance](assets/screenshots/onboarding-dark.png)
 
 [Welcome — Light](assets/screenshots/onboarding-light.png) ·
-[Appearance choices](assets/screenshots/onboarding-appearance-dark.png)
+[Compact layout](assets/screenshots/onboarding-compact-dark.png)
 
 **Statistics — sample usage, Dark**
 

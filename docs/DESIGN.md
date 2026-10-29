@@ -41,23 +41,30 @@ add frame timers or repeat entrance animations on background refreshes.
 
 ## Welcome guide
 
-Setup has two steps: a first task, then appearance. Do not add a ceremonial
-welcome screen or repeat choices in a separate completion screen. Header,
-content and footer share a 600-point column and 32-point outer inset. Skip setup
-stays in the header; Back and the destination action stay in a fixed footer at
-40 points high. Short viewports scroll content without losing those actions.
+Setup is one screen: choose Home, Switcher, Statistics or Transcribe, adjust
+appearance and spacing if desired, then open the selected page directly. Skip
+for now stays in the header. Do not insert an appearance wizard between the
+user's task choice and its destination. Motion follows the existing preference
+and macOS Reduce Motion; further customization remains in Settings.
 
-Present destinations as a single list of aligned rows, with a consistent icon
-slot, title, explanation and selected indicator. Use a soft accent surface for
-the selected row, without enclosing every row in an outline. Selection must not
-imply that a provider has connected or a model has downloaded. The final action
-names the selected page. Appearance uses compact System/Light/Dark choices and
-aligned spacing/motion controls. Keep defaults immediately usable.
+Header, content and footer share one aligned column. Use a 24–26 point heading,
+short descriptions, consistent Lucide icon slots and a single checkmark for
+selection. Avoid nested icon wells, radio circles, outlined groups and repeated
+selection decoration. The primary action names its destination and remains
+40 points high in a fixed footer.
 
-Use the shared theme, typography and Lucide icons. Step headings have heading
-semantics and receive accessibility focus when the step changes. Transitions
-are a 180 ms opacity/offset change with no ongoing animation work and an
-immediate reduced-motion path. Hover and press feedback belong to the control.
+At sufficiently wide and tall sizes, a labelled, inert layout illustration sits
+beside the choices. It uses the real theme tokens and density values and changes
+with the choices. It is not a live page, does not contain user data and must not
+create an app session, connect a provider or download a model. Smaller viewports
+use a two-column task grid and omit the illustration; the actual choice spacing
+still demonstrates density. Content can scroll while the primary action stays
+available. Review the complete view at the exact viewport, disabling AppKit's
+automatic host sizing so it cannot conceal clipping by enlarging the window.
+
+The heading has accessibility heading semantics and requests focus on entry.
+Controls retain keyboard activation and selected traits. Hover and press effects
+are brief and disabled under reduced motion, with no ongoing animation work.
 
 ## Job history cleanup
 
