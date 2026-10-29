@@ -193,6 +193,59 @@ final class StatisticsCodexReader {
     private var meta: JSONValue = [:], context: JSONValue = [:], contexts: [String: JSONValue] = [:]
     private var modernTurns = Set<String>(), modern: [StatisticsUsage] = [], fallback: [(String, StatisticsUsage)] = [], exclusions: [String] = []
     private var previous: Double = 0, starts: [String: Double] = [:], tools = Set<String>()
+    // Value snapshots must precede provisional EOF decoding. Holding this
+    // reference-type reader itself would let the next read mutate its base.
+    struct Snapshot: Sendable {
+        var meta: JSONValue, context: JSONValue, contexts: [String: JSONValue]
+        var modernTurns: Set<String>, modern: [StatisticsUsage], fallback: [(String, StatisticsUsage)], exclusions: [String]
+        var previous: Double, starts: [String: Double], tools: Set<String>
+
+        func estimatedBytes(limit: Int) -> Int? {
+            guard modern.capacity <= 20_000, fallback.capacity <= 20_000,
+                  modern.count + fallback.count <= 20_000, contexts.capacity <= 10_000,
+                  modernTurns.capacity <= 40_000, exclusions.capacity <= 20_000,
+                  starts.capacity <= 40_000, tools.capacity <= 2_048 else { return nil }
+            var remaining = limit
+            func spend(_ count: Int) -> Bool {
+                guard count >= 0, count <= remaining else { return false }
+                remaining -= count; return true
+            }
+            func json(_ value: JSONValue) -> Bool {
+                guard spend(64) else { return false }
+                switch value {
+                case .string(let text): return spend(text.utf8.count)
+                case .array(let values): return spend(values.capacity * 32) && values.allSatisfy { json($0) }
+                case .object(let values): return spend(values.capacity * 96) && values.allSatisfy { spend($0.key.utf8.count) && json($0.value) }
+                default: return true
+                }
+            }
+            func strings<S: Sequence>(_ values: S) -> Bool where S.Element == String {
+                values.allSatisfy { spend($0.utf8.count) }
+            }
+            func record(_ value: StatisticsUsage) -> Bool {
+                strings([value.id, value.source, value.model, value.project, value.session, value.effort, value.rawDay,
+                         value.timing ?? "", value.streamTiming ?? ""])
+            }
+            guard spend((modern.capacity + fallback.capacity) * 640),
+                  spend((contexts.capacity + modernTurns.capacity + starts.capacity + tools.capacity) * 96),
+                  spend(exclusions.capacity * 32), json(meta), json(context),
+                  contexts.allSatisfy({ spend($0.key.utf8.count) && json($0.value) }),
+                  strings(modernTurns), strings(exclusions), strings(starts.keys), strings(tools),
+                  modern.allSatisfy({ record($0) }),
+                  fallback.allSatisfy({ spend($0.0.utf8.count) && record($0.1) }) else { return nil }
+            return limit - remaining
+        }
+    }
+    init() {}
+    init(snapshot: Snapshot) {
+        meta = snapshot.meta; context = snapshot.context; contexts = snapshot.contexts
+        modernTurns = snapshot.modernTurns; modern = snapshot.modern; fallback = snapshot.fallback; exclusions = snapshot.exclusions
+        previous = snapshot.previous; starts = snapshot.starts; tools = snapshot.tools
+    }
+    func snapshot() -> Snapshot {
+        Snapshot(meta: meta, context: context, contexts: contexts, modernTurns: modernTurns, modern: modern,
+                 fallback: fallback, exclusions: exclusions, previous: previous, starts: starts, tools: tools)
+    }
     func push(_ o: JSONValue) {
         let p = o["payload"], type = o["type"].string
         // Most transcript frames only update context or are unrelated output.

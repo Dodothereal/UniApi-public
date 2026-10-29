@@ -285,3 +285,67 @@ fixture and output and is not page memory. This is a synthetic component
 control, not an installed speedup, GPU/FPS result or completion of the remaining
 Reload work. Four production regression methods and the full 1,291-test optimized native
 gate passed. Installed candidate timing remains pending.
+
+
+## Validated plain-Codex append candidate
+
+The native reader can checkpoint metadata parser state for four recent plain
+Codex files, with a 16 MiB aggregate retention estimate and explicit collection
+limits. A growing file must match the committed revision and file identity,
+then pass SHA-256 validation of every old byte. Only its saved EOF tail and new
+bytes are decoded again. Raw EOF-tail bytes are reread, not retained by the cache.
+The parser snapshot precedes provisional EOF decoding, so a later append can
+invalidate an unterminated row or replace fallback accounting correctly.
+Rebuild, migration repair, read-only reads, archives, evicted entries and changed
+prefixes use the full path. Detected mid-read changes retry on the owned file
+descriptor. Complete per-file row transactions, ordering and global deduplication
+remain unchanged. Scan byte counters describe the final accepted eligible-reader
+attempt, not cumulative retry I/O or a CPU breakdown.
+
+A matched synthetic warm-parser control used a 181,657,821-byte prefix with
+1,800 usage records and large ignored tool bodies, then a 201,854-byte append
+adding two records. Six separate optimized process invocations ran in ABBAAB
+order. Priming, the append write and result/oracle hashing were outside timing;
+full-prefix validation was inside the candidate timing. Each result matched the
+full importer's complete record order, stored fields and every numeric bit
+pattern. All six result digests matched and all run logs were empty. Harness,
+runner, actual binary, retained objects/modules and source inputs were pinned
+and joined to the successful native gate. The actual executable has macOS 14
+minimum/SDK 26.5 headers. Independent saved-record review reproduced the results.
+
+| Metric | Full parsing | Validated append |
+| --- | ---: | ---: |
+| Median elapsed | 176.651 ms | 71.830 ms |
+| Median process CPU | 175.128 ms | 71.186 ms |
+| Median process peak RSS before oracle | 22,495,232 B | 24,788,992 B |
+| Prefix bytes validated | 0 | 181,657,821 |
+| Bytes sent through the line decoder | 181,859,675 | 201,854 |
+
+The candidate trades some retained metadata for lower repeated parsing cost.
+Peak RSS includes process initialization, priming and base hashing; it is not
+timed allocation or page memory. The measured increase is 2,293,760 bytes.
+The new checkpoint's retention estimate was 4,416,455 bytes, which is separate
+from the measured process peak. The sandbox restricted writes to the private
+work directory and denied operator-home reads outside it; default reads outside
+the operator home remained allowed. Neither `NativeRuntime` nor an app session or database was constructed. These are parser-component results, not a whole-app speedup,
+GPU/FPS, energy, fresh disk-cache or instant-Reload claim. The full 1,303-test
+native gate, including 13 append-specific methods, passed.
+
+A pre-install 0.1.13 running-app baseline separately recorded both Codex and
+All-apps scopes, each with three Home → Speed → Statistics passes and three
+individually admitted header Reloads. Each recording contains 65 rows and 13
+complete visits, without failed/incomplete visits or omitted samples. Codex's
+session reached its automatic five-minute stop; All apps was stopped explicitly.
+The original Codex/All-time scope was restored and installed app bytes matched.
+
+| 0.1.13 scope/action | n | Median data view, ms | Median data draw, ms | Median host-process CPU at draw, ms |
+| --- | ---: | ---: | ---: | ---: |
+| Codex Statistics navigation | 3 | 22.345 | 313.220 | 314.255 |
+| Codex Reload | 3 | 1282.228 | 1312.101 | 1860.472 |
+| All apps Statistics navigation | 3 | 22.397 | 295.592 | 296.428 |
+| All apps Reload | 3 | 1605.126 | 1652.039 | 2219.567 |
+
+This baseline predates installing the append candidate. Histories were live;
+no causal version percentage follows. Host display callbacks do not prove GPU
+presentation or animation cadence. Candidate installation and actual in-app
+follow-up remain pending.

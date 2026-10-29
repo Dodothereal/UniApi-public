@@ -48,6 +48,35 @@ and no provider/model action occurred. This is thin compilation/static evidence,
 not physical Intel/macOS 14 runtime, translated runtime, universal packaging,
 fresh-user installation or device acceptance. Public downloads remain arm64.
 
+## Plain Codex append-reader candidate
+
+The final optimized native gate exited successfully in 183.250 seconds, built
+all UI and three products in 132.63 seconds, and passed 1,303 tests with zero
+failures in 48.397 seconds (48.486 including all-suite completion). All 13 new
+append-reader methods passed in 1.074 seconds (1.075 suite completion). Compiler
+inputs matched their frozen manifest after execution. Independent source review
+found no blocking issue in the three production files and test delta.
+
+Differential cases compare complete stored fields, order and Double bit patterns
+with the unchanged full importer. They cover every-byte UTF-8/CRLF splits,
+malformed/provisional EOF rows, fallback replacement and clocks, prefix rewrites,
+truncation/replacement, exact revision joins, cache eviction/estimator refusal,
+real INSERT rollback, foreign writers, Rebuild, read-only and compressed failures.
+A default-nil synchronous observation seam permits controlled mid-read mutation
+of owned fixture files; it is unused by production callers. The tests verify
+that rewrite/append/rename/unlink after validation fall back on the owned file
+descriptor, without adopting a replacement or dropping valid input.
+
+The first 10-method focused gate compiled successfully but had two fixture
+assertion failures from `/var` versus `/private/var` spelling in archive paths.
+The corrected fixture captures the already established cache key and retains
+exact path/source-path expectations. The production path contract was unchanged;
+the complete first negative and repaired generation are retained separately.
+
+The matched synthetic parser control and separate 0.1.13 running-app baseline
+are documented in [Performance](PERFORMANCE.md). Neither substitutes for actual
+candidate installation or Speed → Statistics/Reload follow-up, still pending.
+
 ## Single-screen onboarding revision
 
 The welcome guide now places first-page selection, appearance and spacing on

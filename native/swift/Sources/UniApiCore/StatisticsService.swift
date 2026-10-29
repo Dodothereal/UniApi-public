@@ -25,6 +25,7 @@ public actor NativeStatisticsService {
     private var importedFiles: [File] = []
     private var importedCacheFiles: [JSONObject] = []
     private var importedDataVersion: JSONValue = .null
+    private var codexAppendCache = StatisticsCodexAppendCache()
     private var scan: JSONValue = [:], progress: JSONValue = ["scanId": "", "phase": "", "status": "idle", "done": 0, "total": 0, "file": "", "generation": 0, "loaded": false]
     private var rawByDay: [String: Double] = [:], colors: JSONValue = [:], warnings: [String] = []
     private var folds: [String: StatisticsDerived] = [:]
@@ -96,6 +97,7 @@ public actor NativeStatisticsService {
             do { try await flight.task.value; finishScan(flight.id) }
             catch { finishScan(flight.id, error: error) }
         }
+        codexAppendCache.removeAll()
         await publishedSummary.drainBootstrap()
     }
     private func checkRunning() throws {
@@ -476,6 +478,14 @@ public actor NativeStatisticsService {
         let streamingClocks = readerMarkers.contains { $0["name"] == "stats-streaming-1" }
         let incompleteGeneration = !nativeReaders || known.contains { ($0["mtime"]?.double ?? 0) < 0 || ($0["size"]?.double ?? 0) < 0 }
         let present = Set(files.map { $0.cachePath })
+        // Retain only the four most recently modified plain Codex files, not
+        // a second parsed copy of the history corpus. Rebuild and reader repair
+        // always start afresh; read-only caches cannot commit a matching revision.
+        let appendEligible = !full && !runtime.paths.readOnly && !incompleteGeneration && turnClocks && streamingClocks
+        let appendPaths = appendEligible ? Set(files.filter { $0.source == "codex" && $0.url.lastPathComponent.hasSuffix(".jsonl") }
+            .sorted { $0.mtime == $1.mtime ? $0.cachePath < $1.cachePath : $0.mtime > $1.mtime }
+            .prefix(StatisticsCodexAppendCache.maximumFiles).map(\.cachePath)) : []
+        codexAppendCache.retain(appendPaths)
         // A read-only legacy cache cannot receive the migration invalidation.
         // Reparse every file together; fresh canonical IDs must never meet old
         // cached IDs from an unchanged mirror in the same published generation.
@@ -495,6 +505,7 @@ public actor NativeStatisticsService {
             let document = try? NativeFile.readJSON(runtime.paths.home.appendingPathComponent(".claude/stats-cache.json"))
             if document == cacheDocument {
                 scan["elapsedMs"] = .number(clock() - begin); scan["scannedAt"] = .number(clock()); scan["parsedFiles"] = 0
+                scan["codexAppendFiles"] = 0; scan["codexValidatedPrefixBytes"] = 0; scan["codexAppendDecodedBytes"] = 0
                 scan["scanId"] = progress["scanId"]
                 self.warnings = []; lastCheck = clock()
                 await publishProgress("reading")
@@ -510,18 +521,38 @@ public actor NativeStatisticsService {
         await publishProgress("reading")
         scanNeedsRebuild = true
         var memory: [(File, StatisticsReadResult)] = [], failedUpgrade = false
+        var appendFiles = 0, validatedBytes: Int64 = 0, decodedBytes: Int64 = 0
         for (index, f) in todo.enumerated() {
             try Task.checkCancellation()
             progress["file"] = .string(f.url.lastPathComponent)
             do {
                 // Parsing and SQLite reads execute on this service, never MainActor.
-                let result = try StatisticsImporter.read(f.url, source: f.source)
+                let append: StatisticsCodexAppendRead?
+                if appendPaths.contains(f.cachePath) {
+                    // Read the current transaction identity, not just the scan's
+                    // earlier inventory: another reader may have committed while
+                    // progress publication yielded this actor.
+                    let row = try runtime.db.query("SELECT mtime,size,source_path,record_revision FROM stats_files WHERE path=?", [.string(f.cachePath)]).first
+                    let checkpoint = codexAppendCache.checkpoint(path: f.cachePath, sourcePath: row?["source_path"]?.string ?? "",
+                        revision: row?["record_revision"]?.string ?? "", mtime: row?["mtime"]?.double ?? -1, size: row?["size"]?.double ?? -1)
+                    append = try StatisticsCodexAppend.read(f.url, checkpoint: checkpoint)
+                } else { append = nil }
+                let result: StatisticsReadResult
+                if let append { result = append.result }
+                else { result = try StatisticsImporter.read(f.url, source: f.source) }
                 if runtime.paths.readOnly { memory.append((f, result)) }
                 else {
+                    let revision = UUID().uuidString
                     try runtime.db.transaction {
                         try runtime.db.execute("DELETE FROM stats_records WHERE path=?", [.string(f.cachePath)])
                         try insertRecords(result.records, path: f.cachePath)
-                        try runtime.db.execute("INSERT INTO stats_files(path,mtime,size,excluded_usage,source_path,record_revision) VALUES (?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime,size=excluded.size,excluded_usage=excluded.excluded_usage,source_path=excluded.source_path,record_revision=excluded.record_revision", [.string(f.cachePath), .number(f.mtime), .number(f.size), .number(Double(result.excluded)), .string(f.url.path), .string(UUID().uuidString)])
+                        try runtime.db.execute("INSERT INTO stats_files(path,mtime,size,excluded_usage,source_path,record_revision) VALUES (?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime,size=excluded.size,excluded_usage=excluded.excluded_usage,source_path=excluded.source_path,record_revision=excluded.record_revision", [.string(f.cachePath), .number(f.mtime), .number(f.size), .number(Double(result.excluded)), .string(f.url.path), .string(revision)])
+                    }
+                    if let append {
+                        codexAppendCache.commit(append.checkpoint, path: f.cachePath, sourcePath: f.url.path,
+                                                revision: revision, mtime: f.mtime, size: f.size)
+                        if append.validatedPrefixBytes > 0 { appendFiles += 1 }
+                        validatedBytes += append.validatedPrefixBytes; decodedBytes += append.decodedBytes
                     }
                 }
             } catch {
@@ -586,6 +617,9 @@ public actor NativeStatisticsService {
         let nextColors = JSONValue.object(Dictionary(uniqueKeysWithValues: weights.keys.sorted { weights[$0] == weights[$1] ? $0 < $1 : weights[$0]! > weights[$1]! }.enumerated().map { ($0.element, .string(palette[$0.offset % palette.count])) }))
         var nextScan: JSONValue = ["files": .number(Double(files.count)), "bytes": .number(files.reduce(0) { $0 + $1.size }), "elapsedMs": .number(clock() - begin), "scannedAt": .number(clock()), "rawGrand": .number(rawGrand), "duplicates": .number(Double(duplicates)), "records": .number(Double(recordCount)), "claudeFiles": .number(Double(files.filter { $0.source == "claude" }.count)), "parsedFiles": .number(Double(todo.count))]
         nextScan["scanId"] = progress["scanId"]
+        nextScan["codexAppendFiles"] = .number(Double(appendFiles))
+        nextScan["codexValidatedPrefixBytes"] = .number(Double(validatedBytes))
+        nextScan["codexAppendDecodedBytes"] = .number(Double(decodedBytes))
         let excludedRows = try runtime.db.query("SELECT path,excluded_usage FROM stats_files")
         var excluded = Dictionary(uniqueKeysWithValues: excludedRows.map { (($0["path"] ?? .null).string, ($0["excluded_usage"] ?? 0).int) })
         for (file, result) in memory { excluded[file.cachePath] = result.excluded }
