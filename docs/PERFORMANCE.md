@@ -194,7 +194,7 @@ whole-app speedup percentage. All apps Reload still took approximately
 not isolate its cause. This is not an instant-loading or compositor-smoothness
 completion claim. The original Statistics scope was restored after testing.
 
-## Benchmark timestamp candidate
+## Benchmark timestamp eligibility, 0.1.11–0.1.12
 
 A further diagnostic sample exercised one All-apps Reload only after that scope
 had settled. It contained benchmark ledger decoding and timestamp parsing as
@@ -226,4 +226,62 @@ versus 4.892 ms for eligible-only clocks**, in one process with ABBAAB order.
 Complete legacy fold results are compared outside timing. Parser-call counts
 are asserted in the focused helper tests, not in that timing loop. This is a
 clock-component result, not CPU, a fresh-process test or an installed app
-improvement percentage. New installed timings remain pending.
+improvement percentage. The installed follow-up below measures the resulting
+0.1.12 app separately.
+
+## Installed follow-up, 0.1.12
+
+Two explicit recordings each contain 65 rows and 13 complete visits in one
+running process: three Home → Speed → Statistics passes, three individually
+admitted header Reloads and a final Settings visit. Each scope was settled
+before starting its recording; each session was explicitly stopped. All 26
+visits have all five phases, with no failed/incomplete visits or dropped
+samples. The app's 18 installed files matched before and after. The original
+Codex/All-time scope was restored. Independent saved-record arithmetic review
+reproduced every sample, median, range and CPU total.
+
+| Statistics scope/action | Visits | Median data view, ms | Median data draw, ms | Data draw range, ms | Median app CPU at draw, ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| All apps navigation | 3 | 22.2 | 308.9 | 301.9–313.8 | 302.4 |
+| All apps Reload | 3 | 1654.0 | 1720.5 | 1638.7–1736.2 | 2253.5 |
+| Codex navigation | 3 | 21.7 | 330.4 | 325.8–331.2 | 325.2 |
+| Codex Reload | 3 | 1322.7 | 1352.0 | 1351.6–1353.4 | 1902.4 |
+
+Navigation committed data quickly, but Reload is still not instant. These
+histories were live and the work was not frozen between releases. In particular,
+the slower Codex Reload observation is retained rather than omitted or presented
+as a matched-version regression percentage. The same host-draw, process CPU,
+recording-overhead, shared-desktop and small-sample limitations apply. This does
+not prove GPU presentation, animation cadence, cold entry or per-page memory.
+
+A separate source-bound diagnostic sample of one settled Codex Reload found
+changed-file envelope parsing and full cached-row assembly. It is an inclusive
+stack sample, not a timing breakdown or invocation count. An initial diagnostic
+sample missed the requested Reload and is not used as its profile.
+
+## In-place fold bucket candidate
+
+The candidate updates stored day/model dictionaries and project session sets
+in place. The previous loop copied each nested container into a local tuple
+before updating it, creating a second owner and triggering copy-on-write.
+Event order, numeric operations, group membership, date handling and all
+reported fields remain unchanged; no extra corpus cache is retained.
+
+A source-bound control compared complete legacy/candidate boards, including
+every numeric bit pattern, across 216 cases: sorted, reversed and interleaved
+records, four time zones, three ranges, source scopes and optional lifetime
+cache. All matched. Six separate optimized invocations in ABBAAB order used
+40,000 synthetic records; fixture construction and result hashing were outside
+timing. The actual binary targets macOS 14 with SDK 26.5.
+
+| Metric | Original copying loop | In-place candidate |
+| --- | ---: | ---: |
+| Median elapsed time | 87.225 ms | 47.078 ms |
+| Median process CPU | 85.936 ms | 46.744 ms |
+| Median process peak RSS | 51,167,232 bytes | 51,052,544 bytes |
+
+All six full-result bit-pattern digests match. Process peak RSS includes the
+fixture and output and is not page memory. This is a synthetic component
+control, not an installed speedup, GPU/FPS result or completion of the remaining
+Reload work. Four production regression methods and the full 1,291-test optimized native
+gate passed. Installed candidate timing remains pending.
