@@ -187,6 +187,9 @@ records capture scope and image checksums.
 
 **Welcome — Dark**
 
+The four-step guide keeps progress compact, previews appearance choices and
+finishes at your chosen first page. Setup can be replayed from Settings.
+
 ![Native welcome guide, Dark appearance](assets/screenshots/onboarding-dark.png)
 
 [Welcome — Light](assets/screenshots/onboarding-light.png) ·

@@ -39,6 +39,22 @@ Exercise the relevant controls separately and preserve the user's settings.
 Motion must respect both the app preference and macOS Reduce Motion. Do not
 add frame timers or repeat entrance animations on background refreshes.
 
+## Welcome guide
+
+Setup uses one centered content column with a compact four-step header. Header,
+content and footer share the same 636-point maximum width and outer inset. Keep
+Skip setup in one place, the header; Back and the primary action stay in the
+fixed footer at 40 points high. Content may scroll in short viewports without
+moving these actions offscreen.
+
+Use the shared theme, type and Lucide icons. Only selected choice cards receive
+an accent outline; neutral cards use a quiet surface. Appearance previews depict
+both palettes deliberately, while their surrounding controls use live theme
+tokens. Destination cards reserve equal space for their descriptions. Avoid a
+second navigation rail, a mock dashboard and repeated setup explanations.
+Step transitions are a 200 ms opacity/offset change, with no ongoing animation
+work and an immediate reduced-motion path.
+
 ## Job history cleanup
 
 Jobs labels its history action **Clear old jobs…** and opens a confirmation

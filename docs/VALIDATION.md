@@ -161,6 +161,40 @@ They establish page layout, not input,
 VoiceOver execution, compositor performance, a real-client streaming clock or
 installed-user acceptance. The preceding 1,251-test result is not a new run.
 
+## Compact welcome guide (0.1.8 candidate)
+
+The welcome guide now uses a compact horizontal header, one content column,
+aligned appearance rows and a two-column destination grid. Back and the primary
+action stay in a fixed footer. The four steps, preference keys, admission policy
+and completion/destination handoff are unchanged. No service or routing behavior
+changes in this update.
+
+The optimized focused gate compiled the native UI in 61.86 seconds and passed
+all six existing onboarding-policy tests with zero failures in 0.007 seconds
+(0.014 seconds including selected-suite completion). A subsequent one-sentence
+copy correction was compiled in the final render link. This is a focused result,
+not a new execution of the earlier 1,263-test suite.
+
+The final render link compiled nine byte-exact production UI files with 159
+retained Core, Presentation and C objects in 15.425 seconds. The resulting
+executable was checked for macOS 14 minimum/SDK 26.5 before running. All 32
+captures use the complete onboarding view: four steps in Light/Dark at 820×660,
+760×580, 700×580 and 640×520 points. Normal setup sizes fit the content; the
+smallest stress size needs scrolling for some secondary content, with all
+footer actions still visible. The guide has no repeating animation timer.
+
+The host is invisible, unordered and outside every display. Private argument-
+domain preferences select System appearance and Reduced motion; no app session,
+runtime services, provider connection or physical input is used. Initial drafts
+used a suite volatile domain that did not select Reduced motion; those drafts
+are not the final reduced-motion captures. Public screenshots come from the
+corrected final set. Bitmaps establish layout, not input, VoiceOver, compositor
+smoothness, fresh-user installation or a resource/performance improvement.
+
+The public static gate passed all 62 isolated Python fixtures, source/credential
+boundaries, resource admission and generated-pricing consistency. Independent
+source and visual review found no blocking defect in the final layout/copy.
+
 ## Onboarding presentation refinement (0.1.5)
 
 Only `NativeOnboardingView.swift` changes application behavior. The admission
