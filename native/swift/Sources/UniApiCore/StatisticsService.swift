@@ -11,6 +11,7 @@ public actor NativeStatisticsService {
     private let environment: [String: String], calendar: Calendar
     private let clock: @Sendable () -> Double
     private let beforeScan: @Sendable () async throws -> Void
+    private let beforeCodexCommit: @Sendable (NativeRuntime) throws -> Void
     private let streamTimingPollNanoseconds: UInt64
     private var streamTimingMonitor: Task<Void, Never>?
     private var initialized = false, loaded = false, lastCheck: Double = 0, generation = 0
@@ -26,6 +27,8 @@ public actor NativeStatisticsService {
     private var importedCacheFiles: [JSONObject] = []
     private var importedDataVersion: JSONValue = .null
     private var codexAppendCache = StatisticsCodexAppendCache()
+    private var codexPublication: StatisticsAppendPublication?
+    private let codexPublicationEnabled: Bool
     private var scan: JSONValue = [:], progress: JSONValue = ["scanId": "", "phase": "", "status": "idle", "done": 0, "total": 0, "file": "", "generation": 0, "loaded": false]
     private var rawByDay: [String: Double] = [:], colors: JSONValue = [:], warnings: [String] = []
     private var folds: [String: StatisticsDerived] = [:]
@@ -41,6 +44,8 @@ public actor NativeStatisticsService {
         self.runtime = runtime; calendar = .current; clock = { Date().timeIntervalSince1970 * 1000 }
         publishedSummary = StatisticsPublishedSummary()
         beforeScan = {}
+        beforeCodexCommit = { _ in }
+        codexPublicationEnabled = true
         streamTimingPollNanoseconds = 10_000_000_000
         // A supplied test home must not accidentally import the process user's stores.
         environment = runtime.paths.home.standardizedFileURL == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL ? ProcessInfo.processInfo.environment : [:]
@@ -49,11 +54,15 @@ public actor NativeStatisticsService {
          streamTimingPollNanoseconds: UInt64 = 10_000_000_000,
          bootstrapQueue: DispatchQueue = .global(qos: .utility),
          bootstrapLoad: @escaping @Sendable (NativeRuntime, Double) throws -> JSONValue = { try StatisticsSummaryBootstrap.load(runtime: $0, now: $1) },
+         codexPublicationEnabled: Bool = true,
+         beforeCodexCommit: @escaping @Sendable (NativeRuntime) throws -> Void = { _ in },
          beforeScan: @escaping @Sendable () async throws -> Void = {}) {
         self.runtime = runtime; self.environment = environment; self.calendar = calendar; self.clock = clock
         self.streamTimingPollNanoseconds = max(1_000_000, streamTimingPollNanoseconds)
         publishedSummary = StatisticsPublishedSummary(queue: bootstrapQueue, load: bootstrapLoad)
         self.beforeScan = beforeScan
+        self.codexPublicationEnabled = codexPublicationEnabled
+        self.beforeCodexCommit = beforeCodexCommit
     }
     public func start() async throws {
         try checkRunning(); try initialize(); try await ensureScan()
@@ -98,6 +107,7 @@ public actor NativeStatisticsService {
             catch { finishScan(flight.id, error: error) }
         }
         codexAppendCache.removeAll()
+        codexPublication = nil
         await publishedSummary.drainBootstrap()
     }
     private func checkRunning() throws {
@@ -495,6 +505,12 @@ public actor NativeStatisticsService {
             let previous = byPath[file.cachePath], sourcePath = previous?["source_path"]?.string ?? ""
             return full || runtime.paths.readOnly && (incompleteGeneration || !turnClocks && file.source == "codex" || !streamingClocks && file.source == "antigravity") || previous?["mtime"]?.double != file.mtime || previous?["size"]?.double != file.size || (sourcePath.isEmpty ? file.cachePath : sourcePath) != file.url.path
         }
+        let assemblySchema = appendEligible && codexPublicationEnabled && !appendPaths.isEmpty ? statisticsAssemblySchema() : nil
+        let canReuseAssembly = assemblySchema != nil && !todo.isEmpty && loaded && !scanNeedsRebuild
+            && known == importedCacheFiles && dataVersion == importedDataVersion && present == Set(byPath.keys)
+            && codexPublication?.schema == assemblySchema && codexPublication?.generation == generation
+            && todo.allSatisfy { $0.source == "codex" && appendPaths.contains($0.cachePath) }
+        var expectedCache = byPath, appendedOffsets: [String: Int] = [:]
         progress["total"] = .number(Double(todo.count))
         if !full, loaded, !scanNeedsRebuild, !incompleteGeneration, turnClocks, streamingClocks, todo.isEmpty, present == Set(byPath.keys), files == importedFiles, known == importedCacheFiles, dataVersion == importedDataVersion {
             // Discovery still checks every source, including directory errors,
@@ -506,6 +522,8 @@ public actor NativeStatisticsService {
             if document == cacheDocument {
                 scan["elapsedMs"] = .number(clock() - begin); scan["scannedAt"] = .number(clock()); scan["parsedFiles"] = 0
                 scan["codexAppendFiles"] = 0; scan["codexValidatedPrefixBytes"] = 0; scan["codexAppendDecodedBytes"] = 0
+                scan["assemblyMode"] = "metadata"; scan["assembledRecords"] = 0
+                scan["reusedRecords"] = scan["records"]; scan["codexSQLAppendFiles"] = 0
                 scan["scanId"] = progress["scanId"]
                 self.warnings = []; lastCheck = clock()
                 await publishProgress("reading")
@@ -521,7 +539,7 @@ public actor NativeStatisticsService {
         await publishProgress("reading")
         scanNeedsRebuild = true
         var memory: [(File, StatisticsReadResult)] = [], failedUpgrade = false
-        var appendFiles = 0, validatedBytes: Int64 = 0, decodedBytes: Int64 = 0
+        var appendFiles = 0, sqlAppendFiles = 0, validatedBytes: Int64 = 0, decodedBytes: Int64 = 0
         for (index, f) in todo.enumerated() {
             try Task.checkCancellation()
             progress["file"] = .string(f.url.lastPathComponent)
@@ -543,14 +561,40 @@ public actor NativeStatisticsService {
                 if runtime.paths.readOnly { memory.append((f, result)) }
                 else {
                     let revision = UUID().uuidString
+                    var ordered = false, appendedOffset: Int?
+                    // The fixture seam can commit through a second connection
+                    // after prefix validation. The real guard belongs inside
+                    // BEGIN IMMEDIATE, where another writer can no longer race it.
+                    if canReuseAssembly { try beforeCodexCommit(runtime) }
                     try runtime.db.transaction {
-                        try runtime.db.execute("DELETE FROM stats_records WHERE path=?", [.string(f.cachePath)])
-                        try insertRecords(result.records, path: f.cachePath)
+                        let current = canReuseAssembly ? try runtime.db.query("SELECT path,mtime,size,source_path,record_revision FROM stats_files WHERE path=?", [.string(f.cachePath)]).first : nil
+                        if canReuseAssembly, let schema = assemblySchema, statisticsAssemblySchema() == schema,
+                           try runtime.db.query("PRAGMA data_version").first?["data_version"] == dataVersion,
+                           current == byPath[f.cachePath], let offset = append?.appendedRecordOffset,
+                           let oldRevision = current?["record_revision"]?.string,
+                           codexAppendCache.hasOrderedRows(path: f.cachePath, revision: oldRevision, schema: schema),
+                           try statisticsRowHeadroom(result.records.count - offset),
+                           try runtime.db.query("SELECT COUNT(*) AS n FROM stats_records WHERE path=?", [.string(f.cachePath)]).first?["n"]?.int == offset {
+                            // The decoded old prefix and its committed row order
+                            // are proven unchanged. Do not rewrite those rows.
+                            try insertRecords(Array(result.records.dropFirst(offset)), path: f.cachePath)
+                            ordered = true; appendedOffset = offset
+                        } else {
+                            try runtime.db.execute("DELETE FROM stats_records WHERE path=?", [.string(f.cachePath)])
+                            if append != nil, let schema = assemblySchema, statisticsAssemblySchema() == schema {
+                                ordered = try statisticsRowHeadroom(result.records.count)
+                            }
+                            try insertRecords(result.records, path: f.cachePath)
+                        }
                         try runtime.db.execute("INSERT INTO stats_files(path,mtime,size,excluded_usage,source_path,record_revision) VALUES (?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime,size=excluded.size,excluded_usage=excluded.excluded_usage,source_path=excluded.source_path,record_revision=excluded.record_revision", [.string(f.cachePath), .number(f.mtime), .number(f.size), .number(Double(result.excluded)), .string(f.url.path), .string(revision)])
+                        if canReuseAssembly {
+                            expectedCache[f.cachePath] = try runtime.db.query("SELECT path,mtime,size,source_path,record_revision FROM stats_files WHERE path=?", [.string(f.cachePath)]).first
+                        }
                     }
+                    if let appendedOffset { appendedOffsets[f.cachePath] = appendedOffset; sqlAppendFiles += 1 }
                     if let append {
                         codexAppendCache.commit(append.checkpoint, path: f.cachePath, sourcePath: f.url.path,
-                                                revision: revision, mtime: f.mtime, size: f.size)
+                                                revision: revision, mtime: f.mtime, size: f.size, rowOrderSchema: ordered ? assemblySchema : nil)
                         if append.validatedPrefixBytes > 0 { appendFiles += 1 }
                         validatedBytes += append.validatedPrefixBytes; decodedBytes += append.decodedBytes
                     }
@@ -573,43 +617,80 @@ public actor NativeStatisticsService {
         }
         let cacheFilesBeforeRead = try cachedFiles()
         let dataVersionBeforeRead = try runtime.db.query("PRAGMA data_version").first?["data_version"] ?? .null
-        var rows: [StatisticsUsage] = [], recordCount = 0, seen = Set<String>(), duplicates = 0, rawGrand: Double = 0, raw: [String: Double] = [:]
-        let replacements = Dictionary(uniqueKeysWithValues: memory.map { ($0.0.cachePath, $0.1.records) })
-        let replacementPaths = replacements.keys.sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
-        var replacementIndex = 0, interned: [String: String] = [:]
-        func intern(_ value: String) -> String {
-            guard value.utf8.count > 15 else { return value }
-            if let existing = interned[value] { return existing }
-            interned[value] = value; return value
-        }
-        func consume(_ record: StatisticsUsage) {
-            var e = record
-            recordCount += 1
-            if e.source == "claude" { rawGrand += e.grand; let key = e.rawDay.isEmpty ? statisticsUTC(e.ts) : e.rawDay; raw[key, default: 0] += e.grand }
-            if !seen.insert(e.source + ":" + e.id).inserted { if e.source == "claude" { duplicates += 1 }; return }
-            e.model = intern(e.model); e.project = intern(e.project); e.session = intern(e.session); e.effort = intern(e.effort)
-            rows.append(e)
-        }
-        func flushReplacements(through path: String?) {
-            while replacementIndex < replacementPaths.count {
-                let next = replacementPaths[replacementIndex]
-                if let path, path.utf8.lexicographicallyPrecedes(next.utf8) { break }
-                for record in replacements[next] ?? [] { consume(record) }
-                replacementIndex += 1
+        var nextEvents: [StatisticsUsage] = [], nextPublication: StatisticsAppendPublication?
+        var recordCount = 0, duplicates = 0, rawGrand: Double = 0, raw: [String: Double] = [:]
+        var reusedAssembly = false, assembledRecords = 0
+        if canReuseAssembly, warnings.isEmpty, appendedOffsets.count == todo.count,
+           cacheFilesBeforeRead == expectedCache.values.sorted(by: { ($0["path"] ?? .null).string.utf8.lexicographicallyPrecedes(($1["path"] ?? .null).string.utf8) }),
+           dataVersionBeforeRead == dataVersion, var candidate = codexPublication,
+           candidate.generation == generation, statisticsAssemblySchema() == candidate.schema {
+            var tail: [StatisticsUsage] = [], admitted = true
+            // SQL bytewise path order precedes its original per-file row order.
+            // All admitted timestamps are strictly after the old global maximum.
+            for f in todo.sorted(by: { $0.cachePath.utf8.lexicographicallyPrecedes($1.cachePath.utf8) }) {
+                guard let offset = appendedOffsets[f.cachePath] else { admitted = false; break }
+                var columns = StatisticsCachedRecordColumns([]), count = 0
+                try runtime.db.forEachValueRow("SELECT * FROM stats_records WHERE path=? ORDER BY rowid LIMIT -1 OFFSET ?",
+                    [.string(f.cachePath), .number(Double(offset))], columns: { columns = StatisticsCachedRecordColumns($0) }) { values in
+                    count += 1
+                    guard admitted, let row = candidate.admit(columns.usage(in: values), path: f.cachePath, after: events.last?.ts ?? -.infinity) else { admitted = false; return }
+                    tail.append(row)
+                }
+                let expectedCount = try runtime.db.query("SELECT COUNT(*) AS n FROM stats_records WHERE path=?", [.string(f.cachePath)]).first?["n"]?.int ?? -1
+                if count != expectedCount - offset { admitted = false }
+                if !admitted { break }
+            }
+            if admitted {
+                nextEvents = events; nextEvents.append(contentsOf: tail.sorted { $0.ts < $1.ts })
+                raw = rawByDay; rawGrand = scan["rawGrand"].double; duplicates = scan["duplicates"].int
+                recordCount = scan["records"].int + tail.count; assembledRecords = tail.count
+                nextPublication = candidate; reusedAssembly = true
             }
         }
-        // Merge already-ordered cached rows with changed-file replacements.
-        // Lexical path then original row order remains the dedup precedence,
-        // without retaining/sorting the full SQLite dictionary result twice.
-        var columns = StatisticsCachedRecordColumns([])
-        try runtime.db.forEachValueRow("SELECT * FROM stats_records ORDER BY path,rowid", columns: { columns = StatisticsCachedRecordColumns($0) }) { values in
-            let path = columns.path(in: values)
-            flushReplacements(through: path)
-            guard present.contains(path), replacements[path] == nil else { return }
-            consume(columns.usage(in: values))
+        if !reusedAssembly {
+            var rows: [StatisticsUsage] = [], seen = Set<String>()
+            let replacements = Dictionary(uniqueKeysWithValues: memory.map { ($0.0.cachePath, $0.1.records) })
+            let replacementPaths = replacements.keys.sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
+            var replacementIndex = 0, interned: [String: String] = [:]
+            var origins = StatisticsInternerOrigins(enabled: assemblySchema != nil)
+            func intern(_ value: String, path: String) -> String {
+                guard value.utf8.count > 15 else { return value }
+                if let existing = interned[value] { return existing }
+                interned[value] = value
+                origins.note(value, representative: value, path: path)
+                return value
+            }
+            func consume(_ record: StatisticsUsage, path: String) {
+                var e = record
+                recordCount += 1
+                if e.source == "claude" { rawGrand += e.grand; let key = e.rawDay.isEmpty ? statisticsUTC(e.ts) : e.rawDay; raw[key, default: 0] += e.grand }
+                if !seen.insert(e.source + ":" + e.id).inserted { if e.source == "claude" { duplicates += 1 }; return }
+                e.model = intern(e.model, path: path); e.project = intern(e.project, path: path)
+                e.session = intern(e.session, path: path); e.effort = intern(e.effort, path: path)
+                rows.append(e)
+            }
+            func flushReplacements(through path: String?) {
+                while replacementIndex < replacementPaths.count {
+                    let next = replacementPaths[replacementIndex]
+                    if let path, path.utf8.lexicographicallyPrecedes(next.utf8) { break }
+                    for record in replacements[next] ?? [] { consume(record, path: next) }
+                    replacementIndex += 1
+                }
+            }
+            // Preserve the established dedup/interner order in the fallback.
+            var columns = StatisticsCachedRecordColumns([])
+            try runtime.db.forEachValueRow("SELECT * FROM stats_records ORDER BY path,rowid", columns: { columns = StatisticsCachedRecordColumns($0) }) { values in
+                let path = columns.path(in: values)
+                flushReplacements(through: path)
+                guard present.contains(path), replacements[path] == nil else { return }
+                consume(columns.usage(in: values), path: path)
+            }
+            flushReplacements(through: nil)
+            nextEvents = rows.sorted { $0.ts < $1.ts }; assembledRecords = recordCount
+            if let schema = assemblySchema, nextEvents.allSatisfy({ $0.ts.isFinite }) {
+                nextPublication = StatisticsAppendPublication(keys: seen, origins: origins, schema: schema)
+            }
         }
-        flushReplacements(through: nil)
-        let nextEvents = rows.sorted { $0.ts < $1.ts }
         let nextDocument = try? NativeFile.readJSON(runtime.paths.home.appendingPathComponent(".claude/stats-cache.json"))
         let nextCache = nextDocument.flatMap(StatisticsCache.parse)
         var weights: [String: Double] = [:]; for e in nextEvents { weights[e.model, default: 0] += e.grand }; for (name, total) in nextCache?.perModel ?? [:] where weights[name] == nil { weights[name] = total.grand }
@@ -617,6 +698,10 @@ public actor NativeStatisticsService {
         let nextColors = JSONValue.object(Dictionary(uniqueKeysWithValues: weights.keys.sorted { weights[$0] == weights[$1] ? $0 < $1 : weights[$0]! > weights[$1]! }.enumerated().map { ($0.element, .string(palette[$0.offset % palette.count])) }))
         var nextScan: JSONValue = ["files": .number(Double(files.count)), "bytes": .number(files.reduce(0) { $0 + $1.size }), "elapsedMs": .number(clock() - begin), "scannedAt": .number(clock()), "rawGrand": .number(rawGrand), "duplicates": .number(Double(duplicates)), "records": .number(Double(recordCount)), "claudeFiles": .number(Double(files.filter { $0.source == "claude" }.count)), "parsedFiles": .number(Double(todo.count))]
         nextScan["scanId"] = progress["scanId"]
+        nextScan["assemblyMode"] = .string(reusedAssembly ? "append" : "full")
+        nextScan["assembledRecords"] = .number(Double(assembledRecords))
+        nextScan["reusedRecords"] = .number(Double(reusedAssembly ? scan["records"].int : 0))
+        nextScan["codexSQLAppendFiles"] = .number(Double(sqlAppendFiles))
         nextScan["codexAppendFiles"] = .number(Double(appendFiles))
         nextScan["codexValidatedPrefixBytes"] = .number(Double(validatedBytes))
         nextScan["codexAppendDecodedBytes"] = .number(Double(decodedBytes))
@@ -633,11 +718,40 @@ public actor NativeStatisticsService {
         let cacheFilesAfterRead = try cachedFiles()
         let dataVersionAfterRead = try runtime.db.query("PRAGMA data_version").first?["data_version"] ?? .null
         guard cacheFilesBeforeRead == cacheFilesAfterRead, dataVersionBeforeRead == dataVersionAfterRead else { throw NativeFailure("Usage cache changed during publication; retry the read.") }
+        if reusedAssembly, statisticsAssemblySchema() != assemblySchema { throw NativeFailure("Usage cache schema changed during publication; retry the read.") }
         events = nextEvents; rawByDay = raw; cache = nextCache; cacheDocument = nextDocument; importedFiles = files
         importedCacheFiles = cacheFilesAfterRead; importedDataVersion = dataVersionAfterRead
         colors = nextColors; scan = nextScan; self.warnings = warnings
         generation += 1; clearQueries(); loaded = true; scanNeedsRebuild = false; lastCheck = clock()
+        nextPublication?.generation = generation; codexPublication = nextPublication
         await publishScan()
+    }
+    /// A rowid proof is tied to both schema journals. Temporary triggers can
+    /// affect this connection too; an unknown layout only disables the shortcut.
+    private func statisticsAssemblySchema() -> String? {
+        // Capability inspection is optional. Failure disables reuse; ordinary
+        // reads and their existing error handling remain authoritative.
+        do {
+            guard try runtime.db.query("SELECT name FROM sqlite_temp_master WHERE lower(name) IN ('stats_records','stats_files')").isEmpty else { return nil }
+            let objects = try runtime.db.query("SELECT type,sql FROM sqlite_master WHERE name IN ('stats_records','stats_files')")
+            guard objects.count == 2, objects.allSatisfy({ $0["type"] == "table" && !($0["sql"]?.string.uppercased().contains("WITHOUT ROWID") ?? true) }),
+                  runtime.db.hasBinaryCollation(table: "stats_records", column: "path") else { return nil }
+            let columns = try runtime.db.query("PRAGMA main.table_xinfo(stats_records)")
+            guard !columns.contains(where: { ($0["pk"]?.int ?? 0) != 0 || ["rowid", "_rowid_", "oid"].contains(($0["name"] ?? .null).string.lowercased()) }) else { return nil }
+            let triggers = try runtime.db.query("SELECT name FROM sqlite_master WHERE type='trigger' AND lower(tbl_name) IN ('stats_records','stats_files') UNION ALL SELECT name FROM sqlite_temp_master WHERE type='trigger' AND lower(tbl_name) IN ('stats_records','stats_files')")
+            guard triggers.isEmpty else { return nil }
+            let main = try runtime.db.query("PRAGMA main.schema_version").first?["schema_version"]?.int
+            let temporary = try runtime.db.query("PRAGMA temp.schema_version").first?["schema_version"]?.int
+            guard let main, let temporary else { return nil }
+            return "\(main):\(temporary)"
+        } catch { return nil }
+    }
+    private func statisticsRowHeadroom(_ count: Int) throws -> Bool {
+        // INTEGER -> JSON number rounds through Double. Text preserves MAX's
+        // exact signed boundary and prevents SQLite's random-rowid fallback.
+        let text = try runtime.db.query("SELECT COALESCE(CAST(MAX(rowid) AS TEXT),'0') AS largest FROM stats_records").first?["largest"]?.string ?? ""
+        guard let largest = Int64(text), largest >= 0, count >= 0, let n = Int64(exactly: count) else { return false }
+        return largest <= Int64.max - n
     }
     private func insertRecords(_ records: [StatisticsUsage], path: String) throws {
         // Bound to 704 variables, below SQLite's historical 999-variable limit.

@@ -1,5 +1,29 @@
 # Preview validation
 
+## Conservative Codex append publication (candidate)
+
+The final source-bound optimized native gate passed **1,321 tests, zero failures**.
+Its 18 new methods cover canonical-Unicode membership, exact record bytes and
+Double bits, bounded provenance, and paired real-service overview/model/CSV/summary
+oracles. Service cases exercise retained SQL prefixes, changed IDs/timestamps,
+EOF invalidation, fallback suppression, foreign revisions, source inventory,
+MAXROWID, a real foreign connection changing old rows after parsing, and repeated
+appends under an unchanged TEMP shadow schema. The foreign-write case deliberately
+preserves file revisions and requires the full rewrite to overwrite that change.
+
+Independent review found three initial gaps in transaction-local version
+admission, unknown schema layouts and provenance budgeting. Those were corrected;
+the review then strengthened the TEMP regression with a second append and no DDL.
+All final methods passed. The complete suite took 44.900 seconds (44.986 including
+all-suite completion), with a 105.178-second wrapper exit. The same production
+Core/UI sources had already completed the all-UI/three-product build in 139.43
+seconds; the final delta was the strengthened test only. Sources remained fixed.
+
+The [six-process synthetic refresh control](PERFORMANCE.md#conservative-append-publication)
+measures the admitted warm path separately. Production installation and actual
+running-app follow-up remain separate gates; component results do not establish
+instant Reload or final rewrite acceptance.
+
 ## In-place Statistics fold buckets (candidate)
 
 Only three container-update blocks change the fold: per-day model/harness
@@ -20,8 +44,9 @@ The separate thin Intel compilation below used the same application sources;
 these native tests executed on arm64.
 
 The [synthetic component control and actual 0.1.12 running-app recordings](PERFORMANCE.md#in-place-fold-bucket-candidate)
-retain their distinct scopes. The candidate has not been installed or measured
-as a new whole-app improvement. The recorded Reload delay remains open.
+retain their distinct scopes. Later installed follow-ups are recorded separately
+in that performance document; the component result is not a whole-app percentage.
+The recorded Reload delay remains open.
 
 ## Explicit thin architecture builds (candidate)
 

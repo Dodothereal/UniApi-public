@@ -42,6 +42,15 @@ public final class NativeDatabase: @unchecked Sendable {
         try forEachRow(sql, parameters) { rows.append($0) }
         return rows
     }
+    /// Optimization admission only. Unknown metadata never establishes the
+    /// bytewise ordering used by an incrementally retained result set.
+    internal func hasBinaryCollation(table: String, column: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        var collation: UnsafePointer<CChar>?
+        guard sqlite3_table_column_metadata(connection, "main", table, column, nil, &collation, nil, nil, nil) == SQLITE_OK,
+              let collation else { return false }
+        return String(cString: collation) == "BINARY"
+    }
     /// Consume large result sets without retaining an intermediate dictionary
     /// for every row. The callback owns ordinary values and may throw safely.
     public func forEachRow(_ sql: String, _ parameters: [JSONValue] = [], _ consume: (JSONObject) throws -> Void) throws {
