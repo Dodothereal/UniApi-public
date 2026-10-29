@@ -1,6 +1,6 @@
 # Preview validation
 
-## Explicit in-app performance recording (candidate)
+## Explicit in-app performance recording (0.1.9)
 
 The Settings recorder adds no default background work. Its protected file writer
 is covered by eight new native methods: canonical metadata/private permissions,
@@ -24,9 +24,13 @@ close admission synchronously and publish Settings status on a later MainActor
 task, guarded against a newer recording. Manual navigation also records its
 start, so a missing view/draw terminal remains visible as incomplete evidence.
 
-This establishes source and writer regression coverage. Actual installed UI
-recordings, page/Reload measurements and compositor behavior are separate; no
-latency or resource improvement is inferred from passing these tests.
+The reviewed 0.1.9 package was installed through the unchanged guarded updater.
+Its 18 installed app files matched the reviewed candidate exactly. Actual
+sidebar input then recorded 48 complete visits across all 14 pages and four
+Statistics Reloads, with no failed or incomplete visit omitted. See the
+[measured timings and scope](PERFORMANCE.md). This establishes running-app
+view/draw evidence; compositor behavior and matched performance improvements
+remain separate from both the tests and this capture.
 
 ## Statistics Reload timing and clearer setup actions (0.1.8)
 

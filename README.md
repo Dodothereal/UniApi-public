@@ -5,7 +5,7 @@ integrations you need, and keep your work in one SwiftUI app.
 
 **[Download the latest preview](https://github.com/Dodothereal/UniApi-public/releases/latest)** ·
 [Installation](docs/INSTALL.md) · [Configuration](docs/CONFIGURATION.md) ·
-[Validation](docs/VALIDATION.md)
+[Validation](docs/VALIDATION.md) · [Performance observations](docs/PERFORMANCE.md)
 
 ## Before you install
 
