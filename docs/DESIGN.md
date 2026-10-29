@@ -41,8 +41,10 @@ add frame timers or repeat entrance animations on background refreshes.
 
 ## Welcome guide
 
-Setup is one screen: choose Home, Switcher, Statistics or Transcribe, adjust
-appearance and spacing if desired, then open the selected page directly. Skip
+Setup is one screen: choose a task (Look around, Connect a model, Explore usage
+or Transcribe audio), with its Home, Switcher, Statistics or Transcribe destination
+shown below. Adjust appearance and spacing if desired, then open the selected
+page directly. Skip
 for now stays in the header. Do not insert an appearance wizard between the
 user's task choice and its destination. Motion follows the existing preference
 and macOS Reduce Motion; further customization remains in Settings.
@@ -53,13 +55,16 @@ selection. Avoid nested icon wells, radio circles, outlined groups and repeated
 selection decoration. The primary action names its destination and remains
 40 points high in a fixed footer.
 
-At sufficiently wide and tall sizes, a labelled, inert layout illustration sits
-beside the choices. It uses the real theme tokens and density values and changes
+At sufficiently wide and tall sizes, a small labelled, inert appearance
+illustration sits beside the choices. It uses the real theme tokens and density values and changes
 with the choices. It is not a live page, does not contain user data and must not
 create an app session, connect a provider or download a model. Smaller viewports
-use a two-column task grid and omit the illustration; the actual choice spacing
-still demonstrates density. Content can scroll while the primary action stays
-available. Review the complete view at the exact viewport, disabling AppKit's
+use a two-column task grid and omit the illustration. Appearance and Spacing
+then use equal-width columns with matching label baselines. Density changes
+only the preview and destination pages; keep the task hit targets stable so
+customization does not move the selection under the pointer. Do not put
+clickable-looking chevrons in the inert illustration. Content can scroll while
+the primary action stays available. Review the complete view at the exact viewport, disabling AppKit's
 automatic host sizing so it cannot conceal clipping by enlarging the window.
 
 The heading has accessibility heading semantics and requests focus on entry.
