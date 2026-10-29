@@ -5,12 +5,15 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 [[ $# == 2 && "$1" == --output && "$2" == /* ]] || { echo 'Usage: build-local-whisper.sh --output /absolute/path/uniapi-whisper' >&2; exit 64; }
 output="$2"
+native_arch="${UNIAPI_NATIVE_ARCH-$(uname -m)}"
+case "$native_arch" in arm64|x86_64) ;; *) echo 'UNIAPI_NATIVE_ARCH must be arm64 or x86_64.' >&2; exit 64;; esac
+export UNIAPI_NATIVE_ARCH="$native_arch"
 source "$repo/native/swift/tools/swift-environment.sh"
 uniapi_swift_environment
 cache="$repo/.cache/whisper-runtime"
 archive="$cache/whisper-v1.9.4.tar.gz"
 source_root="$cache/whisper.cpp-1.9.4"
-build_root="$cache/build-$(uname -m)"
+build_root="$cache/build-$native_arch"
 archive_sha=57e280cee375ab02425b806ad5146b99f6eb9357e3c2b31357c8a6af2e2e44ae
 archive_url=https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/refs/tags/v1.9.4
 for path in "$repo/.cache" "$cache" "$archive" "$source_root" "$build_root"; do
@@ -75,9 +78,9 @@ PYLICENSE
 # files use the C compile rule, so C_FLAGS also covers their Objective-C macros.
 # Preserve other cached flags (or the initial environment) and quote each
 # argument for CMake's Unix Makefiles generator, including roots with spaces.
-python3 - "$source_root" "$build_root" > "$work/compiler-flags" <<'PYFLAGS'
+python3 - "$source_root" "$build_root" "$native_arch" > "$work/compiler-flags" <<'PYFLAGS'
 import os, pathlib, shlex, sys
-source, build = sys.argv[1:]
+source, build, arch = sys.argv[1:]
 roots = []
 for root, replacement in ((source, "whisper.cpp"), (build, "whisper-build")):
     # Clang can report macros with the supplied spelling but canonicalize the
@@ -90,16 +93,24 @@ options = ("-ffile-prefix-map", "-fmacro-prefix-map", "-fdebug-prefix-map")
 prefixes = tuple(f"{option}={root}=" for root, _ in roots for option in options)
 maps = [f"{option}={root}={replacement}" for root, replacement in roots for option in options]
 cached = {}
+intel_baseline = ['-march=x86-64', '-mtune=generic'] if arch == 'x86_64' else []
+def intel_flags(flags):
+    flags = [flag for flag in flags if flag not in intel_baseline]
+    if arch == 'x86_64' and any(flag.startswith(('-m', '-arch', '-target', '--target', '-Xarch_', '-Xclang')) for flag in flags):
+        raise SystemExit('Intel Whisper baseline refuses custom target or CPU flags')
+    return flags
 cache_file = pathlib.Path(build) / "CMakeCache.txt"
 if cache_file.is_file():
     for line in cache_file.read_text().splitlines():
         for language in ("C", "CXX"):
             key = f"CMAKE_{language}_FLAGS:STRING="
             if line.startswith(key): cached[language] = line[len(key):]
+            if arch == 'x86_64' and line.startswith(f"CMAKE_{language}_FLAGS_RELEASE:STRING="):
+                intel_flags(shlex.split(line.split('=', 1)[1]))
 for language, environment in (("C", "CFLAGS"), ("CXX", "CXXFLAGS")):
     flags = shlex.split(cached.get(language, os.environ.get(environment, "")))
     flags = [flag for flag in flags if not flag.startswith(prefixes)]
-    sys.stdout.write(shlex.join(flags + maps) + '\0')
+    sys.stdout.write(shlex.join(intel_flags(flags) + maps + intel_baseline) + '\0')
 PYFLAGS
 exec 3< "$work/compiler-flags"
 IFS= read -r -d '' c_flags <&3
@@ -107,15 +118,25 @@ IFS= read -r -d '' cxx_flags <&3
 exec 3<&-
 # Set cache flags on every configure; generated flags.make is an explicit
 # dependency of each object, so pre-remapping objects must be rebuilt. Keep
-# compilers, Release settings and all optional backend defaults unchanged.
+# compilers, Release settings and optional backends unchanged. GGML_NATIVE=OFF
+# alone still enables x86 ISA defaults in this pin; Intel uses the baseline ISA.
+arch_options=(-DGGML_NATIVE=OFF)
+if [[ "$native_arch" == x86_64 ]]; then
+  arch_options+=(-DGGML_CPU_ALL_VARIANTS=OFF)
+  for feature in SSE42 AVX AVX2 AVX_VNNI BMI2 FMA F16C AVX512 AVX512_VBMI AVX512_VNNI AVX512_BF16 AMX_TILE AMX_INT8 AMX_BF16; do
+    arch_options+=("-DGGML_$feature=OFF")
+  done
+fi
 cmake -S "$source_root" -B "$build_root" -G 'Unix Makefiles' \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_SYSROOT="$UNIAPI_SWIFT_SDK" \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="$(uname -m)" \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="$native_arch" \
   -DCMAKE_C_FLAGS:STRING="$c_flags" -DCMAKE_CXX_FLAGS:STRING="$cxx_flags" \
-  -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_METAL_EMBED_LIBRARY=ON \
-  -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_SERVER=OFF
+  -DBUILD_SHARED_LIBS=OFF -DGGML_METAL_EMBED_LIBRARY=ON \
+  -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_SERVER=OFF "${arch_options[@]}"
 cmake --build "$build_root" --target whisper-cli -j2
 binary="$build_root/bin/whisper-cli"
+actual_arch="$(lipo -archs "$binary")"
+[[ "$actual_arch" == "$native_arch" ]] || { echo 'Unexpected Whisper architecture; refusing publication.' >&2; exit 1; }
 # Static whisper/ggml may use macOS frameworks/libraries; reject non-system
 # dylibs instead of silently creating an incomplete standalone bundle.
 otool -L "$binary" | tail -n +2 | while IFS= read -r dependency; do

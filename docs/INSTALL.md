@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- A Mac running macOS 14 or later. Validation has run on macOS 27.2/arm64. Runtime behavior on macOS 14, Intel builds and universal builds remains unverified.
+- A Mac running macOS 14 or later. Validation has run on macOS 27.2/arm64. A thin Intel build has compiled and passed static header/signature checks on an arm64 host. Runtime behavior on macOS 14 or Intel hardware and universal builds remain unverified.
 - For a source build: Apple's developer tools with the macOS 26.5 SDK and a matching Swift toolchain, Python 3, CMake and Make. The Whisper build also uses curl and tar supplied by macOS.
 - Additional tools and accounts only for the integrations you choose to use.
 
@@ -18,13 +18,25 @@ bash native/swift/build.sh
 
 The script selects the pinned SDK and matching compiler, uses native SwiftPM with two compiler jobs and two backend threads, and stages `native/swift/build.noindex/UniApi Native.app`. It also builds and bundles `uniapi-whisper`. It does not download model weights, run inference, install the app or restart services. The default build is ad-hoc signed.
 
+`UNIAPI_NATIVE_ARCH` selects one thin target: `arm64` or `x86_64`. When unset it defaults to `uname -m`; empty, combined and other values are refused. The same macOS 14 target is passed to SwiftPM's build and binary discovery, the fan helper and Whisper. Staging and final bundle validation require all five executables to match the selected architecture. Validation without an explicit target still refuses inconsistent architecture sets across the five executables.
+
+To prepare a thin Intel build in a separate output directory:
+
+```sh
+UNIAPI_NATIVE_ARCH=x86_64 \
+  UNIAPI_NATIVE_BUILD_ROOT="$PWD/native/swift/build-x86_64.noindex" \
+  bash native/swift/build.sh
+```
+
+This is a source-build selection, not Intel runtime validation or a ready public Intel package. Universal builds are not provided by this script. The release workflow remains arm64-only; this selection does not change its gates.
+
 Install CMake before building and ensure `cmake` and `make` are available in your shell. For example, if you already use Homebrew:
 
 ```sh
 brew install cmake
 ```
 
-The Whisper helper uses [official whisper.cpp v1.9.4 source](https://github.com/ggml-org/whisper.cpp/tree/v1.9.4), downloaded from the [pinned upstream archive](https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/refs/tags/v1.9.4). `tools/build-local-whisper.sh` verifies its pinned SHA-256, then builds `whisper-cli` with CMake and two build jobs. Compiler file, macro and debug prefix maps replace both logical and physical spellings of local source/build roots with `whisper.cpp` and `whisper-build`, including assertion paths in the Metal Objective-C sources; they preserve ordinary string literals. Source paths containing spaces are quoted. Existing C/C++ flags are preserved, and CMake updates the flags file each object depends on, rebuilding stale objects when the remapping flags change. The build refuses to publish a helper that still contains local build roots or personal home paths. Whisper/ggml libraries are linked statically, Metal source is embedded, and only macOS system dynamic dependencies are permitted. The build targets the current host architecture; it does not produce a universal binary.
+The Whisper helper uses [official whisper.cpp v1.9.4 source](https://github.com/ggml-org/whisper.cpp/tree/v1.9.4), downloaded from the [pinned upstream archive](https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/refs/tags/v1.9.4). `tools/build-local-whisper.sh` verifies its pinned SHA-256, then builds `whisper-cli` with CMake and two build jobs. Compiler file, macro and debug prefix maps replace both logical and physical spellings of local source/build roots with `whisper.cpp` and `whisper-build`, including assertion paths in the Metal Objective-C sources; they preserve ordinary string literals. Source paths containing spaces are quoted. Existing C/C++ flags are preserved, except that Intel builds refuse custom target/CPU flags that could override their portable baseline. CMake updates the flags file each object depends on, rebuilding stale objects when the remapping or baseline flags change. The build refuses to publish a helper that has the wrong architecture or still contains local build roots or personal home paths. Whisper/ggml libraries are linked statically, Metal source is embedded, and only macOS system dynamic dependencies are permitted. Source archives are shared, while build caches are separate for `arm64` and `x86_64`. Intel selects `-march=x86-64 -mtune=generic` and disables ggml's optional SSE4.2, AVX-family, BMI2, FMA, F16C and AMX ISA extensions; `GGML_NATIVE=OFF` alone would leave some enabled in this upstream pin. Arm64 backend defaults are unchanged. This produces one selected architecture, not a universal binary.
 
 The upstream CLI static build has completed, and real local CLI transcription and model lifecycle checks have passed. The final 0.1.0 packaged executable passed real local CLI transcription and model lifecycle checks; app job flows and optional integrations need their own runtime evidence. CMake and Make are source-build tools, not transcription runtime requirements.
 

@@ -1,5 +1,30 @@
 # Preview validation
 
+## Explicit thin architecture builds (candidate)
+
+One `UNIAPI_NATIVE_ARCH` selects the same arm64 or x86_64 target for SwiftPM,
+fan compilation and the pinned Whisper build. The default remains the host
+architecture. Manifest staging and validation reject mixed executable sets;
+Intel Whisper uses a portable baseline with optional ISA extensions disabled.
+
+The corrected focused Python suites passed 24 manifest/build-discovery methods
+and nine Whisper path/target methods. Initial mocked positives failed because
+the replacement fixture wrote its helper without executable permission; that
+fixture was corrected to mode 0755 without relaxing executable admission.
+Independent source review found no remaining scoped blocker. The run froze all
+six changed inputs and recorded no drift.
+
+An actual optimized thin x86_64 build then completed in 246.486 seconds on the
+arm64 Mac, including pinned upstream Whisper and all Swift app/helper products.
+All five actual executables are x86_64 with macOS 14 minimum/SDK 26.5 headers
+and signature load commands. Strict deep ad-hoc signature verification passed.
+The development bundle contains 18 files and 58,568,792 logical bytes; this is
+not a production-size comparison. Frozen compiler inputs remained unchanged.
+No Intel executable was run, no installed app or hardware helper was replaced,
+and no provider/model action occurred. This is thin compilation/static evidence,
+not physical Intel/macOS 14 runtime, translated runtime, universal packaging,
+fresh-user installation or device acceptance. Public downloads remain arm64.
+
 ## Two-step onboarding revision (0.1.12)
 
 The guide now starts with four first-task choices, then offers appearance,

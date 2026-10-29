@@ -41,6 +41,8 @@ PLIST_FIELDS = frozenset({
 })
 IDENTITIES = {"production": ("app.devved.uniapi.hub", "UniApi"),
               "development": ("app.devved.uniapi.native-development", "UniApi Native")}
+ARCHITECTURES = {"arm64": 0x0100000C, "x86_64": 0x01000007}
+CPU_SUBTYPES = {"arm64": 0, "x86_64": 3}
 
 
 def version_string(version):
@@ -216,9 +218,11 @@ def native_executable(data, file):
     thin = {b"\xcf\xfa\xed\xfe": "<", b"\xfe\xed\xfa\xcf": ">"}
     magic = data[:4]
     if magic in thin and len(data) >= 32:
-        _, cpu, _, kind = struct.unpack(thin[magic] + "IIII", data[:16])
-        if cpu in {0x01000007, 0x0100000C} and kind == 2:
-            return
+        _, cpu, subtype, kind = struct.unpack(thin[magic] + "IIII", data[:16])
+        architectures = frozenset(name for name, value in ARCHITECTURES.items()
+                                  if value == cpu and subtype & 0x00FFFFFF == CPU_SUBTYPES[name])
+        if architectures and kind == 2:
+            return architectures
     fat = {b"\xca\xfe\xba\xbe": (">", False), b"\xbe\xba\xfe\xca": ("<", False),
            b"\xca\xfe\xba\xbf": (">", True), b"\xbf\xba\xfe\xca": ("<", True)}
     if magic in fat and len(data) >= 8:
@@ -226,15 +230,36 @@ def native_executable(data, file):
         count = struct.unpack(endian + "I", data[4:8])[0]
         width = 32 if wide else 20
         if 0 < count <= 8 and len(data) >= 8 + count * width:
+            architectures = set()
             for index in range(count):
                 record = data[8 + index * width:8 + (index + 1) * width]
-                _, _, offset, size, *_ = struct.unpack(endian + ("IIQQII" if wide else "IIIII"), record)
+                cpu, subtype, offset, size, *_ = struct.unpack(endian + ("IIQQII" if wide else "IIIII"), record)
                 if offset < 8 + count * width or size < 32 or offset + size > len(data):
                     break
-                native_executable(data[offset:offset + size], file)
+                found = native_executable(data[offset:offset + size], file)
+                declared = frozenset(name for name, value in ARCHITECTURES.items()
+                                     if value == cpu and subtype & 0x00FFFFFF == CPU_SUBTYPES[name])
+                if found != declared or architectures.intersection(found):
+                    break
+                architectures.update(found)
             else:
-                return
+                return frozenset(architectures)
     raise RuntimeError("Expected a native macOS executable in manifest slot: " + str(file))
+
+
+def selected_architectures(architecture):
+    if architecture is None:
+        return None
+    if architecture not in ARCHITECTURES:
+        raise RuntimeError("Expected arm64 or x86_64 native architecture")
+    return frozenset({architecture})
+
+
+def matching_architectures(data, file, expected):
+    actual = native_executable(data, file)
+    if expected is not None and actual != expected:
+        raise RuntimeError("Native executable architecture differs from selected bundle: " + str(file))
+    return actual
 
 
 def text_resource(data, file):
@@ -248,12 +273,12 @@ def text_resource(data, file):
         raise RuntimeError("Expected a shell installer in manifest slot: " + str(file))
 
 
-def validate_app(app, variant="production", version=None):
+def validate_app(app, variant="production", version=None, architecture=None):
     with ManifestDirectory(app, allow_root_alias=False) as root:
-        validate_app_directory(root, variant, version)
+        validate_app_directory(root, variant, version, architecture)
 
 
-def validate_app_directory(root, variant, version):
+def validate_app_directory(root, variant, version, architecture=None):
     files = root.exact_tree("", APP_FILES, {SIGNATURE_FILE})
     data = root.read("Contents/Info.plist", 1 << 20)
     try:
@@ -265,8 +290,9 @@ def validate_app_directory(root, variant, version):
     version = version_string(info.get("CFBundleShortVersionString")) if version is None else version_string(version)
     if info != bundle_info(variant, version) or type(info["NSHighResolutionCapable"]) is not bool:
         raise RuntimeError("Native Info.plist identity/version/production fields differ from the manifest")
+    expected = selected_architectures(architecture)
     for relative in APP_EXECUTABLES:
-        native_executable(root.read(relative, executable=True), root.path / relative)
+        expected = matching_architectures(root.read(relative, executable=True), root.path / relative, expected)
     for relative in APP_RESOURCES:
         file = root.path / relative
         data = root.read(relative, 16 << 20)
@@ -290,12 +316,12 @@ def validate_app_directory(root, variant, version):
             raise RuntimeError("Native resource signature is invalid") from error
 
 
-def validate_package(stage, version=None):
+def validate_package(stage, version=None, architecture=None):
     required = {"UniApi.app/" + file for file in APP_FILES} | set(PACKAGE_FILES)
     with ManifestDirectory(stage, allow_root_alias=False) as root:
         root.exact_tree("", required, {"UniApi.app/" + SIGNATURE_FILE})
         with root.child("UniApi.app") as app:
-            validate_app_directory(app, "production", version)
+            validate_app_directory(app, "production", version, architecture)
         for relative in PACKAGE_FILES:
             text_resource(root.read(relative, 16 << 20), relative)
 
@@ -307,7 +333,7 @@ def validate_inputs(repo):
             root.read(source, 16 << 20)
 
 
-def stage_app(repo, binaries, fan_helper, app, variant, version, *, whisper_helper):
+def stage_app(repo, binaries, fan_helper, app, variant, version, *, whisper_helper, architecture=None):
     app, fan_helper, whisper_helper = Path(app), Path(fan_helper), Path(whisper_helper)
     # Every relative component is opened below its selected, pinned root.
     # Read the admitted descriptors once; publishing never reopens source paths.
@@ -319,7 +345,9 @@ def stage_app(repo, binaries, fan_helper, app, variant, version, *, whisper_help
         contents["Contents/MacOS/UniApiNative"] = binary_root.read("UniApiNative")
         contents["Contents/Resources/Helpers/uniapi-fans"] = fan_root.read(fan_helper.name)
         contents["Contents/Resources/Helpers/uniapi-whisper"] = whisper_root.read(whisper_helper.name, executable=True)
-        native_executable(contents["Contents/Resources/Helpers/uniapi-whisper"], whisper_helper)
+        expected = selected_architectures(architecture)
+        for relative in APP_EXECUTABLES:
+            expected = matching_architectures(contents[relative], relative, expected)
     info = bundle_info(variant, version)
     with ManifestDirectory(app.parent) as parent:
         try:
@@ -331,7 +359,7 @@ def stage_app(repo, binaries, fan_helper, app, variant, version, *, whisper_help
                 mode = 0o755 if relative in APP_EXECUTABLES or relative.endswith(".sh") else 0o644
                 output.write_new(relative, data, mode)
             output.write_new("Contents/Info.plist", plistlib.dumps(info), 0o644)
-            validate_app_directory(output, variant, version)
+            validate_app_directory(output, variant, version, architecture)
 
 
 def main():
@@ -341,6 +369,7 @@ def main():
     parser.add_argument("--bin-dir"); parser.add_argument("--fan-helper"); parser.add_argument("--whisper-helper")
     parser.add_argument("--variant", choices=IDENTITIES, default="production")
     parser.add_argument("--version")
+    parser.add_argument("--arch", choices=ARCHITECTURES)
     args = parser.parse_args()
     if args.operation == "validate-inputs":
         if not args.repo: parser.error("validate-inputs requires repo")
@@ -348,13 +377,13 @@ def main():
     elif args.operation == "stage-app":
         if not all([args.app, args.repo, args.bin_dir, args.fan_helper, args.whisper_helper, args.version]):
             parser.error("stage-app requires app, repo, bin-dir, fan-helper, whisper-helper and version")
-        stage_app(args.repo, args.bin_dir, args.fan_helper, args.app, args.variant, args.version, whisper_helper=args.whisper_helper)
+        stage_app(args.repo, args.bin_dir, args.fan_helper, args.app, args.variant, args.version, whisper_helper=args.whisper_helper, architecture=args.arch)
     elif args.operation == "validate-app":
         if not args.app: parser.error("validate-app requires app")
-        validate_app(args.app, args.variant, args.version)
+        validate_app(args.app, args.variant, args.version, architecture=args.arch)
     else:
         if not args.stage: parser.error("validate-package requires stage")
-        validate_package(args.stage, args.version)
+        validate_package(args.stage, args.version, architecture=args.arch)
 
 
 if __name__ == "__main__":
