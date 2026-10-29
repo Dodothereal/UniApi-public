@@ -26,14 +26,15 @@ KEEP_FLAGS = '-DKEEP_IDENTIFIER=17 ' + shlex.quote('-DKEEP_LITERAL="words stay"'
 
 
 class BuildFixture:
-    def __init__(self, checkout_name='checkout with spaces'):
+    def __init__(self, checkout_name='checkout with spaces', arch=None, host='arm64'):
         self.checkout_name = checkout_name
+        self.arch, self.host = arch, host
 
     def __enter__(self):
         self.temp = tempfile.TemporaryDirectory(prefix='whisper path maps ')
         self.root = Path(self.temp.name) / self.checkout_name
         self.source = self.root / '.cache/whisper-runtime/whisper.cpp-1.9.4'
-        self.build = self.root / '.cache/whisper-runtime' / ('build-' + os.uname().machine)
+        self.build = self.root / '.cache/whisper-runtime' / ('build-' + (self.host if self.arch is None else self.arch))
         self.bin = self.root / 'fake commands'
         self.bin.mkdir(parents=True)
         tools = self.root / 'tools'
@@ -48,22 +49,35 @@ class BuildFixture:
                         UNIAPI_SWIFT_SDK=str(sdk), UNIAPI_SWIFT_TOOLCHAIN=str(self.bin / 'swift'),
                         CFLAGS='-DENV_IDENTIFIER=31', CXXFLAGS='-DENV_IDENTIFIER=32',
                         WHISPER_FIXTURE_LOG=str(self.root / 'commands.jsonl'))
+        self.env.pop('UNIAPI_NATIVE_ARCH', None)
+        if self.arch is not None:
+            self.env['UNIAPI_NATIVE_ARCH'] = self.arch
+        self.stub('uname', 'print(' + repr(self.host) + ')')
         self.stub('swift', 'raise SystemExit("Compiler execution forbidden in fake tests")')
         self.stub('swiftc', 'raise SystemExit("Compiler execution forbidden in fake tests")')
         for name in ('cc', 'c++', 'clang', 'clang++', 'make', 'curl', 'tar', 'xcrun'):
             self.stub(name, 'raise SystemExit("Unexpected build/network command in fake tests")')
         self.stub('shasum', 'import sys;print("57e280cee375ab02425b806ad5146b99f6eb9357e3c2b31357c8a6af2e2e44ae  " + sys.argv[-1])')
         self.stub('otool', 'import sys;print(sys.argv[-1]+":\\n\\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)")')
-        self.stub('cmake', '''import json,os,pathlib,sys
+        self.stub('lipo', '''import pathlib,struct,sys
+data=pathlib.Path(sys.argv[-1]).read_bytes()
+print({0x0100000c:'arm64',0x01000007:'x86_64'}[struct.unpack('<I',data[4:8])[0]])
+''')
+        self.stub('cmake', '''import json,os,pathlib,struct,sys
 args=sys.argv[1:]
 with open(os.environ['WHISPER_FIXTURE_LOG'],'a') as log: log.write(json.dumps(args)+'\\n')
 if '--build' in args:
     build=pathlib.Path(args[args.index('--build')+1]);(build/'bin').mkdir(exist_ok=True)
-    payload = str(build).encode() if os.environ.get('WHISPER_FIXTURE_LEAK') == '1' else b'Synthetic nonexecutable fixture bytes'
+    arch=next(line.split('=',1)[1] for line in (build/'CMakeCache.txt').read_text().splitlines() if line.startswith('CMAKE_OSX_ARCHITECTURES:STRING='))
+    if os.environ.get('WHISPER_FIXTURE_WRONG_ARCH') == '1': arch='x86_64' if arch=='arm64' else 'arm64'
+    payload=struct.pack('<IIIIIIII',0xfeedfacf,{'arm64':0x0100000c,'x86_64':0x01000007}[arch],3 if arch=='x86_64' else 0,2,0,0,0,0)
+    if os.environ.get('WHISPER_FIXTURE_LEAK') == '1': payload += str(build).encode()
     (build/'bin/whisper-cli').write_bytes(payload)
 else:
     build=pathlib.Path(args[args.index('-B')+1]);build.mkdir(exist_ok=True)
     flags=[a[2:] for a in args if a.startswith(('-DCMAKE_C_FLAGS:', '-DCMAKE_CXX_FLAGS:'))]
+    arch=next(a.split('=',1)[1] for a in args if a.startswith('-DCMAKE_OSX_ARCHITECTURES='))
+    flags.append('CMAKE_OSX_ARCHITECTURES:STRING='+arch)
     (build/'CMakeCache.txt').write_text('\\n'.join(flags)+'\\n')
 ''')
         files = {'LICENSE': b'fixture root license\n',
@@ -115,6 +129,62 @@ else:
 
 
 class CommandTests(unittest.TestCase):
+    def test_target_architecture_controls_cache_and_portable_intel_flags(self):
+        for host, selected in [('arm64', None), ('x86_64', None), ('arm64', 'x86_64'), ('x86_64', 'arm64')]:
+            with self.subTest(host=host, selected=selected), BuildFixture(arch=selected, host=host) as fixture:
+                fixture.seed_cache()
+                flags, configure = fixture.run()
+                expected = host if selected is None else selected
+                self.assertIn('-DCMAKE_OSX_ARCHITECTURES=' + expected, configure)
+                self.assertEqual(fixture.build.name, 'build-' + expected)
+                for values in flags.values():
+                    self.assertIn('-DKEEP_IDENTIFIER=17', values)
+                    self.assertIn('-DKEEP_LITERAL="words stay"', values)
+                    self.assertEqual('-march=x86-64' in values, expected == 'x86_64')
+                    self.assertEqual('-mtune=generic' in values, expected == 'x86_64')
+                features = ('SSE42', 'AVX', 'AVX2', 'AVX_VNNI', 'BMI2', 'FMA', 'F16C', 'AVX512',
+                            'AVX512_VBMI', 'AVX512_VNNI', 'AVX512_BF16', 'AMX_TILE', 'AMX_INT8', 'AMX_BF16')
+                for feature in features:
+                    self.assertEqual('-DGGML_' + feature + '=OFF' in configure, expected == 'x86_64')
+                if expected == 'x86_64':
+                    repeated, _ = fixture.run()
+                    self.assertEqual(flags, repeated, 'A repeated Intel configure must not accumulate baseline flags')
+
+    def test_invalid_architecture_refuses_before_cmake_or_publication(self):
+        for arch in ('', 'universal', 'arm64;x86_64', 'arm64 x86_64', 'x86_64h'):
+            with self.subTest(arch=arch), BuildFixture(arch=arch) as fixture:
+                with self.assertRaisesRegex(AssertionError, 'UNIAPI_NATIVE_ARCH must be arm64 or x86_64'):
+                    fixture.run()
+                self.assertFalse((fixture.root / 'commands.jsonl').exists())
+                self.assertFalse((fixture.root / 'output with spaces/uniapi-whisper').exists())
+                self.assertFalse(list(fixture.source.parent.glob('.prepare.*')))
+
+    def test_intel_custom_cpu_flags_cannot_override_portable_baseline(self):
+        for flags in ('-march=native', '-mavx2', '-arch arm64', '--target=arm64-apple-macosx14.0'):
+            with self.subTest(flags=flags), BuildFixture(arch='x86_64') as fixture:
+                fixture.seed_cache(flags)
+                with self.assertRaisesRegex(AssertionError, 'baseline refuses custom target or CPU flags'):
+                    fixture.run()
+                self.assertFalse((fixture.root / 'commands.jsonl').exists())
+                self.assertFalse((fixture.root / 'output with spaces/uniapi-whisper').exists())
+        for language in ('C', 'CXX'):
+            with self.subTest(release_language=language), BuildFixture(arch='x86_64') as fixture:
+                fixture.seed_cache()
+                with (fixture.build / 'CMakeCache.txt').open('a') as cache:
+                    cache.write('CMAKE_' + language + '_FLAGS_RELEASE:STRING=-O3 -march=native\n')
+                with self.assertRaisesRegex(AssertionError, 'baseline refuses custom target or CPU flags'):
+                    fixture.run()
+                self.assertFalse((fixture.root / 'commands.jsonl').exists())
+                self.assertFalse((fixture.root / 'output with spaces/uniapi-whisper').exists())
+
+    def test_wrong_linked_architecture_is_refused_without_publishing(self):
+        with BuildFixture(arch='x86_64') as fixture:
+            fixture.env['WHISPER_FIXTURE_WRONG_ARCH'] = '1'
+            with self.assertRaisesRegex(AssertionError, 'Unexpected Whisper architecture'):
+                fixture.run()
+            self.assertFalse((fixture.root / 'output with spaces/uniapi-whisper').exists())
+            self.assertFalse(list(fixture.source.parent.glob('.prepare.*')))
+
     def test_spaces_and_cached_identifiers_and_literals_survive_argv(self):
         with BuildFixture() as fixture:
             fixture.seed_cache()

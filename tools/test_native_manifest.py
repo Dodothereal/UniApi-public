@@ -21,14 +21,15 @@ manifest = importlib.util.module_from_spec(spec); spec.loader.exec_module(manife
 spec = importlib.util.spec_from_file_location("native_release_manifest_fixture", TOOLS / "package_release.py")
 package = importlib.util.module_from_spec(spec); spec.loader.exec_module(package)
 MACHO = struct.pack("<IIIIIIII", 0xFEEDFACF, 0x0100000C, 0, 2, 0, 0, 0, 0)
+MACHO_X86 = struct.pack("<IIIIIIII", 0xFEEDFACF, 0x01000007, 3, 2, 0, 0, 0, 0)
 
 
-def native_fixture(root):
+def native_fixture(root, architecture="arm64"):
     """Complete manifest fixture, reusable by the parent-owned package tests."""
     root = Path(root); repo = root / "repo"; binaries = root / "binaries"
     binaries.mkdir(parents=True)
     for name in ("UniApiNative", "uniapi-battery", "uniapi-shim", "uniapi-fans", "uniapi-whisper"):
-        (binaries / name).write_bytes(MACHO); (binaries / name).chmod(0o755)
+        (binaries / name).write_bytes({"arm64": MACHO, "x86_64": MACHO_X86}[architecture]); (binaries / name).chmod(0o755)
     for relative in manifest.APP_RESOURCES.values():
         file = repo / relative; file.parent.mkdir(parents=True, exist_ok=True)
         if file.suffix == ".sh": data = b"#!/bin/bash\n# fixture installer; never executed\nexit 0\n"
@@ -46,6 +47,52 @@ def native_fixture(root):
 
 @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "Native macOS descriptor fixtures require POSIX")
 class NativeManifestTests(unittest.TestCase):
+    def test_all_five_thin_executables_match_requested_or_inferred_architecture(self):
+        for architecture in ("arm64", "x86_64"):
+            with self.subTest(architecture=architecture), tempfile.TemporaryDirectory() as temporary:
+                _, _, stage = native_fixture(temporary, architecture)
+                app = stage / "UniApi.app"
+                manifest.validate_app(app, architecture=architecture)
+                manifest.validate_package(stage, architecture=architecture)
+                package.assert_native_stage(stage)
+                other = "x86_64" if architecture == "arm64" else "arm64"
+                with self.assertRaisesRegex(RuntimeError, "architecture differs"):
+                    manifest.validate_app(app, architecture=other)
+                with self.assertRaisesRegex(RuntimeError, "architecture differs"):
+                    manifest.validate_package(stage, architecture=other)
+
+    def test_each_mixed_slot_is_refused_before_staging_and_during_validation(self):
+        for relative in manifest.APP_EXECUTABLES:
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary); repo, binaries, stage = native_fixture(root)
+                (binaries / Path(relative).name).write_bytes(MACHO_X86)
+                destination = root / "next.app"
+                with self.assertRaisesRegex(RuntimeError, "architecture differs"):
+                    manifest.stage_app(repo, binaries, binaries / "uniapi-fans", destination, "production", "3.0.0",
+                                       whisper_helper=binaries / "uniapi-whisper")
+                self.assertFalse(destination.exists())
+                (stage / "UniApi.app" / relative).write_bytes(MACHO_X86)
+                with self.assertRaisesRegex(RuntimeError, "architecture differs"):
+                    package.assert_native_stage(stage)
+                with self.assertRaisesRegex(RuntimeError, "architecture differs"):
+                    manifest.validate_app(stage / "UniApi.app", architecture="arm64")
+
+    def test_requested_thin_target_refuses_fat_slices_and_false_cpu_headers(self):
+        header = struct.pack(">II", 0xCAFEBABE, 2)
+        records = struct.pack(">IIIII", 0x0100000C, 0, 48, 32, 0) + struct.pack(">IIIII", 0x01000007, 3, 80, 32, 0)
+        fat = header + records + MACHO + MACHO_X86
+        self.assertEqual(manifest.native_executable(fat, "fixture"), frozenset({"arm64", "x86_64"}))
+        with self.assertRaisesRegex(RuntimeError, "architecture differs"):
+            manifest.matching_architectures(fat, "fixture", frozenset({"x86_64"}))
+        false_records = struct.pack(">IIIII", 0x01000007, 3, 48, 32, 0) + records[20:]
+        with self.assertRaises(RuntimeError):
+            manifest.native_executable(header + false_records + MACHO + MACHO_X86, "fixture")
+        for architecture in ("", "universal", "arm64;x86_64", "x86_64h"):
+            with self.assertRaises(RuntimeError): manifest.selected_architectures(architecture)
+        for cpu, subtype in ((0x01000007, 8), (0x0100000C, 2)):
+            with self.assertRaises(RuntimeError):
+                manifest.native_executable(struct.pack("<IIIIIIII", 0xFEEDFACF, cpu, subtype, 2, 0, 0, 0, 0), "specialized ISA fixture")
+
     def test_complete_manifest_preserves_every_resource_and_optional_signature(self):
         with tempfile.TemporaryDirectory() as temporary:
             repo, _, stage = native_fixture(temporary)
@@ -233,7 +280,17 @@ class NativeBuildDiscoveryTests(unittest.TestCase):
         for relative in ("native/swift/build.sh", "native/swift/tools/build-snapshot.sh", "native/swift/tools/swift-environment.sh", "native/swift/tools/verify-ci.sh", "tools/native_manifest.py", "tools/generate_statistics_pricing.py", "resources/pricing-catalog.json", "native/swift/Sources/UniApiCore/StatisticsPriceCatalog.swift"):
             target = repo / relative; target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ROOT / relative, target)
         # Build plumbing fixture: never run CMake, download sources or execute ASR.
-        (repo / "tools/build-local-whisper.sh").write_text('#!/bin/bash\nset -euo pipefail\n[[ $# == 2 && "$1" == --output ]]\ncp "$UNIAPI_MANIFEST_FIXTURE/binaries/uniapi-whisper" "$2"\n')
+        (repo / "tools/build-local-whisper.sh").write_text('''#!/bin/bash
+set -euo pipefail
+[[ $# == 2 && "$1" == --output ]]
+python3 - "$2" <<'PY'
+import json,os,pathlib,struct,sys
+arch=os.environ['UNIAPI_NATIVE_ARCH']; root=pathlib.Path(os.environ['UNIAPI_MANIFEST_FIXTURE'])
+with (root/'whisper-calls').open('a') as log: log.write(json.dumps({'arch':arch,'output':sys.argv[1]})+'\\n')
+pathlib.Path(sys.argv[1]).write_bytes(struct.pack('<IIIIIIII',0xFEEDFACF,{'arm64':0x0100000C,'x86_64':0x01000007}[arch],3 if arch=='x86_64' else 0,2,0,0,0,0))
+pathlib.Path(sys.argv[1]).chmod(0o755)
+PY
+''')
         (repo / "native/swift/tools/verify.sh").write_text('#!/bin/bash\nprintf "%s\\n%s\\n" "$UNIAPI_SWIFT_SDK" "$UNIAPI_SWIFT_TOOLCHAIN"\n')
         (repo / "native/swift/tools/install-native.sh").write_text("#!/bin/bash\n# fixture only; never executed\nexit 0\n")
         developer = root / "Xcode Fixture.app/Contents/Developer"
@@ -244,11 +301,13 @@ class NativeBuildDiscoveryTests(unittest.TestCase):
 import json, os, pathlib, struct, sys, time
 a=sys.argv[1:]; root=pathlib.Path(os.environ['UNIAPI_MANIFEST_FIXTURE']); cwd=pathlib.Path.cwd()
 with (root/'calls').open('a') as f: f.write(json.dumps({'args':a,'sdk':os.environ.get('SDKROOT'),'clang':os.environ.get('CLANG_MODULE_CACHE_PATH'),'modules':os.environ.get('SWIFTPM_MODULECACHE_OVERRIDE')})+'\\n')
+target=a[a.index('-target')+1] if '-target' in a else a[a.index('--triple')+1] if '--triple' in a else 'arm64-apple-macosx14.0'
+arch=target.split('-')[0]; cpu={'arm64':0x0100000C,'x86_64':0x01000007}[arch]
 if pathlib.Path(sys.argv[0]).name=='swiftc':
- out=pathlib.Path(a[a.index('-o')+1]); out.write_bytes(struct.pack('<IIIIIIII',0xFEEDFACF,0x0100000C,0,2,0,0,0,0)); sys.exit(0)
+ out=pathlib.Path(a[a.index('-o')+1]); out.write_bytes(struct.pack('<IIIIIIII',0xFEEDFACF,cpu,3 if arch=='x86_64' else 0,2,0,0,0,0)); sys.exit(0)
 pkg=pathlib.Path(a[a.index('--package-path')+1]) if '--package-path' in a else cwd
 scratch=pathlib.Path(a[a.index('--scratch-path')+1]) if '--scratch-path' in a else cwd/'.build/fixture'
-bin=scratch/'bin'; bin.mkdir(parents=True,exist_ok=True)
+bin=scratch/('bin-'+arch if '--triple' in a else 'bin'); bin.mkdir(parents=True,exist_ok=True)
 if '--show-bin-path' in a: print(bin); sys.exit(0)
 assert a[a.index('-j')+1]=='2'
 if os.environ.get('UNIAPI_MANIFEST_RACE')=='1':
@@ -261,20 +320,67 @@ if os.environ.get('UNIAPI_MANIFEST_RACE')=='1':
   (root/'first-observed').write_text((pkg/'Sources/generation').read_text())
  else: (root/'second-finished').touch()
 for n in ('UniApiNative','uniapi-battery','uniapi-shim'):
- file=bin/n; file.write_bytes(struct.pack('<IIIIIIII',0xFEEDFACF,0x0100000C,0,2,0,0,0,0)); file.chmod(0o755)
+ selected=(0x01000007 if cpu==0x0100000C else 0x0100000C) if os.environ.get('UNIAPI_MANIFEST_WRONG_EXECUTABLE')==n else cpu
+ file=bin/n; file.write_bytes(struct.pack('<IIIIIIII',0xFEEDFACF,selected,3 if selected==0x01000007 else 0,2,0,0,0,0)); file.chmod(0o755)
 print('fixture compiler progress')
 ''')
         compiler.chmod(0o755); shutil.copy2(compiler, commands / "swiftc")
-        for name, content in {"uname": "#!/bin/bash\n[[ \"${1:-}\" != -s ]] || { echo Darwin; exit; }; echo arm64\n",
+        for name, content in {"uname": "#!/bin/bash\n[[ \"${1:-}\" != -s ]] || { echo Darwin; exit; }; echo \"${UNIAPI_MANIFEST_HOST_ARCH:-arm64}\"\n",
                               "vtool": "#!/bin/bash\necho 'minos 14.0'\n", "plutil": "#!/bin/bash\nexit 0\n",
                               "codesign": "#!/bin/bash\nexit 0\n",
                               "strip": "#!/bin/bash\nprintf '%s\\n' \"$*\" >> \"$UNIAPI_MANIFEST_FIXTURE/strip-calls\"\n[[ \"${UNIAPI_MANIFEST_STRIP_FAIL:-0}\" != 1 ]] || exit 9\n"}.items():
             file = commands / name; file.write_text(content); file.chmod(0o755)
         env = os.environ.copy()
-        for name in ("UNIAPI_SWIFT_SDK", "UNIAPI_SWIFT_TOOLCHAIN", "UNIAPI_NATIVE_BUILD_ROOT", "UNIAPI_NATIVE_VERSION", "UNIAPI_NATIVE_BUNDLE_VARIANT", "UNIAPI_NATIVE_CONFIGURATION"):
+        for name in ("UNIAPI_SWIFT_SDK", "UNIAPI_SWIFT_TOOLCHAIN", "UNIAPI_NATIVE_BUILD_ROOT", "UNIAPI_NATIVE_VERSION", "UNIAPI_NATIVE_BUNDLE_VARIANT", "UNIAPI_NATIVE_CONFIGURATION", "UNIAPI_NATIVE_ARCH", "UNIAPI_MANIFEST_HOST_ARCH", "UNIAPI_MANIFEST_WRONG_EXECUTABLE"):
             env.pop(name, None)
         env.update(DEVELOPER_DIR=str(developer), PATH=str(commands) + os.pathsep + env["PATH"], UNIAPI_MANIFEST_FIXTURE=str(root))
         return repo, sdk, compiler, env
+
+    def test_bundle_target_propagates_to_swiftpm_discovery_fan_and_whisper(self):
+        for host, selected in (("arm64", None), ("x86_64", None), ("arm64", "x86_64"), ("x86_64", "arm64")):
+            with self.subTest(host=host, selected=selected), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary); repo, _, _, env = self.fixture(root)
+                env["UNIAPI_MANIFEST_HOST_ARCH"] = host
+                if selected is not None: env["UNIAPI_NATIVE_ARCH"] = selected
+                expected = host if selected is None else selected
+                result = subprocess.run(["bash", str(repo / "native/swift/build.sh")], env=env, capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                app = repo / "native/swift/build.noindex/UniApi Native.app"
+                manifest.validate_app(app, "development", architecture=expected)
+                calls = [json.loads(line)["args"] for line in (root / "calls").read_text().splitlines()]
+                self.assertEqual(len(calls), 3)
+                for args in calls:
+                    option = "--triple" if args[0] == "build" else "-target"
+                    self.assertEqual(args[args.index(option) + 1], expected + "-apple-macosx14.0")
+                    if option == "-target":
+                        self.assertEqual(args[args.index("-j") + 1], "2")
+                        self.assertEqual(args[args.index("-num-threads") + 1], "2")
+                self.assertEqual(sum("--show-bin-path" in args for args in calls), 1)
+                whisper = [json.loads(line) for line in (root / "whisper-calls").read_text().splitlines()]
+                self.assertEqual([call["arch"] for call in whisper], [expected])
+
+    def test_invalid_bundle_architecture_never_reaches_build_commands(self):
+        for architecture in ("", "universal", "arm64;x86_64", "arm64 x86_64", "x86_64h"):
+            with self.subTest(architecture=architecture), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary); repo, _, _, env = self.fixture(root)
+                env["UNIAPI_NATIVE_ARCH"] = architecture
+                result = subprocess.run(["bash", str(repo / "native/swift/build.sh")], env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 64)
+                self.assertIn("UNIAPI_NATIVE_ARCH must be arm64 or x86_64", result.stderr)
+                self.assertFalse((root / "calls").exists())
+                self.assertFalse((root / "whisper-calls").exists())
+
+    def test_mixed_swiftpm_product_cannot_replace_prior_bundle(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); repo, _, _, env = self.fixture(root)
+            previous = repo / "native/swift/build.noindex/UniApi Native.app"
+            previous.mkdir(parents=True); (previous / "previous").write_text("preserved")
+            env.update(UNIAPI_NATIVE_ARCH="x86_64", UNIAPI_MANIFEST_WRONG_EXECUTABLE="uniapi-shim")
+            result = subprocess.run(["bash", str(repo / "native/swift/build.sh")], env=env, capture_output=True, text=True, timeout=15)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("architecture differs", result.stderr)
+            self.assertEqual((previous / "previous").read_text(), "preserved")
+            self.assertFalse(list(previous.parent.glob(".native-bundle.*")))
 
     def test_developer_sdk_and_explicit_overrides_choose_the_same_toolchain(self):
         with tempfile.TemporaryDirectory() as temporary:

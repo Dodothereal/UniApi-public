@@ -87,7 +87,9 @@ enum StatisticsFold {
         for e in events {
             all.add(e, streaming: streaming); models[e.model, default: StatisticsSpeed()].add(e, streaming: streaming); harnesses[e.source, default: StatisticsSpeed()].add(e, streaming: streaming)
             let key = e.source + "\u{0}" + e.model; var p = pairs[key] ?? (e.source, e.model, StatisticsSpeed()); p.2.add(e, streaming: streaming); pairs[key] = p
-            let day = dates.day(e.ts); var d = days[day] ?? ([:], [:]); d.models[e.model, default: StatisticsSpeed()].add(e, streaming: streaming); d.harnesses[e.source, default: StatisticsSpeed()].add(e, streaming: streaming); days[day] = d
+            let day = dates.day(e.ts)
+            days[day, default: (models: [:], harnesses: [:])].models[e.model, default: StatisticsSpeed()].add(e, streaming: streaming)
+            days[day, default: (models: [:], harnesses: [:])].harnesses[e.source, default: StatisticsSpeed()].add(e, streaming: streaming)
         }
         func decorated(_ s: StatisticsSpeed, _ fields: JSONObject) -> JSONValue { .object(s.json.object.merging(fields) { _, new in new }) }
         return ["basis": .string(streaming ? "streaming" : "response"), "summary": all.json, "models": .array(models.keys.sorted().map { decorated(models[$0]!, ["model": .string($0)]) }), "harnesses": .array(StatisticsSource.allCases.map { decorated(harnesses[$0.rawValue]!, ["source": .string($0.rawValue)]) }), "pairs": .array(pairs.keys.sorted().map { let p = pairs[$0]!; return decorated(p.2, ["source": .string(p.0), "model": .string(p.1)]) }), "days": .array(days.keys.sorted().map { ["day": .number($0), "models": .object(days[$0]!.models.mapValues(\.json)), "harnesses": .object(days[$0]!.harnesses.mapValues(\.json))] })]
@@ -100,8 +102,11 @@ enum StatisticsFold {
         var projects: [String: (StatisticsTotals, Set<String>)] = [:]
         var dates = StatisticsCalendarCursor(calendar: calendar)
         for e in evs {
-            let day = dates.day(e.ts); var bucket = daily[day] ?? (StatisticsTotals(), [:]); bucket.0.add(e); bucket.1[e.model, default: StatisticsTotals()].add(e); daily[day] = bucket
-            var p = projects[e.project] ?? (StatisticsTotals(), []); p.0.add(e); p.1.insert(e.session); projects[e.project] = p
+            let day = dates.day(e.ts)
+            daily[day, default: (StatisticsTotals(), [:])].0.add(e)
+            daily[day, default: (StatisticsTotals(), [:])].1[e.model, default: StatisticsTotals()].add(e)
+            projects[e.project, default: (StatisticsTotals(), [])].0.add(e)
+            projects[e.project, default: (StatisticsTotals(), [])].1.insert(e.session)
             let c = calendar.dateComponents([.weekday, .hour], from: Date(timeIntervalSince1970: e.ts / 1000)); d.heat[((c.weekday ?? 1) + 5) % 7][min(23, max(0, c.hour ?? 0))] += 1
         }
         d.days = daily.keys.sorted().map { ["day": .number($0), "totals": daily[$0]!.0.json, "perModel": .object(daily[$0]!.1.mapValues(\.json))] }

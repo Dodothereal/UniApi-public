@@ -2,6 +2,10 @@
 # Build a separate native development bundle. Never install or run it here.
 set -euo pipefail
 cd "$(dirname "$0")"
+native_arch="${UNIAPI_NATIVE_ARCH-$(uname -m)}"
+case "$native_arch" in arm64|x86_64) ;; *) echo 'UNIAPI_NATIVE_ARCH must be arm64 or x86_64.' >&2; exit 64;; esac
+export UNIAPI_NATIVE_ARCH="$native_arch"
+target="$native_arch-apple-macosx14.0"
 source tools/swift-environment.sh
 uniapi_swift_environment
 sdk="$UNIAPI_SWIFT_SDK"
@@ -24,11 +28,11 @@ for helper in uniapi-fans uniapi-battery uniapi-shim uniapi-whisper; do
 done
 mkdir -p "$CLANG_MODULE_CACHE_PATH" "$SWIFTPM_MODULECACHE_OVERRIDE" "$build_root/Helpers"
 bash ../../tools/build-local-whisper.sh --output "$build_root/Helpers/uniapi-whisper"
-"$compiler" build --build-system native --disable-sandbox --sdk "$sdk" --cache-path "$PWD/.cache/swiftpm" -c "$configuration" -j 2 -Xswiftc -num-threads -Xswiftc 2
-binary_dir="$("$compiler" build --build-system native --disable-sandbox --sdk "$sdk" -c "$configuration" --show-bin-path)"
+"$compiler" build --build-system native --disable-sandbox --sdk "$sdk" --triple "$target" --cache-path "$PWD/.cache/swiftpm" -c "$configuration" -j 2 -Xswiftc -num-threads -Xswiftc 2
+binary_dir="$("$compiler" build --build-system native --disable-sandbox --sdk "$sdk" --triple "$target" -c "$configuration" --show-bin-path)"
 fan_temporary="$(mktemp "$build_root/Helpers/uniapi-fans.XXXXXX")"
 trap 'rm -f "$fan_temporary"' EXIT
-"$swiftc" -O -sdk "$sdk" -target "$(uname -m)-apple-macosx14.0" ../fans/Core/*.swift ../fans/main.swift -framework IOKit -o "$fan_temporary"
+"$swiftc" -O -j 2 -num-threads 2 -sdk "$sdk" -target "$target" ../fans/Core/*.swift ../fans/main.swift -framework IOKit -o "$fan_temporary"
 codesign --force --sign - --identifier uniapi-fans "$fan_temporary"
 mv -f "$fan_temporary" "$build_root/Helpers/uniapi-fans"
 trap - EXIT
@@ -41,7 +45,7 @@ app="$(mktemp -d "$build_root/.native-bundle.XXXXXX")/UniApi.app"
 staging="$(dirname "$app")"
 trap 'rm -rf "$staging"' EXIT
 python3 ../../tools/native_manifest.py stage-app --repo ../.. --bin-dir "$binary_dir" \
-  --fan-helper "$build_root/Helpers/uniapi-fans" --whisper-helper "$build_root/Helpers/uniapi-whisper" --app "$app" --variant "$variant" --version "$version"
+  --fan-helper "$build_root/Helpers/uniapi-fans" --whisper-helper "$build_root/Helpers/uniapi-whisper" --app "$app" --variant "$variant" --version "$version" --arch "$native_arch"
 for helper in uniapi-battery uniapi-shim; do
   helper_temporary="$(mktemp "$build_root/Helpers/$helper.XXXXXX")"
   trap 'rm -f "$helper_temporary"; rm -rf "$staging"' EXIT
@@ -61,7 +65,7 @@ done
 plutil -lint "$app/Contents/Info.plist"
 codesign --force --sign - "$app"
 codesign --verify --strict "$app"
-python3 ../../tools/native_manifest.py validate-app --app "$app" --variant "$variant" --version "$version"
+python3 ../../tools/native_manifest.py validate-app --app "$app" --variant "$variant" --version "$version" --arch "$native_arch"
 [[ ! -L "$final_app" ]] || { echo 'Linked build bundle refused.' >&2; exit 1; }
 rm -rf "$final_app"
 mv "$app" "$final_app"

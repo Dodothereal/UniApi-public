@@ -1,5 +1,53 @@
 # Preview validation
 
+## In-place Statistics fold buckets (candidate)
+
+Only three container-update blocks change the fold: per-day model/harness
+speed buckets, per-day token/model buckets and per-project session sets.
+Direct stored-value mutation avoids copying nested collections for each event.
+The event and scalar accumulation order, date logic, grouping and reported
+fields remain unchanged. Four new methods cover manual expected day/clock
+counters, per-project session membership and 108 complete legacy-oracle boards
+with exact recursive numeric-bit comparison. Independent Core/test source
+review found no blocking defect.
+
+The full optimized native gate passed **1,291 tests, zero failures**, in
+48.420 seconds (48.508 seconds including all-suite completion). It exited after
+210.589 seconds, including the 159.96-second all-UI/three-product build.
+Frozen inputs remained unchanged. The actual host was macOS 27.2/arm64, with
+macOS 14 target/SDK 26.5. All four new methods have individual passing records.
+The separate thin Intel compilation below used the same application sources;
+these native tests executed on arm64.
+
+The [synthetic component control and actual 0.1.12 running-app recordings](PERFORMANCE.md#in-place-fold-bucket-candidate)
+retain their distinct scopes. The candidate has not been installed or measured
+as a new whole-app improvement. The recorded Reload delay remains open.
+
+## Explicit thin architecture builds (candidate)
+
+One `UNIAPI_NATIVE_ARCH` selects the same arm64 or x86_64 target for SwiftPM,
+fan compilation and the pinned Whisper build. The default remains the host
+architecture. Manifest staging and validation reject mixed executable sets;
+Intel Whisper uses a portable baseline with optional ISA extensions disabled.
+
+The corrected focused Python suites passed 24 manifest/build-discovery methods
+and nine Whisper path/target methods. Initial mocked positives failed because
+the replacement fixture wrote its helper without executable permission; that
+fixture was corrected to mode 0755 without relaxing executable admission.
+Independent source review found no remaining scoped blocker. The run froze all
+six changed inputs and recorded no drift.
+
+An actual optimized thin x86_64 build then completed in 246.486 seconds on the
+arm64 Mac, including pinned upstream Whisper and all Swift app/helper products.
+All five actual executables are x86_64 with macOS 14 minimum/SDK 26.5 headers
+and signature load commands. Strict deep ad-hoc signature verification passed.
+The development bundle contains 18 files and 58,568,792 logical bytes; this is
+not a production-size comparison. Frozen compiler inputs remained unchanged.
+No Intel executable was run, no installed app or hardware helper was replaced,
+and no provider/model action occurred. This is thin compilation/static evidence,
+not physical Intel/macOS 14 runtime, translated runtime, universal packaging,
+fresh-user installation or device acceptance. Public downloads remain arm64.
+
 ## Two-step onboarding revision (0.1.12)
 
 The guide now starts with four first-task choices, then offers appearance,

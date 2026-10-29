@@ -10,10 +10,11 @@ integrations you need, and keep your work in one SwiftUI app.
 ## Before you install
 
 The preview is for Apple Silicon (arm64). Setup and the navigation controls
-described below require **0.1.4 or newer**; the release page identifies the
+described below require **0.1.12 or newer**; the release page identifies the
 currently downloadable version. The app
 targets macOS 14 and was validated on macOS 27.2 with Apple Silicon; physical
-macOS 14 runtime behavior, Intel and universal builds remain unverified. Source
+macOS 14 and Intel runtime behavior and universal builds remain unverified. A
+thin Intel build has compiled and passed static header/signature checks. Source
 builds require the pinned macOS 26.5 SDK and matching toolchain.
 
 The preview is ad-hoc signed and **not notarized**. Ad-hoc signing does not verify the publisher. Fresh-user installation acceptance remains open; see
