@@ -1,5 +1,34 @@
 # Preview validation
 
+## Empty-state grouping and Home card widths (unreleased)
+
+Independent visual critique covered all 14 destinations using 72 native page
+captures in Light/Dark at 1050x800 and 720x1000 points. These are bounded empty
+or synthetic states, not an all-populated-state certificate. Four Codex-labelled
+captures accidentally used the Claude fixture and provide no Codex acceptance.
+An omitted fan footer and incomplete Activity telemetry were fixture limitations.
+
+Follow-up changes group Speed and Results empty-state actions with their
+instructions, make the free-test action secondary and unavailable without
+providers, and hide Code's empty project rail after a successful empty read.
+Sixteen complete-page captures cover those empty states plus an unselected
+existing-project rail control. The optimized UI-only link took 60.878 seconds.
+The control establishes that the rail remains present; it does not establish
+an enabled New thread action or a selected project.
+
+Home now chooses its destination grid using a minimum card width that includes
+density-scaled padding. Twelve captures cover Compact, Default and Spacious,
+both themes and both sizes; destination titles remain whole. Four more captures
+show the existing populated Results winner row and headline tiles using two
+synthetic models. This second optimized UI-only link took 61.129 seconds.
+
+Both links compile the current complete UI copies with 159 retained Core,
+Presentation and C objects from an earlier build. The hosts remain invisible,
+outside all displays and inactive, with page reads and pollers suppressed.
+These renders are not current Core execution, input, hover/compositor, full
+shell, live hardware or a performance comparison. The prior 1,255-test result
+below remains separate; no new Core test execution is implied.
+
 ## Completed-response streaming clock (unreleased)
 
 An isolated Codex 0.164.0 client using the 0.1.5 shim completed an actual shell

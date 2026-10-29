@@ -23,6 +23,8 @@ struct NativeHomePage: View {
     var body: some View {
         GeometryReader { geometry in
         let contentWidth = min(820, geometry.size.width) - 2 * density.pageMargin
+        // Keep the destination title and both header icons inside each card.
+        let summaryCardWidth = 140 + 40 * density.cardScale
         NativePage(title: "Home", readiness: pageReadiness, showsHeader: false) {
             VStack(spacing: 12) {
                 UniApiMark(size: 54)
@@ -68,7 +70,7 @@ struct NativeHomePage: View {
                     }
                 }
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: contentWidth < 350 ? 1 : contentWidth < 600 ? 2 : 4), spacing: 12) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: contentWidth < 2 * summaryCardWidth + 12 ? 1 : contentWidth < 4 * summaryCardWidth + 36 ? 2 : 4), spacing: 12) {
                 summaryCard(.code, value: domains["code"].isNull ? "Reading…" : homeCount(domains["code"]["activeThreads"].int, "live thread"), detail: domains["code"].isNull ? "Reading saved threads…" : domains["code"]["pendingPermissions"].int > 0 ? homeCount(domains["code"]["pendingPermissions"].int, "permission") + " waiting" : domains["code"]["lastTitle"].string.isEmpty ? homeCount(domains["code"]["threads"].int, "thread") : domains["code"]["lastTitle"].string)
                 summaryCard(.arena, value: domains["arena"].isNull ? "Reading…" : "\(domains["arena"]["pendingVotes"].int) to judge", detail: domains["arena"].isNull ? "Reading saved matches…" : domains["arena"]["running"].int > 0 ? homeCount(domains["arena"]["running"].int, "match", plural: "matches") + " running" : homeCount(domains["arena"]["matches"].int, "match", plural: "matches"))
                 summaryCard(.transcribe, value: domains["transcribe"].isNull ? "Reading…" : homeCount(domains["transcribe"]["count"].int, "transcript"), detail: domains["transcribe"]["running"].int > 0 ? "\(domains["transcribe"]["running"].int) in progress" : domains["transcribe"]["lastTitle"].string.isEmpty ? "Links and files to text" : domains["transcribe"]["lastTitle"].string)

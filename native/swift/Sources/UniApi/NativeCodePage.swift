@@ -32,8 +32,10 @@ struct NativeCodePage: View {
                 VStack(spacing: 0) {
                     if !state.error.isEmpty { NativeError(message: state.error).padding(12) }
                     HStack(spacing: 0) {
-                        projectRail.frame(width: 268)
-                        Rectangle().fill(Theme.border).frame(width: 1).accessibilityHidden(true)
+                        if !state.loaded || !state.projects.isEmpty {
+                            projectRail.frame(width: 268)
+                            Rectangle().fill(Theme.border).frame(width: 1).accessibilityHidden(true)
+                        }
                         threadPane.frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                             .accessibilityHidden(showGit && !project.isEmpty && !inlineInspector)
                         if showGit, !project.isEmpty, inlineInspector {
