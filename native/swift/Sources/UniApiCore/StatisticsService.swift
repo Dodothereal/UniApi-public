@@ -28,6 +28,7 @@ public actor NativeStatisticsService {
     private var scan: JSONValue = [:], progress: JSONValue = ["scanId": "", "phase": "", "status": "idle", "done": 0, "total": 0, "file": "", "generation": 0, "loaded": false]
     private var rawByDay: [String: Double] = [:], colors: JSONValue = [:], warnings: [String] = []
     private var folds: [String: StatisticsDerived] = [:]
+    private var publishedTotals: StatisticsPublishedTotals?
     private var queryDay: Double?, sourceTotals: [Int: JSONValue] = [:]
     private var claudeLifetimeModels: [String: StatisticsModel]?
     private struct DetailKey: Hashable { let model: String, range: Int, source: String }
@@ -227,8 +228,8 @@ public actor NativeStatisticsService {
             value["progress"] = progress
             return value
         case "summary":
-            let d = derived(range: 0, source: "all", now: now)
-            return ["loaded": true, "grand": .number(d.summary.totals.grand), "models": .number(Double(d.summary.models)), "responses": .number(d.summary.totals.messages)]
+            let totals = publicationTotals(now: now)
+            return ["loaded": true, "grand": .number(totals.totals.grand), "models": .number(Double(totals.models)), "responses": .number(totals.totals.messages)]
         case "model", "exportDailyCSV":
             let model = (input["model"] ?? .null).string
             guard !model.isEmpty, model.count <= 300, !model.unicodeScalars.contains(where: { $0.value < 32 }), [0, 7, 30, 90, 365].contains(requestedRange), allowedSources.contains(requestedSource) else { throw NativeFailure("Choose a valid model, source and date range.") }
@@ -258,7 +259,15 @@ public actor NativeStatisticsService {
     }
     private func clearQueries() {
         folds.removeAll(); sourceTotals.removeAll(); claudeLifetimeModels = nil
+        publishedTotals = nil
         details.removeAll(); detailOrder.removeAll()
+    }
+    private func publicationTotals(now: Double) -> StatisticsPublishedTotals {
+        prepareQueryDay(now: now)
+        if let publishedTotals { return publishedTotals }
+        let totals = StatisticsPublishedTotals.fold(events, cache: cache)
+        publishedTotals = totals
+        return totals
     }
     private func detail(model: String, range: Int, source: String, now: Double) throws -> JSONValue {
         prepareQueryDay(now: now)
@@ -615,7 +624,7 @@ public actor NativeStatisticsService {
         let now = clock()
         // Publish only a complete generation, including Claude lifetime
         // reconciliation. Readers never observe a partially reparsed corpus.
-        let complete = derived(range: 0, source: "all", now: now).summary
+        let complete = publicationTotals(now: now)
         publishedSummary.replace(["loaded": true, "loading": false, "scanning": false, "provenance": "corpus", "readerGeneration": "native", "grand": .number(complete.totals.grand), "models": .number(Double(complete.models)), "responses": .number(complete.totals.messages)])
         // The scanned-event page load can supersede the awaiting manual reload.
         // Invalidate before yielding so a restored ledger with the same size
