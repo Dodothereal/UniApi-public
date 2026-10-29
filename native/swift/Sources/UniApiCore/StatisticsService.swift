@@ -661,10 +661,10 @@ public actor NativeStatisticsService {
         var pairs: [String: JSONValue] = [:], runs = Set<String>(), first: String?, last: String?
         var trend: [String: (ts: Double, label: String, key: String, run: String, ms: [Double])] = [:]
         for r in try readBench() {
-            let at = statisticsTimestamp(r["ts"])
-            if range > 0 && (at == nil || at! < cutoff) { continue }
             let provider = r["provider"].string, name = r["model"].string.isEmpty ? r["target"].string : r["model"].string
             if provider.isEmpty || name.isEmpty || (model != nil && model != name) { continue }
+            let clock = StatisticsBenchmarkClock(r, range: range)
+            if range > 0 && (clock.timestamp == nil || clock.timestamp! < cutoff) { continue }
             let key = provider + "|" + name, tok = r["tokens"], input = statisticsNumber(tok["in"]), output = statisticsNumber(tok["out"])
             if input > 0 || output > 0 {
                 var p = pairs[key] ?? ["key": .string(key), "provider": .string(provider), "providerName": .string(r["provider_name"].string.isEmpty ? provider : r["provider_name"].string), "model": .string(name)]
@@ -673,7 +673,7 @@ public actor NativeStatisticsService {
                 if !r["run_id"].string.isEmpty { runs.insert(r["run_id"].string) }
                 let stamp = r["ts"].string; if !stamp.isEmpty { first = min(first ?? stamp, stamp); last = max(last ?? stamp, stamp) }
             }
-            if r["test"].string == "latency", r["ok"].bool, !r["run_id"].string.isEmpty, case .number(let ms) = r["timing_ms"]["ttft"], ms.isFinite, let at {
+            if let ms = clock.latencyMs, let at = clock.timestamp {
                 let run = r["run_id"].string, group = key + "@" + run
                 var bucket = trend[group] ?? (at, "\(name.split(separator: "/").last ?? Substring(name)) · \(r["provider_name"].string.isEmpty ? provider : r["provider_name"].string)", key, run, [])
                 bucket.ts = min(bucket.ts, at); bucket.ms.append(ms); trend[group] = bucket

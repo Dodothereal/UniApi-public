@@ -1,5 +1,26 @@
 # Preview validation
 
+## Benchmark clock eligibility (candidate)
+
+All-time benchmark spend now parses dates only for eligible latency trends.
+Date-window queries keep the same timestamp parser and cutoff rules; spend's
+lexical first/last strings, full JSON admission and complete-record deduplication
+are unchanged. A partial-decoding alternative was explicitly rejected after a
+Foundation control showed it admitting an ignored overflowing number that the
+full decoder rejects.
+
+The optimized full native gate passed **1,287 tests, zero failures**, in 47.642
+seconds (47.730 seconds including all-suite completion). The command exited
+after 208.929 seconds, including a 159.05-second native build and all three
+product links. Frozen inputs remained unchanged. Eight new methods cover exact
+legacy outputs and numeric bits, cutoffs, missing clocks, malformed rows and
+parser-call admission. Independent review cleared both Core files and the eight
+tests. The host was macOS 27.2/arm64, target macOS 14 and SDK 26.5.
+
+The [component timing control](PERFORMANCE.md#benchmark-timestamp-candidate)
+does not establish installed speedups; package delivery and real-input follow-up
+remain separate.
+
 ## Lightweight Statistics publication (0.1.10)
 
 The native service now prepares Home/summary counters without first building
