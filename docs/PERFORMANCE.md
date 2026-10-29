@@ -193,3 +193,37 @@ whole-app speedup percentage. All apps Reload still took approximately
 1.73–1.78 seconds and remains an optimization target. The capture alone does
 not isolate its cause. This is not an instant-loading or compositor-smoothness
 completion claim. The original Statistics scope was restored after testing.
+
+## Benchmark timestamp candidate
+
+A further diagnostic sample exercised one All-apps Reload only after that scope
+had settled. It contained benchmark ledger decoding and timestamp parsing as
+well as usage parsing, database assembly and chart folding. Different sampled
+instruction addresses do not establish repeated calls, and stack counts are
+not elapsed-time percentages.
+
+The candidate keeps the complete benchmark JSON decoder and deduplication
+unchanged. A tested partial-decoder shortcut was rejected: an ignored `1e999`
+value made the full decoder reject a record that a partial decoder accepted.
+A syntax-valid JSON projection would therefore widen existing admission.
+
+Instead, relevant provider/model rows parse timestamps only when a date range
+requires filtering or an eligible latency trend needs a clock. All-time spend
+retains its original first/last strings, including unparseable dates. The same
+parser, finite numeric TTFT requirement, successful latency test and nonempty
+run identity remain in force.
+
+Eight new regression methods cover parser-call admission, eligible zero/negative
+latencies and numeric run IDs, real timestamp forms, every positive-range
+eligibility class, all-time invalid-date spend and first/last strings, ranged
+model cutoffs and medians, and complete-row deduplication/rejection. They compare
+full legacy outputs and number bit patterns. The full optimized native gate
+passed 1,287 tests with zero failures.
+
+A 1,000-row synthetic control with six-digit offset timestamps and 10% eligible
+latency tests measured median-three elapsed time of **47.180 ms for eager clocks
+versus 4.892 ms for eligible-only clocks**, in one process with ABBAAB order.
+Complete legacy fold results are compared outside timing. Parser-call counts
+are asserted in the focused helper tests, not in that timing loop. This is a
+clock-component result, not CPU, a fresh-process test or an installed app
+improvement percentage. New installed timings remain pending.
