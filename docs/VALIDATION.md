@@ -1,6 +1,6 @@
 # Preview validation
 
-## Two-step onboarding revision (0.1.12 candidate)
+## Two-step onboarding revision (0.1.12)
 
 The guide now starts with four first-task choices, then offers appearance,
 spacing and motion before opening the selected page. The separate introduction
@@ -34,6 +34,29 @@ binding for that interactive instance. The view uses its own preference domain
 and no app session or services. This does not establish installed-shell
 navigation, actual VoiceOver focus delivery, compositor smoothness or
 fresh-user installation.
+
+The final 0.1.12 production package built successfully in 163.166 seconds.
+Its 18 app files total 29,996,875 logical bytes; all five actual executables
+have macOS 14 minimum/SDK 26.5 headers and passed strict ad-hoc signature
+verification. All 22 ZIP members match staging byte for byte with no CRC
+failures. The 12,643,692-byte ZIP has SHA-256
+`c715608b75d9740b0c58fdc962ea7d9f9f2b2667989e870b3bb3cb0f233d5274`.
+All 62 public Python fixtures and both hosted static CI runs passed.
+
+The unchanged guarded updater then installed this package after idle admission
+and a coherent private backup. All 18 installed files match the candidate.
+Provider/client configuration, prior Statistics records and saved preferences
+were retained. Normal expired aggregated fan-history pruning, rollup accumulation,
+Statistics file metadata changes and a fresh startup status are qualified
+separately; this is not an all-private-bytes-unchanged claim.
+
+Actual installed input opened Settings > Show setup, selected Statistics,
+advanced to the second step with existing System/Default/System preferences,
+and used Open Statistics. The sheet dismissed onto the selected Statistics page
+with the original Codex/All-time scope. The complete saved preference domain
+was unchanged after that check. This establishes this existing-user replay and
+navigation path, not a fresh-user installation, VoiceOver execution or a
+compositor/FPS measurement.
 
 ## Benchmark clock eligibility (candidate)
 
