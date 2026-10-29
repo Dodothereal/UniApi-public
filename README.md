@@ -229,7 +229,8 @@ The Home illustrations use empty dashboard summaries.
 ## Help, validation and contributing
 
 Start with [Installation](docs/INSTALL.md), [Configuration](docs/CONFIGURATION.md)
-and [Local development](docs/LOCAL-DEVELOPMENT.md). When reporting a problem,
+and [Local development](docs/LOCAL-DEVELOPMENT.md). Interface contributors should
+also follow the [native design conventions](docs/DESIGN.md). When reporting a problem,
 include the preview version, macOS version and architecture, and a sanitized
 reproduction. Keep credentials, private histories and personal data out of reports.
 

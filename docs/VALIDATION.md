@@ -1,6 +1,6 @@
 # Preview validation
 
-## Empty-state grouping and Home card widths (unreleased)
+## Empty-state grouping and Home card widths (0.1.7)
 
 Independent visual critique covered all 14 destinations using 72 native page
 captures in Light/Dark at 1050x800 and 720x1000 points. These are bounded empty
@@ -29,7 +29,35 @@ These renders are not current Core execution, input, hover/compositor, full
 shell, live hardware or a performance comparison. The prior 1,255-test result
 below remains separate; no new Core test execution is implied.
 
-## Completed-response streaming clock (unreleased)
+## Whisper build-path privacy (0.1.7)
+
+Release assertions in the pinned Whisper/ggml sources retained 22 absolute
+build paths. Compiler file, macro and debug prefix maps now cover the logical
+and physical source/build roots. A separate post-link check refuses to publish
+a helper that still contains those roots or personal home-path prefixes.
+This does not patch binary strings or change ordinary source literals.
+
+Five fake-command fixtures cover argument quoting, preservation of cached or
+initial flags, repeat configuration, unsafe roots and refusal to publish a
+leaking binary. Separate real C, C++ and Objective-C compiler controls checked
+file macros, identifiers, ordinary literals and debug-object paths. A tiny real
+CMake/Make object-library control checked spaced roots and rebuilding after
+flag changes; no compiled control program was executed.
+
+One actual helper build completed in 27.093 seconds. All 40 checked objects
+rebuilt, all 22 diagnostics retained their remapped paths, and no home, source
+or build-root paths remained. The helper targets macOS 14/SDK 26.5, retains
+embedded Metal, the pinned archive and notices, and uses only system dynamic
+libraries. A cached production build with the final publication guard passed
+in 2.547 seconds and produced the identical helper. This is compiler/build
+and artifact evidence; the earlier transcription result is not a new inference
+run for this change.
+
+The public static gate passed 62 isolated Python fixtures with zero failures in
+125.707 seconds. Source/credential boundaries, resource admission and generated
+pricing checks passed. This gate launches no app, installed service or provider.
+
+## Completed-response streaming clock (0.1.7)
 
 An isolated Codex 0.164.0 client using the 0.1.5 shim completed an actual shell
 tool and final reply against a synthetic loopback provider. Metadata-only traces
@@ -71,7 +99,7 @@ This is a host send-completion clock, not peer receipt, compositor timing or
 every-provider acceptance. Clock metadata never adds token usage by itself;
 Statistics still requires an exact matching client usage record.
 
-## Statistics empty-source presentation (unreleased)
+## Statistics empty-source presentation (0.1.7)
 
 Empty source cards now say **No recorded usage**, including their accessibility
 value. Cards containing usage retain their output/cache detail and measured
@@ -93,7 +121,7 @@ They establish page layout, not input,
 VoiceOver execution, compositor performance, a real-client streaming clock or
 installed-user acceptance. The preceding 1,251-test result is not a new run.
 
-## Onboarding presentation refinement (0.1.5 candidate)
+## Onboarding presentation refinement (0.1.5)
 
 Only `NativeOnboardingView.swift` changes application behavior. The admission
 policy, preference keys, completion callbacks and destination handoff are
