@@ -26,11 +26,11 @@ struct NativeOnboardingView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: compact ? 18 : 28) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Your UniApi workspace")
+                            Text("What would you like to do?")
                                 .font(Theme.ui(compact ? 24 : 26, weight: .semibold)).tracking(-0.6)
                                 .accessibilityAddTraits(.isHeader)
                                 .accessibilityFocused($focusedHeading)
-                            Text("Choose a starting page and a look that feels like you.")
+                            Text("Start with one thing. Everything else is available in the sidebar.")
                                 .font(Theme.ui(13)).foregroundStyle(Theme.dim)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -81,7 +81,7 @@ struct NativeOnboardingView: View {
 
     private func destinations(grid: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Start in").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
+            Text("Start here").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
             if grid {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                     ForEach(OnboardingDestination.allCases) { destinationChoice($0, compact: true) }
@@ -101,19 +101,20 @@ struct NativeOnboardingView: View {
                 NativeIcon(value.icon, size: 19).foregroundStyle(selected ? Theme.link : Theme.dim)
                     .frame(width: 24, height: 24).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(value.title).font(Theme.ui(13, weight: .medium))
-                    Text(value.detail).font(Theme.ui(11.5)).foregroundStyle(Theme.dim)
+                    Text(value.actionTitle).font(Theme.ui(13, weight: .medium))
+                    Text(value.title + " · " + value.detail).font(Theme.ui(11.5)).foregroundStyle(Theme.dim)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 NativeIcon("check", size: 14).foregroundStyle(Theme.link)
                     .opacity(selected ? 1 : 0).accessibilityHidden(true)
             }
-            .padding(.horizontal, 12).padding(.vertical, density == "compact" ? 8 : density == "spacious" ? 14 : compact ? 10 : 12)
-            .frame(maxWidth: .infinity, minHeight: density == "compact" ? 58 : density == "spacious" ? 76 : 64, alignment: .leading)
+            .padding(.horizontal, 12).padding(.vertical, compact ? 10 : 12)
+            .frame(maxWidth: .infinity, minHeight: compact ? 68 : 72, alignment: .leading)
         }
         .buttonStyle(OnboardingChoiceStyle(selected: selected))
-        .accessibilityLabel(value.title + ". " + value.detail)
+        .accessibilityLabel(value.actionTitle + ". Select " + value.title + " as starting page. " + value.detail)
+        .accessibilityHint("Use Open " + value.title + " to continue.")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
@@ -121,26 +122,44 @@ struct NativeOnboardingView: View {
         VStack(alignment: .leading, spacing: 12) {
             if showPreview {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Layout preview").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
+                    Text("Appearance preview").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
                     OnboardingWorkspacePreview(destination: destination)
-                        .frame(height: 240)
+                        .frame(height: 180)
                         .accessibilityHidden(true).allowsHitTesting(false)
                 }
             }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Appearance").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-                choiceStrip(options: [("auto", "System", "monitor"), ("light", "Light", "sun"), ("dark", "Dark", "moon")], selection: appearance) { appearance = $0 }
-                    .accessibilityLabel("Appearance")
+            if showPreview {
+                appearanceControl
+                spacingControl
+            } else {
+                HStack(alignment: .top, spacing: 16) {
+                    appearanceControl
+                    spacingControl
+                }
             }
-            HStack(spacing: 12) {
-                Text("Spacing").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-                Spacer(minLength: 0)
-                choiceStrip(options: [("compact", "Compact", nil), ("standard", "Default", nil), ("spacious", "Roomy", nil)], selection: density) { density = $0 }
-                    .frame(maxWidth: 250)
-                    .accessibilityLabel("Page spacing")
-            }
+            Text("Colours, sidebar and motion controls are in Settings.")
+                .font(Theme.ui(11)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var appearanceControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Appearance").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
+            choiceStrip(options: [("auto", "System", "monitor"), ("light", "Light", "sun"), ("dark", "Dark", "moon")], selection: appearance) { appearance = $0 }
+                .accessibilityLabel("Appearance")
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var spacingControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Spacing").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
+            choiceStrip(options: [("compact", "Compact", nil), ("standard", "Default", nil), ("spacious", "Roomy", nil)], selection: density) { density = $0 }
+                .accessibilityLabel("Page spacing")
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func choiceStrip(options: [(String, String, String?)], selection: String, change: @escaping (String) -> Void) -> some View {
@@ -193,15 +212,31 @@ private enum OnboardingDestination: String, CaseIterable, Identifiable {
     var title: String {
         switch self { case .home: return "Home"; case .switcher: return "Switcher"; case .stats: return "Statistics"; case .transcribe: return "Transcribe" }
     }
+    var actionTitle: String {
+        switch self {
+        case .home: return "Look around"
+        case .switcher: return "Connect a model"
+        case .stats: return "Explore usage"
+        case .transcribe: return "Transcribe audio"
+        }
+    }
+    var previewRows: [String] {
+        switch self {
+        case .home: return ["Recent work", "Usage overview"]
+        case .switcher: return ["Choose a coding tool", "Add a provider and model"]
+        case .stats: return ["Tokens and cost estimates", "Models and usage history"]
+        case .transcribe: return ["Optional local model", "Your audio, on your Mac"]
+        }
+    }
     var icon: String {
         switch self { case .home: return "house"; case .switcher: return "route"; case .stats: return "chart-line"; case .transcribe: return "mic" }
     }
     var detail: String {
         switch self {
-        case .home: return "All your apps at a glance."
-        case .switcher: return "Bring your models to coding tools."
-        case .stats: return "Usage history and cost estimates."
-        case .transcribe: return "Audio to text, on your Mac."
+        case .home: return "Your apps at a glance."
+        case .switcher: return "Choose a provider and model."
+        case .stats: return "Review tokens and cost estimates."
+        case .transcribe: return "Install Whisper when you need it."
         }
     }
 }
@@ -212,41 +247,40 @@ private struct OnboardingWorkspacePreview: View {
     let destination: OnboardingDestination
     @Environment(\.nativeInterfaceDensity) private var density
     @Environment(\.nativeReducedMotion) private var reducedMotion
-    private var gap: CGFloat { density == .compact ? 8 : density == .spacious ? 18 : 12 }
+    private var gap: CGFloat { density == .compact ? 6 : density == .spacious ? 12 : 9 }
 
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: gap / 2) {
-                UniApiMark(size: 23).padding(.bottom, 8)
+                UniApiMark(size: 23).padding(.bottom, 4)
                 ForEach(OnboardingDestination.allCases) { value in
                     NativeIcon(value.icon, size: 15)
                         .foregroundStyle(destination == value ? Theme.link : Theme.muted)
-                        .frame(width: 32, height: 28)
+                        .frame(width: 32, height: 24)
                         .background(RoundedRectangle(cornerRadius: 6).fill(destination == value ? Theme.sidebarAccent : .clear))
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.top, 18).frame(width: 54)
+            .padding(.top, 12).frame(width: 54)
             .background(Theme.sidebarBG)
             Rectangle().fill(Theme.border).frame(width: 1)
             VStack(alignment: .leading, spacing: gap) {
                 Text(destination.title).font(Theme.ui(14, weight: .semibold))
                 Text(destination.detail).font(Theme.ui(10.5)).foregroundStyle(Theme.dim)
                     .fixedSize(horizontal: false, vertical: true)
-                ForEach(["Your providers", "Your usage", "Local tools"], id: \.self) { title in
+                ForEach(destination.previewRows, id: \.self) { title in
                     HStack(spacing: 8) {
                         RoundedRectangle(cornerRadius: 2).fill(Theme.accent.opacity(0.65)).frame(width: 3, height: 14)
                         Text(title).font(Theme.ui(10.5)).foregroundStyle(Theme.dim)
                         Spacer(minLength: 0)
-                        NativeIcon("chevron-right", size: 10).foregroundStyle(Theme.muted)
                     }
-                    .padding(.vertical, density == .compact ? 5 : density == .spacious ? 9 : 7)
+                    .padding(.vertical, density == .compact ? 4 : density == .spacious ? 8 : 6)
                     .padding(.horizontal, 10)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Theme.subtle))
                 }
                 Spacer(minLength: 0)
             }
-            .padding(18).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(Theme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -273,6 +307,7 @@ private struct OnboardingChoiceBody: View {
             .contentShape(RoundedRectangle(cornerRadius: 9))
             .scaleEffect(configuration.isPressed && !reducedMotion ? 0.99 : 1)
             .animation(reducedMotion ? nil : NativeMotion.hover, value: hovering)
+            .animation(reducedMotion ? nil : NativeMotion.hover, value: selected)
             .animation(reducedMotion ? nil : NativeMotion.press, value: configuration.isPressed)
             .onHover { hovering = $0 }
             .onDisappear { hovering = false }
@@ -295,6 +330,7 @@ private struct OnboardingSegmentBody: View {
             .background(RoundedRectangle(cornerRadius: 6).fill(selected ? Theme.surface : configuration.isPressed || hovering ? Theme.subtle2 : .clear))
             .contentShape(RoundedRectangle(cornerRadius: 6))
             .animation(reducedMotion ? nil : NativeMotion.hover, value: hovering)
+            .animation(reducedMotion ? nil : NativeMotion.hover, value: selected)
             .onHover { hovering = $0 }
             .onDisappear { hovering = false }
             .pointingHand()

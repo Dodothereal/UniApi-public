@@ -4,7 +4,7 @@ UniApi stores navigation preferences with macOS application preferences. They ar
 
 ## Guided setup
 
-A fresh, unconfigured writable installation offers a single-screen welcome: choose a starting page, appearance and spacing, then open that page directly. A labelled layout illustration is shown when the viewport has room. Existing preferences or provider configuration keep it out of the way for existing users. `Settings > Show setup` reopens the same guide without resetting the workspace.
+A fresh, unconfigured writable installation offers a single-screen welcome: choose a task, appearance and spacing, then open its page directly. Task labels explain what to do; the destination name stays visible below them. A small, non-interactive appearance illustration is shown when the viewport has room. The two customization controls share their label and width alignment, including side-by-side placement in shorter windows. Existing preferences or provider configuration keep it out of the way for existing users. `Settings > Show setup` reopens the same guide without resetting the workspace.
 
 If the app exits before completing or skipping setup, the guide opens again on the next launch with its appearance choices retained. A separate started marker distinguishes those choices and the new window frame from an older installation's settings.
 

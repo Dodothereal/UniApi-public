@@ -639,3 +639,29 @@ The optional model is absent until explicitly installed. Model files are validat
 - Native page illustrations are distinct from compositor captures, full-shell interaction, hardware acceptance and a fresh installed-user test.
 
 The final UI-only icon, notification-default and slider changes were rebuilt into the package and recaptured separately. Core and Presentation sources are unchanged from the 1,176-test run.
+
+
+## Task-first welcome refinement
+
+The welcome screen now names tasks before destination names, uses an inert,
+smaller appearance preview without clickable-looking chevrons, and aligns the
+Appearance and Spacing controls. Compact windows keep both customizers visible
+side by side. Density changes the preview instead of moving the task hit targets.
+
+The optimized native gate passed 1,303 tests with zero failures and all UI/three
+product links. Later changes were confined to the accessibility label/hint and
+preview spacing; Core and test inputs stayed byte-identical. Those final UI
+sources compiled separately against the retained Core/Presentation objects with
+macOS 14/SDK 26.5 headers. Twenty-four quiet exact-view captures cover Light/Dark,
+four finite viewport sizes and all three densities. The capture host cannot
+silently enlarge the declared viewport. Public screenshots and their manifest
+bind the final view, harness and composition hashes.
+
+A separate preference-isolated native input check selected Explore usage,
+changed Light/Roomy, used Return to produce the Statistics callback, reopened
+with the preferences retained, then used Escape to skip and closed its own window.
+That input check preceded the final preview-fit adjustment; final bitmap evidence
+covers that geometry change. It constructs no app runtime or services. Its input
+phase had no OS sandbox; this is not a global write audit, a fresh-user test,
+VoiceOver acceptance, or a compositor/frame-rate measurement. The rendering
+phase was separately sandboxed and offscreen.

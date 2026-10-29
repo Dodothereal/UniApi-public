@@ -53,8 +53,9 @@ For source builds and separate runtime data, see [local development](docs/LOCAL-
 ## Your first five minutes
 
 New, unconfigured installations offer a skippable single-screen welcome.
-Choose a starting page, adjust appearance and spacing, and open that page
-directly. Larger windows show a labelled layout preview. Opening welcome itself never signs you
+Choose a task—connect a model, explore usage, transcribe audio or look
+around—adjust appearance and spacing, and open that page directly. Larger
+windows show a small, non-interactive appearance preview. Opening welcome itself never signs you
 in, downloads a model, changes hardware controls or changes routing. Existing
 installations are not forced through setup; use **Settings > Show setup** to
 replay it. If setup is interrupted, its appearance choices are retained and

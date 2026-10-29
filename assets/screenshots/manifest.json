@@ -14,52 +14,52 @@
       "page": "onboarding-welcome",
       "appearance": "dark",
       "image": "onboarding-compact-dark.png",
-      "sha256": "a0850e4e2abf57c9e68cd4e464f05992ff761046f06cbc94d861eadbc2d7c74e",
+      "sha256": "2c708b4a6e4aa46a250589e5a1add09944c5ca0d08c9aed9f2a06cb2ae2b24b9",
       "viewport": [
         640,
         520
       ],
-      "label": "Single-screen production onboarding with inert layout illustration, private preferences and reduced motion; no app session or services. Exact finite host size asserted.",
+      "label": "Task-first production onboarding; non-interactive appearance preview, private preferences and reduced motion. Exact finite host size asserted. No app session or services.",
       "sessionInitializer": "none",
       "sessionBypass": "No app session is constructed.",
       "parentVisualReviewed": true,
-      "sourceSHA256": "075580ed683292429107c7bdcaef4b908702fb4c13d7b0bfa2b6d1e3ddbb75ad",
-      "compositionSHA256": "bd74363d74512640ad111aa5353f86b1658afef26dcb4a208625348f5cd3fefc",
-      "harnessSHA256": "c4f01761e2ac914422712c0a1adf6f9242cf88221cea0be6ba47f6b2d0682ea6"
+      "sourceSHA256": "deb15e0e972a08632e311ae21cb35538b308e75c0f8a3e3ada632e3b8ad72f70",
+      "compositionSHA256": "be04208d4236fb59bc13ef12899009dfd24a9a030f994363c5a62f90fd705023",
+      "harnessSHA256": "e8f92d896d031e57d8224bb4027bc01afd6ad350619753d03ab313705980d8f0"
     },
     {
       "page": "onboarding-welcome",
       "appearance": "light",
       "image": "onboarding-light.png",
-      "sha256": "231e6bec1b8d5b63120f27351e67a617062dea880d0253aa93eac2ea6f8bdfe3",
+      "sha256": "1b910fadf3a909301db3237472b1ec60afa813943e67c65d5b6d7912a37df4af",
       "viewport": [
         820,
         660
       ],
-      "label": "Single-screen production onboarding with inert layout illustration, private preferences and reduced motion; no app session or services. Exact finite host size asserted.",
+      "label": "Task-first production onboarding; non-interactive appearance preview, private preferences and reduced motion. Exact finite host size asserted. No app session or services.",
       "sessionInitializer": "none",
       "sessionBypass": "No app session is constructed.",
       "parentVisualReviewed": true,
-      "sourceSHA256": "075580ed683292429107c7bdcaef4b908702fb4c13d7b0bfa2b6d1e3ddbb75ad",
-      "compositionSHA256": "bd74363d74512640ad111aa5353f86b1658afef26dcb4a208625348f5cd3fefc",
-      "harnessSHA256": "c4f01761e2ac914422712c0a1adf6f9242cf88221cea0be6ba47f6b2d0682ea6"
+      "sourceSHA256": "deb15e0e972a08632e311ae21cb35538b308e75c0f8a3e3ada632e3b8ad72f70",
+      "compositionSHA256": "be04208d4236fb59bc13ef12899009dfd24a9a030f994363c5a62f90fd705023",
+      "harnessSHA256": "e8f92d896d031e57d8224bb4027bc01afd6ad350619753d03ab313705980d8f0"
     },
     {
       "page": "onboarding-welcome",
       "appearance": "dark",
       "image": "onboarding-dark.png",
-      "sha256": "898844366b79681d7d11ec2adf17f6992561ee281231b9561cfedb264a554d32",
+      "sha256": "c9f148f018aaa96f48bfde286d05f63e0abe84c690b872ccff4ef9021c242fc6",
       "viewport": [
         820,
         660
       ],
-      "label": "Single-screen production onboarding with inert layout illustration, private preferences and reduced motion; no app session or services. Exact finite host size asserted.",
+      "label": "Task-first production onboarding; non-interactive appearance preview, private preferences and reduced motion. Exact finite host size asserted. No app session or services.",
       "sessionInitializer": "none",
       "sessionBypass": "No app session is constructed.",
       "parentVisualReviewed": true,
-      "sourceSHA256": "075580ed683292429107c7bdcaef4b908702fb4c13d7b0bfa2b6d1e3ddbb75ad",
-      "compositionSHA256": "bd74363d74512640ad111aa5353f86b1658afef26dcb4a208625348f5cd3fefc",
-      "harnessSHA256": "c4f01761e2ac914422712c0a1adf6f9242cf88221cea0be6ba47f6b2d0682ea6"
+      "sourceSHA256": "deb15e0e972a08632e311ae21cb35538b308e75c0f8a3e3ada632e3b8ad72f70",
+      "compositionSHA256": "be04208d4236fb59bc13ef12899009dfd24a9a030f994363c5a62f90fd705023",
+      "harnessSHA256": "e8f92d896d031e57d8224bb4027bc01afd6ad350619753d03ab313705980d8f0"
     },
     {
       "page": "transcribe",
