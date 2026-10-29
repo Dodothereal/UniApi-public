@@ -100,15 +100,15 @@ checks. Private raw captures and operator data are kept outside the repository;
 these aggregate timings contain no prompts, credentials, model identities or
 usage totals.
 
-## Summary-only publication candidate
+## Summary-only publication, 0.1.10
 
-A later diagnostic stack sample of the installed 0.1.9 Reload path showed both
+A diagnostic stack sample of the installed 0.1.9 Reload path showed both
 changed-file parsing and full cached-row assembly, followed by construction of
 the all-source chart board for publication. Publication consumes only token
 total, model count and response count. The selected Codex view then prepares
 its own board. Stack counts identify work, not elapsed-time percentages.
 
-The candidate replaces that premature chart construction with a cached pure
+Version 0.1.10 replaces that premature chart construction with a cached pure
 counter projection. Without lifetime data it keeps original event accumulation
 order. With Claude lifetime data it keeps the same Claude reconciliation and
 UTC fresh tail, then adds every other source together in original order. The
@@ -135,6 +135,61 @@ Fixture construction and exact equality checks are outside timing. The test
 imposes no machine-speed cutoff. This is a component result, not an installed
 Reload percentage, CPU reduction, cold-process or memory measurement.
 
-The complete optimized native gate passed 1,279 tests with zero failures. A
-new installed Reload measurement is pending. The 0.1.9 table above remains the
-accepted installed baseline; no app-level improvement follows from these tests.
+The complete optimized native gate passed 1,279 tests with zero failures.
+The reviewed 0.1.10 package was installed through the guarded updater, and its
+18 installed app files matched the candidate. Prior usage rows, providers,
+client configuration and the complete saved preference domain were preserved.
+Normal aged fan-history retention and accumulating rollups were checked
+separately; this is not an all-database-bytes-unchanged claim.
+
+## Installed follow-up, 0.1.10
+
+The same real sidebar sequence was repeated on macOS 27.2/arm64 with the Codex,
+All time Statistics overview. The first recording contains **235 rows and 47
+complete visits**: 44 navigation visits and three admitted Reload operations.
+The UI tool attempted four clicks; only three admitted operations appear in the
+capture. The records do not establish why one attempt produced no operation,
+and there is no invented fourth timing. No recorded failure, incomplete visit
+or first sample was removed.
+
+| Page | Visits | Median data view, ms | Median data draw, ms | Data draw range, ms | Median app CPU at draw, ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Home | 3 | 9.8 | 315.6 | 282.5–393.1 | 433.6 |
+| Speed | 3 | 14.7 | 272.4 | 255.0–607.7 | 270.1 |
+| Results | 3 | 36.5 | 482.7 | 460.7–602.1 | 548.0 |
+| Prompts | 3 | 30.1 | 161.6 | 134.9–185.3 | 181.0 |
+| Arena | 3 | 6.3 | 157.8 | 146.4–195.6 | 164.8 |
+| Switcher | 3 | 5.9 | 322.3 | 277.3–327.0 | 328.4 |
+| Code | 3 | 29.6 | 133.6 | 126.7–142.2 | 140.7 |
+| Statistics | 4 | 20.8 | 323.0 | 223.6–332.6 | 321.5 |
+| Activity | 3 | 5.3 | 226.9 | 199.8–246.0 | 235.8 |
+| Fan Control | 3 | 21.8 | 225.8 | 193.5–390.6 | 252.7 |
+| Battery | 3 | 30.6 | 112.7 | 104.4–116.7 | 110.7 |
+| Transcribe | 3 | 6.3 | 157.4 | 143.8–165.5 | 194.5 |
+| Jobs | 3 | 14.4 | 268.1 | 266.9–273.0 | 391.9 |
+| Settings | 4 | 6.6 | 123.3 | 99.2–174.7 | 110.1 |
+
+A separate All apps, All time recording contains **65 rows and 13 complete
+visits**: three Home → Speed → Statistics passes, a final Settings visit, and
+three Reloads. That scope was already loaded before starting its recording.
+Each Reload used a separate real-input call. All 13 recorded visits completed
+with no recorded failures or incomplete visits. The two sessions share one
+app process but have distinct recording identities.
+
+| Statistics scope/action | Visits | Median data view, ms | Median data draw, ms | Data draw range, ms | Median app CPU at draw, ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Codex navigation | 4 | 20.8 | 323.0 | 223.6–332.6 | 321.5 |
+| Codex Reload | 3 | 242.6 | 274.1 | 220.5–278.5 | 349.8 |
+| All apps navigation | 3 | 20.8 | 302.2 | 297.1–316.5 | 303.7 |
+| All apps Reload | 3 | 1696.0 | 1759.4 | 1728.8–1775.8 | 2332.5 |
+
+The running process's peak RSS reached 663.0 MiB across these recordings.
+It is not page memory or a matched memory comparison. The same host-draw, CPU,
+observer-overhead and shared-desktop limitations apply as for 0.1.9.
+
+Codex Reload was quicker in this observation, but source histories were live,
+the scan workload was not frozen and sample counts differ. There is no causal
+whole-app speedup percentage. All apps Reload still took approximately
+1.73–1.78 seconds and remains an optimization target. The capture alone does
+not isolate its cause. This is not an instant-loading or compositor-smoothness
+completion claim. The original Statistics scope was restored after testing.

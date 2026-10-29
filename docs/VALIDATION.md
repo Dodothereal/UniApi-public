@@ -1,6 +1,6 @@
 # Preview validation
 
-## Lightweight Statistics publication (candidate)
+## Lightweight Statistics publication (0.1.10)
 
 The native service now prepares Home/summary counters without first building
 all-source chart boards. The full UI folds, parsing, canonical cache records,
@@ -17,8 +17,14 @@ unchanged during the gate. Independent review cleared both Core files and the
 eight tests. These checks used macOS 27.2/arm64, macOS 14 target and SDK 26.5.
 
 The synthetic elapsed-time comparison and its scope are recorded in
-[Performance observations](PERFORMANCE.md#summary-only-publication-candidate).
-Installed delivery and a new real-input Reload capture remain separate.
+[Performance observations](PERFORMANCE.md#summary-only-publication-0110).
+The reviewed package then passed exact app/ZIP/header/signature checks and
+was installed through the unchanged guarded updater. The 18 installed files
+matched it. Two explicitly started/stopped real-input recordings contain 60
+complete visits in total, with separate Codex and All-apps scopes and three
+admitted Reloads in each. All apps remains measurably slower; see the complete
+[timing and admission qualifications](PERFORMANCE.md#installed-follow-up-0110).
+No frozen-workload whole-app, cold-entry or GPU/FPS claim follows.
 
 ## Explicit in-app performance recording (0.1.9)
 
