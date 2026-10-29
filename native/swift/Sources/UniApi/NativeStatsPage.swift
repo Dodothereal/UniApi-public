@@ -77,7 +77,11 @@ struct NativeStatsPage: View {
     private func reload(_ mode: NativeStatsLoadMode, trigger: NativePageVisitTrigger) {
         guard NativeUIReadiness.shared.enabled else { Task { await load(mode: mode) }; return }
         endHeaderVisit(reason: .replacedRead)
-        guard let visit = NativeUIReadiness.shared.begin(.stats, trigger: trigger, parent: navigationVisit) else { return }
+        guard let visit = NativeUIReadiness.shared.begin(.stats, trigger: trigger, parent: navigationVisit) else {
+            // Ending the earlier observation may itself close the recorder.
+            // Measurement admission must never consume the user's action.
+            Task { await load(mode: mode) }; return
+        }
         let observation = NativeStatsHeaderVisit(visit: visit, scope: NativeStatsScope(source: source, range: actualRange, model: selectedModel))
         // This barrier precedes Task scheduling: retained content is not ready
         // for the new visit while load() has yet to set its busy flag.

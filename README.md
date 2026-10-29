@@ -142,6 +142,11 @@ remain unmeasured.
 
 ## Settings and navigation
 
+Settings diagnostics includes an opt-in five-minute performance recording for
+page navigation and Statistics Reload. It saves timing and process counters
+locally, without prompts, model names or credentials. See
+[recording scope and limits](docs/SETTINGS.md#performance-recording).
+
 Settings includes Light/Dark palettes with Original, Ocean, Forest and Plum
 presets, plus color pickers and hex fields for text, highlights, surfaces and
 other roles. Common colors appear first; advanced controls and contrast checks

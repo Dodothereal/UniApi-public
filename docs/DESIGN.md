@@ -73,7 +73,7 @@ route verification and catalog selection remain separate actions.
 
 ## Diagnostic timing
 
-The optional read-only UI recorder separates navigation visits from Statistics
+The optional UI recorder separates navigation visits from Statistics
 header `refresh` and `rebuild` visits. An action starts its clock before the
 asynchronous read begins; retained content cannot satisfy the new visit.
 A successful operation receipt and a newly committed payload/benchmark pair
@@ -82,8 +82,19 @@ must agree on the exact scan ID and requested scope. This also covers the normal
 unmatched reads are recorded as cancelled or incomplete, not successful samples.
 Model-detail responses without scan identity remain unmeasured.
 
-This recorder is disabled in normal operation. View-commit timestamps measure
+Automatic environment-path recording remains read-only-only. An explicit
+five-minute recording can be started under Settings diagnostics in the normal
+app. Its fixed metadata schema and protected fresh file are separate from the
+automatic recorder. Starting and stopping never remount pages, invalidate a
+cache or synthesize input. Session IDs reject callbacks and parent-visit links
+from earlier recordings; manual visits never use the app-entry label. A fixed
+monotonic deadline gates writes even if the expiry task is delayed.
+
+The recorder is disabled by default. View-commit timestamps measure
 the hosting view update, and display callbacks establish drawing; neither proves
 GPU presentation or animation frame rate. CPU deltas cover this process, and
 peak RSS is the process lifetime high-water mark. UI-tool round trips and
 Command-R remounts must not be substituted for header Reload measurements.
+Timestamps precede their own record write, but earlier recorder work can still
+contribute to a later process CPU interval. Reject an incomplete JSONL tail
+after a write failure; do not silently accept it as a complete capture.

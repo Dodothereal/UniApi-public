@@ -1,6 +1,34 @@
 # Preview validation
 
-## Statistics Reload timing and clearer setup actions (unreleased)
+## Explicit in-app performance recording (candidate)
+
+The Settings recorder adds no default background work. Its protected file writer
+is covered by eight new native methods: canonical metadata/private permissions,
+invalid fields and session/Boolean rejection, record/byte/clock limits, symlink
+and name collisions, independent append/chmod/hardlink changes and replacement
+of the named file. Rejections preserve every previously accepted byte and never
+truncate independently changed data. The focused eight-test run passed in
+0.067 seconds (0.074 seconds including selected-suite completion).
+
+The final optimized gate passed **1,271 tests, zero failures**, in 44.853 seconds
+(44.933 seconds including suite completion). The full command exited after
+102.374 seconds, including a 56.18-second incremental native build. All frozen
+native input hashes remained unchanged. All 62 isolated Python fixtures and
+the public source/credential, resource and pricing-consistency checks passed.
+These checks ran on macOS 27.2/arm64 with macOS 14 target/SDK 26.5.
+
+Independent review found and resolved an expiry/failure edge that could consume
+Statistics Reload after its earlier observation closed the recorder. The nil
+measurement branch now performs the ordinary load once. Observation failures
+close admission synchronously and publish Settings status on a later MainActor
+task, guarded against a newer recording. Manual navigation also records its
+start, so a missing view/draw terminal remains visible as incomplete evidence.
+
+This establishes source and writer regression coverage. Actual installed UI
+recordings, page/Reload measurements and compositor behavior are separate; no
+latency or resource improvement is inferred from passing these tests.
+
+## Statistics Reload timing and clearer setup actions (0.1.8)
 
 The read-only diagnostic recorder now distinguishes Statistics header refresh
 and rebuild actions from navigation. Eight new regression methods cover the
