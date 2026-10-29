@@ -1,17 +1,5 @@
 import Foundation
 
-public enum NativeOnboardingStep: Int, CaseIterable, Sendable {
-    case welcome, appearance
-    public var title: String {
-        switch self {
-        case .welcome: return "Choose your starting point"
-        case .appearance: return "Make it yours"
-        }
-    }
-    public var next: Self { Self(rawValue: rawValue + 1) ?? self }
-    public var previous: Self { Self(rawValue: rawValue - 1) ?? self }
-}
-
 /// The welcome flow owns its admission and completion markers. Provider setup, sign-in,
 /// downloads and hardware permissions remain explicit actions in their pages.
 public enum NativeOnboardingPolicy {

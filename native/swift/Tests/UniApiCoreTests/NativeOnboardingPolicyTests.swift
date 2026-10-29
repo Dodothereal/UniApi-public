@@ -21,17 +21,6 @@ final class NativeOnboardingPolicyTests: XCTestCase {
         }
     }
 
-    func testBackAndNextStayInsideTheTwoStepFlow() {
-        XCTAssertEqual(NativeOnboardingStep.welcome.previous, .welcome)
-        XCTAssertEqual(NativeOnboardingStep.appearance.next, .appearance)
-        var step = NativeOnboardingStep.welcome
-        var visited = [step]
-        while step != .appearance { step = step.next; visited.append(step) }
-        XCTAssertEqual(visited, NativeOnboardingStep.allCases)
-        while step != .welcome { step = step.previous }
-        XCTAssertEqual(step, .welcome)
-    }
-
     func testInterruptedFreshSetupSurvivesItsOwnPreferenceWrites() throws {
         let suite = "onboarding-resume-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
