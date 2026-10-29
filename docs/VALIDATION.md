@@ -665,3 +665,27 @@ covers that geometry change. It constructs no app runtime or services. Its input
 phase had no OS sandbox; this is not a global write audit, a fresh-user test,
 VoiceOver acceptance, or a compositor/frame-rate measurement. The rendering
 phase was separately sandboxed and offscreen.
+
+
+## Installed 0.1.14 and 0.1.15 follow-up
+
+Both guarded updates retained a fresh coherent private backup and initially
+refused when a request arrived before final admission. A later directly admitted
+idle retry used the same safety checks and succeeded. All 18 installed files
+matched each respective reviewed package. Before/after comparisons found no
+missing or changed prior usage records, and provider/client configuration and
+preferences were unchanged. Normal telemetry retention/rollups, growing-history
+cache metadata and new startup identities are qualified separately; this is not
+an all-private-files-unchanged claim. No active request was force-stopped.
+
+The 0.1.14 two-scope timing follow-up has 26 complete visits and 130 rows, with no
+failed or incomplete visits. [Performance](PERFORMANCE.md#installed-append-parser-follow-up)
+includes every tested category and its limits. Pricing UI explicitly displayed a
+partial estimate and unknown-cost coverage; this does not verify provider invoices
+or establish new price research.
+
+The final 0.1.15 installed welcome was inspected through Settings > Show setup.
+Explore usage selected Statistics and Open Statistics dismissed the sheet into
+the real Codex/All-time page. Appearance/spacing were left unchanged and the
+original page restored. This closes that bounded installed handoff, not a fresh
+unconfigured user, every destination, VoiceOver or compositor test.

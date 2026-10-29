@@ -347,5 +347,50 @@ The original Codex/All-time scope was restored and installed app bytes matched.
 
 This baseline predates installing the append candidate. Histories were live;
 no causal version percentage follows. Host display callbacks do not prove GPU
-presentation or animation cadence. Candidate installation and actual in-app
-follow-up remain pending.
+presentation or animation cadence. The later installed follow-up is recorded below; it does not turn this live
+baseline into a controlled version A/B.
+
+
+## Installed append-parser follow-up
+
+The guarded 0.1.14 update completed and all 18 installed file hashes matched the
+reviewed candidate. Two separately stopped manual recordings each contain 65
+rows and 13 complete visits: three Home → Speed → Statistics passes, three
+individually admitted header Reloads, and a Settings return. Every visit has all
+five phases, with no failure, incomplete visit or omitted sample. Source/range
+were settled before recording. The original Codex/All-time scope and original
+page were restored afterward; all installed app bytes still matched.
+
+| Scope / action | n | 0.1.13 data view, ms | 0.1.14 data view, ms | 0.1.13 data draw, ms | 0.1.14 data draw, ms | 0.1.13 host CPU at draw, ms | 0.1.14 host CPU at draw, ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Codex / Home | 3 | 39.691 | 42.109 | 367.251 | 503.661 | 489.982 | 620.919 |
+| Codex / Speed | 3 | 14.642 | 15.589 | 253.668 | 280.584 | 253.232 | 276.405 |
+| Codex / Statistics navigation | 3 | 22.345 | 22.965 | 313.220 | 328.521 | 314.255 | 328.829 |
+| Codex / Reload | 3 | 1282.228 | 970.380 | 1312.101 | 992.718 | 1860.472 | 1327.796 |
+| All apps / Home | 3 | 48.496 | 43.327 | 323.416 | 315.159 | 438.688 | 453.433 |
+| All apps / Speed | 3 | 14.591 | 13.668 | 254.106 | 254.809 | 252.991 | 254.125 |
+| All apps / Statistics navigation | 3 | 22.397 | 21.336 | 295.592 | 297.567 | 296.428 | 297.741 |
+| All apps / Reload | 3 | 1605.126 | 1226.999 | 1652.039 | 1277.967 | 2219.567 | 1647.384 |
+
+This is a descriptive running-app comparison with live histories, different
+workloads and only three samples per action. No causal version percentage
+follows. Home's Codex-scope draw result was higher; navigation is not uniformly
+faster. Host process CPU includes other app work, and display callbacks do not
+prove GPU presentation, frame pacing or compositor smoothness. Lifetime peak
+RSS was retained in the private records; different process ages prevent a
+matched page-memory claim. No compiler or parser control overlapped these two
+main recordings. Reload remains about one second and is not accepted as instant.
+
+A separate diagnostic sample was triggered by the actual Reload visit-start
+record. Its matching executable/dSYM UUID resolved cache-row scanning into
+SQLite B-tree/page reads, alongside import and fold work. Inclusive stack counts
+overlap and are not elapsed-time percentages. That sampled Reload took 3267 ms
+and is excluded from the timing comparison as a separately declared diagnostic.
+An earlier sample missed Reload entirely and is retained as a negative, not a
+hotspot result. The current query already uses its path index; no missing-index
+fix or production database-tuning claim follows from this inspection.
+
+Version 0.1.15 carries the same Core/Presentation sources and adds the welcome
+refinement. It was guarded-installed afterward; the 0.1.14 table is not relabelled
+as a 0.1.15 measurement. The next optimization remains subject to controlled
+correctness/resource checks and another installed-app follow-up.
