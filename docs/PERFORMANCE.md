@@ -340,9 +340,9 @@ The original Codex/All-time scope was restored and installed app bytes matched.
 
 | 0.1.13 scope/action | n | Median data view, ms | Median data draw, ms | Median host-process CPU at draw, ms |
 | --- | ---: | ---: | ---: | ---: |
-| Codex navigation | 3 | 22.345 | 313.220 | 314.255 |
+| Codex Statistics navigation | 3 | 22.345 | 313.220 | 314.255 |
 | Codex Reload | 3 | 1282.228 | 1312.101 | 1860.472 |
-| All apps navigation | 3 | 22.397 | 295.592 | 296.428 |
+| All apps Statistics navigation | 3 | 22.397 | 295.592 | 296.428 |
 | All apps Reload | 3 | 1605.126 | 1652.039 | 2219.567 |
 
 This baseline predates installing the append candidate. Histories were live;
