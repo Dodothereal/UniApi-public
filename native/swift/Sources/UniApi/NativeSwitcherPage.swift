@@ -246,7 +246,7 @@ struct NativeSwitcherPage: View {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("Default in config").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
                         Text(state.codex["current"]["model"].string.isEmpty ? "Native model default" : state.codex["current"]["model"].string).font(Theme.ui(18, weight: .semibold)).textSelection(.enabled)
-                        Text(state.codex["current"]["source"].string + " · " + (state.codex["current"]["effort"].string.isEmpty ? "default effort" : state.codex["current"]["effort"].string)).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                        Text([state.codex["current"]["source"].string, state.codex["current"]["effort"].string.isEmpty ? "default effort" : state.codex["current"]["effort"].string].filter { !$0.isEmpty }.joined(separator: " · ")).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
                     }
                     Spacer()
                     Text(state.codex["installed"] == true ? "Codex installed" : "Codex not found").font(Theme.ui(11)).foregroundStyle(Theme.muted).padding(.horizontal, 7).padding(.vertical, 4).background(Theme.subtle, in: RoundedRectangle(cornerRadius: 5))
@@ -312,8 +312,17 @@ struct NativeSwitcherPage: View {
             SectionLabel("Models in Codex")
             Text("Keep native and API models in one picker, with Web models when the optional bridge is connected. One native row is reserved; select at most four preferred workers. Existing chats retain their current roster until reloaded.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
             VStack(alignment: .leading, spacing: 8) {
-                Text("API providers").font(Theme.ui(14, weight: .medium))
-                ForEach(state.catalogDraft.visibleProviders(state.codex["catalog"]["providers"].array), id: \.self["id"]) { provider in
+                let providers = state.catalogDraft.visibleProviders(state.codex["catalog"]["providers"].array)
+                HStack {
+                    Text("API providers").font(Theme.ui(14, weight: .medium))
+                    Spacer()
+                    Button { addProvider = true } label: { HStack(spacing: 6) { NativeIcon("plus", size: 12); Text("Add provider") } }
+                        .disabled(state.controlsBusy)
+                }
+                if providers.isEmpty {
+                    Text("Add a provider to set up its API models for Codex.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                }
+                ForEach(providers, id: \.self["id"]) { provider in
                     HStack(alignment: .top, spacing: 8) {
                         NativeSwitcherCheckRow(title: provider["name"].string, detail: provider["id"].string, checked: state.catalogDraft.providerIDs.contains(provider["id"].string)) { state.catalogDraft.toggleProvider(provider, models: state.codex["models"].array) }
                             .disabled(state.controlsBusy || !state.catalogDraft.providerIDs.contains(provider["id"].string) && provider["available"] != true)

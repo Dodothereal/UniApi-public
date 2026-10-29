@@ -38,3 +38,19 @@ it cannot establish real input, compositor smoothness or service readiness.
 Exercise the relevant controls separately and preserve the user's settings.
 Motion must respect both the app preference and macOS Reduce Motion. Do not
 add frame timers or repeat entrance animations on background refreshes.
+
+## Job history cleanup
+
+Jobs labels its history action **Clear old jobs…** and opens a confirmation
+before deleting anything. The confirmation names the seven-day cutoff, the
+completed/failed/cancelled states and the job details/logs being removed.
+Running and queued jobs, benchmark result files and saved transcripts remain.
+The existing queue predicate determines eligibility when confirmed; the UI
+does not substitute the currently filtered or visible rows. Cleanup remains
+unavailable in read-only mode and while an earlier cleanup is running.
+
+## Provider setup
+
+Codex's API-provider section offers Add provider beside its heading, using the
+same form as the Claude Code tab. An empty section explains the next step;
+route verification and catalog selection remain separate actions.

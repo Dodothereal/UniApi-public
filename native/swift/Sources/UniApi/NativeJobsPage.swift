@@ -10,6 +10,8 @@ struct NativeJobsPage: View {
     @State private var error: String?
     @State private var loaded = false
     @State private var notice: String?
+    @State private var confirmPrune = false
+    @State private var pruning = false
     @State private var reads = NativePageReadScope()
     @State private var subscription: NativePageReadScope.Ticket?
     // CSS ch is the zero-glyph advance; measure the same46ch in the native font.
@@ -22,7 +24,9 @@ struct NativeJobsPage: View {
             HStack(spacing: 8) {
                 Button { Task { await reload() } } label: { HStack(spacing: 6) { NativeIcon("rotate-cw", size: 12); Text("Reload") } }
                 T3Segmented(options: [("active", "Active"), ("all", "All"), ("failed", "Failed")], selection: scope) { scope = $0 }
-                Button("Prune") { Task { do { let removed = try await runtime.jobs.prune(olderThan: NativeJobQueue.defaultPruneAge); notice = "Removed \(removed) finished jobs older than seven days."; await reload() } catch { self.error = error.localizedDescription } } }.disabled(runtime.paths.readOnly)
+                Button(pruning ? "Clearing…" : "Clear old jobs…") { confirmPrune = true }
+                    .disabled(runtime.paths.readOnly || pruning)
+                    .help("Review removal of completed, failed and cancelled job entries older than seven days")
             }
         }) {
             if let error {
@@ -80,6 +84,21 @@ struct NativeJobsPage: View {
             }
         }
         .nativePageActivity(reads: reads)
+        .alert("Clear old job history?", isPresented: $confirmPrune) {
+            Button("Cancel", role: .cancel) { }
+            Button("Clear old jobs", role: .destructive) { Task { await prune() } }
+        } message: {
+            Text("Permanently remove completed, failed and cancelled job entries older than seven days, including their logs and job details. Running and queued jobs, benchmark results and saved transcripts are kept.")
+        }
+    }
+    private func prune() async {
+        guard !runtime.paths.readOnly, !pruning else { return }
+        pruning = true; defer { pruning = false }
+        do {
+            let removed = try await runtime.jobs.prune(olderThan: NativeJobQueue.defaultPruneAge)
+            notice = "Removed \(removed) finished jobs older than seven days."
+            await reload()
+        } catch { self.error = error.localizedDescription }
     }
     private func reload() async {
         guard let subscription, reads.accepts(subscription), let ticket = reads.begin("list") else { return }
