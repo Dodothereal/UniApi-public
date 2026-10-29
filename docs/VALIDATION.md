@@ -1,5 +1,40 @@
 # Preview validation
 
+## Two-step onboarding revision (0.1.12 candidate)
+
+The guide now starts with four first-task choices, then offers appearance,
+spacing and motion before opening the selected page. The separate introduction
+and Ready screens are removed. Admission/version markers, stored preference
+keys and the existing completion/navigation handoff remain unchanged. The
+new step headings have accessibility heading semantics and a focus request.
+
+The optimized focused gate compiled all native UI/product targets in 159.73
+seconds and passed all six onboarding-policy methods with zero failures in
+0.007 seconds (0.014 seconds including selected-suite completion). The command
+exited after 161.871 seconds. A subsequent compact-viewport presentation
+adjustment was compiled in the final exact-source render link. This is focused
+coverage, not another execution of the preceding 1,287-test suite.
+
+Sixteen final native bitmaps cover both steps in Light/Dark at 820×660,
+760×580, 700×580 and 640×520. All four first-task choices and footer actions
+remain visible at the smallest size; secondary notes can scroll. The final
+nine-file production UI link took 15.445 seconds with retained Core,
+Presentation and C objects. Its actual executable has macOS 14 minimum/SDK 26.5
+headers. The invisible, unordered hosts use private preferences and no app
+session or services. Independent source and image review found no blocking
+issue in this scope. The public screenshot manifest binds the updated views.
+
+A separate native preview exercised actual controls through computer use:
+select Statistics, advance, select Dark/Compact/Reduced, go Back, use Return,
+confirm retained selections, finish with the `stats` callback, reopen and
+skip with Escape. Both callback results were visible in accessibility output;
+the parent then closed the preview and found no remaining preview process.
+These are parent input observations, not a saved stdout receipt or sandbox
+binding for that interactive instance. The view uses its own preference domain
+and no app session or services. This does not establish installed-shell
+navigation, actual VoiceOver focus delivery, compositor smoothness or
+fresh-user installation.
+
 ## Benchmark clock eligibility (candidate)
 
 All-time benchmark spend now parses dates only for eligible latency trends.
