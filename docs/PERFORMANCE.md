@@ -438,8 +438,8 @@ already used the validated append parser. After priming the full All-apps board,
 a 456-byte suffix added two strictly later responses to one eligible ledger.
 Timing covers the actual refresh plus its All-apps overview; fixture creation,
 priming, the append write and output hashing are outside the clock. The candidate
-assembled two SQL-decoded rows and retained 160,000 raw rows. All six complete
-board digests and base digests matched; all run logs were empty.
+assembled two SQL-decoded rows and retained 160,000 raw rows. All six overview-payload digests (excluding scan and progress) and base digests
+matched; nonvolatile scan accounting also agreed and all run logs were empty.
 
 | Metric | Full assembly | Admitted append publication | Reduction |
 | --- | ---: | ---: | ---: |
