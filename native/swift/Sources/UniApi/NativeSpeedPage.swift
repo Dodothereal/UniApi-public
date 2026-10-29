@@ -36,10 +36,10 @@ struct NativeSpeedPage: View {
                 SectionLabel(text: "Providers") { Text(state.catalog.isNull ? "Reading…" : "\(state.catalog["providers"].array.count) configured").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
                 if state.catalog.isNull { ShimmerText(text: "Reading provider configuration…") }
                 else if state.catalog["providers"].array.isEmpty {
-                    NativeEmptyState(title: "No providers yet", detail: "Add a provider in Switcher, then return here to choose models.")
-                    Button { NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.switcher) } label: {
-                        HStack(spacing: 6) { NativeIcon("plus", size: 12); Text("Add provider in Switcher") }
-                    }.buttonStyle(T3Button())
+                    NativeEmptyState(title: "No providers yet", detail: "Add a provider in Switcher, then return here to choose models.",
+                                     actionTitle: "Add provider in Switcher") {
+                        NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.switcher)
+                    }
                 }
                 VStack(spacing: 2) { ForEach(state.catalog["providers"].array, id: \.self["id"]) { provider in providerRow(provider) } }.padding(.horizontal, -8)
             }
@@ -138,7 +138,7 @@ struct NativeSpeedPage: View {
             } else {
             HStack {
                 if state.freeRunning { Button { Task { await state.cancel() } } label: { HStack(spacing: 6) { NativeIcon("square", size: 12); Text("Stop free test") } }.buttonStyle(T3Button(.destructive)) }
-                else { Button { Task { await state.sweep() } } label: { HStack(spacing: 6) { NativeIcon("sparkles", size: 14); Text("Run free test") } }.buttonStyle(T3Button(.primary)).disabled(state.running) }
+                else { Button { Task { await state.sweep() } } label: { HStack(spacing: 6) { NativeIcon("sparkles", size: 14); Text("Run free test") } }.buttonStyle(T3Button(.outline)).disabled(state.running || state.catalog["providers"].array.isEmpty) }
                 Spacer()
                 Text("\(state.free["report"]["done"].int)/\(state.free["report"]["total"].int)").font(Theme.mono(11))
             }

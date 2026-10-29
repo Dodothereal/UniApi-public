@@ -25,12 +25,10 @@ struct NativeResultsPage: View {
                 if state.error.isEmpty { ShimmerText(text: "Loading matching result scope…", font: Theme.ui(12)) }
             }
             else if cells.isEmpty {
-                VStack(spacing: 12) {
-                    NativeEmptyState(title: "No results in this scope", detail: "Select models on Speed and start a run.", icon: "chart-bar")
-                    Button { NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.speed) } label: {
-                        HStack(spacing: 6) { NativeIcon("gauge", size: 12); Text("Benchmark") }
-                    }.buttonStyle(T3Button(.primary))
-                }.frame(maxWidth: .infinity)
+                NativeEmptyState(title: "No results in this scope", detail: "Select models on Speed and start a run.", icon: "chart-bar",
+                                 actionTitle: "Benchmark", actionIcon: "gauge") {
+                    NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.speed)
+                }
             }
             else {
                 if history { Text("Speed and first-token records come from individual run summaries; each column can come from a different run. Reliability includes every test, including failures. Gap is measured at the recorded best speed.").font(Theme.ui(12)).foregroundStyle(Theme.muted) }

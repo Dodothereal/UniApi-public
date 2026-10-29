@@ -190,7 +190,13 @@ struct NativeEmptyState: View {
     var title: String
     var detail: String
     var icon: String = "tray"
-    var body: some View { EmptyState(icon: icon, title: title, detail: detail) }
+    var actionTitle: String? = nil
+    var actionIcon: String = "plus"
+    var action: (() -> Void)? = nil
+    var body: some View {
+        EmptyState(icon: icon, title: title, detail: detail,
+                   actionTitle: actionTitle, actionIcon: actionIcon, action: action)
+    }
 }
 
 struct NativeReadFailureState: View {
@@ -218,16 +224,23 @@ struct EmptyState: View {
     var icon: String
     var title: String
     var detail: String
+    var actionTitle: String? = nil
+    var actionIcon: String = "plus"
+    var action: (() -> Void)? = nil
     var body: some View {
-        VStack(spacing: 10) {
-            NativeIcon(systemName: icon, size: 24)
-                .foregroundStyle(Theme.muted.opacity(0.8)).accessibilityHidden(true)
-            Text(title).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink)
-            Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: 16) {
+            VStack(spacing: 10) {
+                NativeIcon(systemName: icon, size: 24)
+                    .foregroundStyle(Theme.muted.opacity(0.8)).accessibilityHidden(true)
+                Text(title).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink)
+                Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            }.accessibilityElement(children: .combine)
+            if let actionTitle, let action {
+                Button(actionTitle, nativeIcon: actionIcon, action: action).buttonStyle(T3Button(.primary))
+            }
         }
         .frame(maxWidth: .infinity).padding(.vertical, 48)
-        .accessibilityElement(children: .combine)
     }
 }
 

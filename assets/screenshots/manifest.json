@@ -218,6 +218,70 @@
       "label": "Complete native Statistics page; two synthetic Codex records, 1,320,000 tokens, 912,000 priced and 408,000 unpriced. Reference API estimate, not operator data or billed spend. Capture-only session bypass, no input.",
       "parentVisualReviewed": true,
       "sourceSHA256": "472becd9f249eb71906f175be0f2aafa0e32a8f1d2c6a12f70f4df3ece30f834"
+    },
+    {
+      "page": "home",
+      "appearance": "dark",
+      "image": "home-dark.png",
+      "sha256": "4e1e72d88d49781f94e4880b2acf18ed06ff38bdf4eb1757179368a42f6e767e",
+      "viewport": [
+        1050,
+        800
+      ],
+      "label": "Actual native page with synthetic empty dashboard summaries; inactive capture lifecycle, reduced motion and no service/hardware/input execution.",
+      "parentVisualReviewed": true,
+      "sourceSHA256": "d7e10f0458d98285c9fd5db5c29ad55521f1a09b2b1b43660f209ec2d04907b3",
+      "compositionSHA256": "b30034cce032037202a906ebbd75bd05c556a1ab79aa6b66fba838d005ab5b15",
+      "harnessSHA256": "49104f8c2ebcbd7973d3135212417b3d422a9da0c76e0bba7a4758d875d7bebb",
+      "retainedCorePresentation": "Earlier retained objects; current UI compiled separately. No current service or compositor claim."
+    },
+    {
+      "page": "home",
+      "appearance": "light",
+      "image": "home-light.png",
+      "sha256": "ecbc7cbdeef8278fa338e2d29d18af93e08cad8dbbcf323a9b85e90f62a62568",
+      "viewport": [
+        1050,
+        800
+      ],
+      "label": "Actual native page with synthetic empty dashboard summaries; inactive capture lifecycle, reduced motion and no service/hardware/input execution.",
+      "parentVisualReviewed": true,
+      "sourceSHA256": "d7e10f0458d98285c9fd5db5c29ad55521f1a09b2b1b43660f209ec2d04907b3",
+      "compositionSHA256": "b30034cce032037202a906ebbd75bd05c556a1ab79aa6b66fba838d005ab5b15",
+      "harnessSHA256": "49104f8c2ebcbd7973d3135212417b3d422a9da0c76e0bba7a4758d875d7bebb",
+      "retainedCorePresentation": "Earlier retained objects; current UI compiled separately. No current service or compositor claim."
+    },
+    {
+      "page": "results",
+      "appearance": "dark",
+      "image": "results-dark.png",
+      "sha256": "f5a8ae12a53e3eaab81ee2ac73702c5428a013df04db35ec3b13a1a6cd1b1c7d",
+      "viewport": [
+        1050,
+        800
+      ],
+      "label": "Actual native page with two synthetic benchmark model results and an inline winner; inactive capture lifecycle, reduced motion and no service/hardware/input execution.",
+      "parentVisualReviewed": true,
+      "sourceSHA256": "0a52d13c35d3843ce43bb5d73715728b4b5ffbda2aa03fa484ffc2adb834daf1",
+      "compositionSHA256": "b30034cce032037202a906ebbd75bd05c556a1ab79aa6b66fba838d005ab5b15",
+      "harnessSHA256": "49104f8c2ebcbd7973d3135212417b3d422a9da0c76e0bba7a4758d875d7bebb",
+      "retainedCorePresentation": "Earlier retained objects; current UI compiled separately. No current service or compositor claim."
+    },
+    {
+      "page": "results",
+      "appearance": "light",
+      "image": "results-light.png",
+      "sha256": "3bba5ef4c5271135d6be08e3cec6ef8d188a48062cce04cc23fa9ef7e008ccfd",
+      "viewport": [
+        1050,
+        800
+      ],
+      "label": "Actual native page with two synthetic benchmark model results and an inline winner; inactive capture lifecycle, reduced motion and no service/hardware/input execution.",
+      "parentVisualReviewed": true,
+      "sourceSHA256": "0a52d13c35d3843ce43bb5d73715728b4b5ffbda2aa03fa484ffc2adb834daf1",
+      "compositionSHA256": "b30034cce032037202a906ebbd75bd05c556a1ab79aa6b66fba838d005ab5b15",
+      "harnessSHA256": "49104f8c2ebcbd7973d3135212417b3d422a9da0c76e0bba7a4758d875d7bebb",
+      "retainedCorePresentation": "Earlier retained objects; current UI compiled separately. No current service or compositor claim."
     }
   ],
   "onboardingReview": "All four steps reviewed in Light/Dark at820x660 and760x580; screenshots illustrate layout, not button or startup acceptance.",

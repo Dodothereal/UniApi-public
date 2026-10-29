@@ -71,6 +71,11 @@ Once in the app, start with whichever part is useful:
 4. **Transcribe** can install an optional local Whisper model when you choose
    to use it. **Settings** lets you adjust appearance and other preferences.
 
+Empty pages keep their next action beside the explanation. Speed links directly
+to provider setup, Results links back to Benchmark, and Code uses the full
+workspace for adding your first project. The free-test action remains secondary
+and cannot start without a configured provider.
+
 Provider requests, link retrieval, model downloads and optional summaries are
 separate actions. Requests sent to a provider can incur charges under its terms.
 See [Configuration](docs/CONFIGURATION.md) for the details.
@@ -194,6 +199,17 @@ records capture scope and image checksums.
 The sample contains two synthetic records. Its cost is a reference estimate,
 not an operator's usage or billed spend.
 
+**Results — sample comparison, Dark**
+
+![Native Results with two synthetic models, an inline winner and aligned headline cards](assets/screenshots/results-dark.png)
+
+[Results — Light](assets/screenshots/results-light.png) ·
+[Home — Dark](assets/screenshots/home-dark.png) ·
+[Home — Light](assets/screenshots/home-light.png)
+
+The comparison uses invented measurements, not provider performance claims.
+The Home illustrations use empty dashboard summaries.
+
 **Transcribe — Dark**
 
 ![Transcribe native page with empty fixture data, Dark appearance](assets/screenshots/transcribe-dark.png)
@@ -213,13 +229,15 @@ not an operator's usage or billed spend.
 ## Help, validation and contributing
 
 Start with [Installation](docs/INSTALL.md), [Configuration](docs/CONFIGURATION.md)
-and [Local development](docs/LOCAL-DEVELOPMENT.md). When reporting a problem,
+and [Local development](docs/LOCAL-DEVELOPMENT.md). Interface contributors should
+also follow the [native design conventions](docs/DESIGN.md). When reporting a problem,
 include the preview version, macOS version and architecture, and a sanitized
 reproduction. Keep credentials, private histories and personal data out of reports.
 
-The onboarding and settings update passed **1,251 native tests with zero
-failures** and 57 Python fixture tests. Those checks apply to the recorded
-revision and scopes; they do not establish every device or integration.
+Recorded validation includes **1,255 native tests with zero failures** for the
+completed-response streaming correction, with separate native UI captures for
+the layout refinements. Those checks apply to the recorded revisions and
+scopes; they do not establish every device or integration.
 See [validation and its limits](docs/VALIDATION.md).
 
 Contributions are welcome: read [Contributing](CONTRIBUTING.md) and the

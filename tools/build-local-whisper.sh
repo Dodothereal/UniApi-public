@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the official pinned CLI only; no model download, inference or installation.
-# Reuse the proved source/build caches; Metal source is embedded, with no metallib.
+# Reuse the checked source/build caches; Metal source is embedded, with no metallib.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 [[ $# == 2 && "$1" == --output && "$2" == /* ]] || { echo 'Usage: build-local-whisper.sh --output /absolute/path/uniapi-whisper' >&2; exit 64; }
@@ -34,7 +34,7 @@ if [[ ! -d "$source_root" ]]; then
   mv "$work/whisper.cpp-1.9.4" "$source_root"
 fi
 # Check cached release sources against the admitted archive without making a
-# second source/build tree. The existing build directory keeps its objects.
+# second source/build tree. CMake invalidates objects when compiler flags change.
 python3 - "$archive" "$cache" <<'PY'
 import pathlib, sys, tarfile
 archive, cache = sys.argv[1], pathlib.Path(sys.argv[2])
@@ -70,11 +70,48 @@ expected = ((source / "LICENSE").read_text() + "\n\nwhisper.cpp v1.9.4 - example
 if bundled.read_bytes() != expected.encode("utf-8"):
     raise SystemExit("Bundled Whisper notices differ from the pinned source")
 PYLICENSE
-# Match the manual proof's configuration so its objects remain reusable. Do not
-# change compilers or optional backend defaults on an already-proved build.
+# GGML_ABORT / WHISPER_ASSERT retain __FILE__ even in Release. Map compiler
+# paths, not arbitrary source literals or linked bytes. The pinned Metal .m
+# files use the C compile rule, so C_FLAGS also covers their Objective-C macros.
+# Preserve other cached flags (or the initial environment) and quote each
+# argument for CMake's Unix Makefiles generator, including roots with spaces.
+python3 - "$source_root" "$build_root" > "$work/compiler-flags" <<'PYFLAGS'
+import os, pathlib, shlex, sys
+source, build = sys.argv[1:]
+roots = []
+for root, replacement in ((source, "whisper.cpp"), (build, "whisper-build")):
+    # Clang can report macros with the supplied spelling but canonicalize the
+    # debug compilation directory (for example, the system's temporary path).
+    for spelling in dict.fromkeys((root, str(pathlib.Path(root).resolve()))):
+        if any(character in spelling for character in '\r\n=$#'):
+            raise SystemExit("Whisper prefix-map roots contain unsupported characters")
+        roots.append((spelling, replacement))
+options = ("-ffile-prefix-map", "-fmacro-prefix-map", "-fdebug-prefix-map")
+prefixes = tuple(f"{option}={root}=" for root, _ in roots for option in options)
+maps = [f"{option}={root}={replacement}" for root, replacement in roots for option in options]
+cached = {}
+cache_file = pathlib.Path(build) / "CMakeCache.txt"
+if cache_file.is_file():
+    for line in cache_file.read_text().splitlines():
+        for language in ("C", "CXX"):
+            key = f"CMAKE_{language}_FLAGS:STRING="
+            if line.startswith(key): cached[language] = line[len(key):]
+for language, environment in (("C", "CFLAGS"), ("CXX", "CXXFLAGS")):
+    flags = shlex.split(cached.get(language, os.environ.get(environment, "")))
+    flags = [flag for flag in flags if not flag.startswith(prefixes)]
+    sys.stdout.write(shlex.join(flags + maps) + '\0')
+PYFLAGS
+exec 3< "$work/compiler-flags"
+IFS= read -r -d '' c_flags <&3
+IFS= read -r -d '' cxx_flags <&3
+exec 3<&-
+# Set cache flags on every configure; generated flags.make is an explicit
+# dependency of each object, so pre-remapping objects must be rebuilt. Keep
+# compilers, Release settings and all optional backend defaults unchanged.
 cmake -S "$source_root" -B "$build_root" -G 'Unix Makefiles' \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_SYSROOT="$UNIAPI_SWIFT_SDK" \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="$(uname -m)" \
+  -DCMAKE_C_FLAGS:STRING="$c_flags" -DCMAKE_CXX_FLAGS:STRING="$cxx_flags" \
   -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_METAL_EMBED_LIBRARY=ON \
   -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_SERVER=OFF
 cmake --build "$build_root" --target whisper-cli -j2
@@ -85,6 +122,19 @@ otool -L "$binary" | tail -n +2 | while IFS= read -r dependency; do
   dependency="${dependency#"${dependency%%[![:space:]]*}"}"
   case "$dependency" in /System/Library/*|/usr/lib/*) ;; *) echo 'Non-system Whisper runtime dependency refused.' >&2; exit 1;; esac
 done
+# Prefix maps affect compiler-generated paths, not ordinary string literals.
+# Refuse publication if a future source or build change leaves either behind.
+python3 - "$binary" "$repo" "$source_root" "$build_root" <<'PYPATHS'
+import pathlib, sys
+binary, *roots = sys.argv[1:]
+data = pathlib.Path(binary).read_bytes()
+paths = {spelling.encode() for root in roots for spelling in (root, str(pathlib.Path(root).resolve()))}
+home = pathlib.Path.home()
+if home != pathlib.Path("/"):
+    paths.add(str(home).encode() + b"/")
+if any(path in data for path in paths) or b"/Users/" in data or b"/home/" in data:
+    raise SystemExit("Whisper binary retains private build paths; refusing publication")
+PYPATHS
 [[ ! -L "$output" && ! -L "$(dirname "$output")" ]] || { echo 'Linked Whisper output refused.' >&2; exit 1; }
 mkdir -p "$(dirname "$output")"
 published="$(mktemp "$(dirname "$output")/.uniapi-whisper.XXXXXX")"
