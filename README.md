@@ -167,6 +167,12 @@ Home, Jobs and Settings stay available in the sidebar. See
 | Activity, Fan Control, Battery | Inspect activity and supported Mac hardware controls |
 | Jobs, Settings | Follow background work and configure the app |
 
+Jobs' **Clear old jobs…** action asks for confirmation before removing completed,
+failed and cancelled entries older than seven days, including their job details
+and logs. It keeps running/queued jobs, benchmark results and saved transcripts.
+The Switcher's Codex tab also offers **Add provider** directly in its API-provider
+section; route checks and model selection remain separate steps.
+
 Actions depend on your configured providers, installed tools and hardware.
 Hardware controls may require compatible devices and an explicitly installed helper; a visible page does not guarantee device support.
 

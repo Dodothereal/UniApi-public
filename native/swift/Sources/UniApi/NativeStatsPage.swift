@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 import UniApiCore
 import UniApiPresentation
 
@@ -14,6 +15,17 @@ extension NativeStatsModel {
     }
 }
 
+/// Keep observing after the manual load returns: its stats.scanned event may
+/// own the final read, or may have committed before the scan receipt arrives.
+@MainActor private final class NativeStatsHeaderVisit {
+    let visit: NativePageVisit
+    var admission: NativeStatsRefreshAdmission
+    var subscription: AnyCancellable?
+    var scope: NativeStatsScope { admission.scope }
+    init(visit: NativePageVisit, scope: NativeStatsScope) { self.visit = visit; admission = NativeStatsRefreshAdmission(scope: scope) }
+    func stop() { subscription?.cancel(); subscription = nil; admission.cancel() }
+}
+
 struct NativeStatsPage: View {
     let runtime: NativeRuntime
     @StateObject private var state: NativeStatsModel
@@ -22,6 +34,10 @@ struct NativeStatsPage: View {
     @State private var readOwner = UUID()
     @State private var selectedModel: String?
     @State private var detailRange = 0
+    @State private var headerVisit: NativeStatsHeaderVisit?
+    @State private var headerReadiness = NativePageReadiness.pending
+    @Environment(\.nativePageVisit) private var navigationVisit
+    @Environment(\.nativePageActivation) private var activation
     @Environment(\.nativeInterfaceDensity) private var density
     init(runtime: NativeRuntime, model: NativeStatsModel? = nil) { self.runtime = runtime; _state = StateObject(wrappedValue: model ?? NativeStatsModel(runtime: runtime)) }
     private var scope: String { "\(source):\(selectedModel ?? ""):\(selectedModel == nil ? range : detailRange)" }
@@ -29,14 +45,75 @@ struct NativeStatsPage: View {
     private var snapshot: NativeStatsSnapshot? { state.snapshot(source: source, range: actualRange, model: selectedModel) }
     private var current: JSONValue { snapshot?.payload ?? .null }
     private var currentBenchmark: JSONValue { snapshot?.benchmark ?? .null }
-    private func load(mode: NativeStatsLoadMode = .cached) async { await state.load(source: source, range: actualRange, model: selectedModel, mode: mode) }
+    private func load(mode: NativeStatsLoadMode = .cached) async {
+        // This callback also serves stats.scanned. Its ordinary read must remain
+        // eligible to publish the exact generation acknowledged by the header.
+        await state.load(source: source, range: actualRange, model: selectedModel, mode: mode)
+    }
     private var readiness: NativePageReadiness { state.busy ? .pending : !state.error.isEmpty ? .failed : current.isNull || currentBenchmark.isNull ? .pending : .ready }
+    private var measuredReadiness: NativePageReadiness {
+        guard let headerVisit else { return readiness }
+        guard activation.active, headerVisit.scope == NativeStatsScope(source: source, range: actualRange, model: selectedModel),
+              headerReadiness == readiness else { return .pending }
+        return headerReadiness
+    }
+    private func endHeaderVisit(reason: NativePageVisitEndReason, outcome: NativePageVisitEnd = .cancelled) {
+        guard let headerVisit else { return }
+        headerVisit.stop()
+        NativeUIReadiness.shared.end(headerVisit.visit, outcome: outcome, reason: reason)
+        self.headerVisit = nil; headerReadiness = .pending
+    }
+    private func updateHeaderVisit(_ observation: NativeStatsHeaderVisit) {
+        guard headerVisit === observation else { return }
+        switch observation.admission.status {
+        case .pending: headerReadiness = .pending
+        case .ready: headerReadiness = .ready
+        case .failed: headerReadiness = .failed
+        case .incomplete: endHeaderVisit(reason: .noAcceptedCommit, outcome: .incomplete); return
+        case .cancelled: endHeaderVisit(reason: .replacedRead); return
+        }
+        NativeUIReadiness.shared.complete(observation.visit, readiness: headerReadiness)
+    }
+    private func reload(_ mode: NativeStatsLoadMode, trigger: NativePageVisitTrigger) {
+        guard NativeUIReadiness.shared.enabled else { Task { await load(mode: mode) }; return }
+        endHeaderVisit(reason: .replacedRead)
+        guard let visit = NativeUIReadiness.shared.begin(.stats, trigger: trigger, parent: navigationVisit) else { return }
+        let observation = NativeStatsHeaderVisit(visit: visit, scope: NativeStatsScope(source: source, range: actualRange, model: selectedModel))
+        // This barrier precedes Task scheduling: retained content is not ready
+        // for the new visit while load() has yet to set its busy flag.
+        headerReadiness = .pending; headerVisit = observation
+        Task {
+            guard headerVisit === observation, activation.active, !Task.isCancelled else {
+                if headerVisit === observation { endHeaderVisit(reason: .inactive) }; return
+            }
+            observation.subscription = state.$busy.dropFirst().sink { [weak observation] busy in
+                guard let observation, headerVisit === observation else { return }
+                if busy { observation.admission.readStarted() }
+                else {
+                    // @Published delivers before assigning busy=false, but the
+                    // accepted commit has already assigned both data values.
+                    observation.admission.published(payload: state.payload, benchmark: state.benchmark, failed: !state.error.isEmpty)
+                }
+                updateHeaderVisit(observation)
+            }
+            await state.load(source: observation.scope.source, range: observation.scope.range, model: observation.scope.model, mode: mode,
+                             operationCompleted: { scanID in
+                guard headerVisit === observation, !Task.isCancelled else { return }
+                observation.admission.operationCompleted(scanID: scanID)
+                updateHeaderVisit(observation)
+            })
+            guard headerVisit === observation else { return }
+            guard !Task.isCancelled else { endHeaderVisit(reason: .taskCancelled); return }
+            observation.admission.operationReturned()
+            updateHeaderVisit(observation)
+        }
+    }
     var body: some View {
         GeometryReader { geometry in
         let contentWidth = max(0, min(1500, geometry.size.width) - 2 * density.pageMargin)
         Group {
             if let model = selectedModel {
-                NativeStatsDetailFrame(readiness: readiness) {
+                NativeStatsDetailFrame(readiness: measuredReadiness) {
                     HStack {
                         Button { selectedModel = nil } label: { HStack(spacing: 6) { NativeIcon("arrow-left", size: 14); Text("Back to Statistics") } }.buttonStyle(T3Button(.ghost))
                         Spacer()
@@ -47,20 +124,24 @@ struct NativeStatsPage: View {
                     pageContents(width: contentWidth)
                 }
             } else {
-                NativePage(title: "Statistics", subtitle: "Token usage from Claude Code, Codex, Antigravity, Z Code, OpenCode and DeepSeek Harness, with model, project and daily breakdowns.", maxWidth: 1500, readiness: readiness, actions: { headerActions }) {
+                NativePage(title: "Statistics", subtitle: "Token usage from Claude Code, Codex, Antigravity, Z Code, OpenCode and DeepSeek Harness, with model, project and daily breakdowns.", maxWidth: 1500, readiness: measuredReadiness, actions: { headerActions }) {
                     pageContents(width: contentWidth)
                 }
             }
         }
         }
+        .environment(\.nativePageVisit, headerVisit?.visit ?? navigationVisit)
         .nativePageTask(id: scope) {
+            endHeaderVisit(reason: .scopeChanged)
             await state.begin(runtime: runtime, owner: readOwner) { await load() }
         }
         .onAppear {
             if !(["all"] + StatisticsSource.allCases.map(\.rawValue)).contains(source) { source = "all" }
             if ![0, 7, 30].contains(range) { range = 0 }
         }
-        .nativePageActivity(suspended: { state.stop(owner: readOwner) })
+        .onChange(of: scope) { _, _ in endHeaderVisit(reason: .scopeChanged) }
+        .onDisappear { endHeaderVisit(reason: .disappeared) }
+        .nativePageActivity(suspended: { endHeaderVisit(reason: .inactive); state.stop(owner: readOwner) })
     }
     private var headerActions: some View {
         HStack(spacing: 8) {
@@ -73,11 +154,11 @@ struct NativeStatsPage: View {
                 } label: { NativeStatsMenuLabel(title: detailRange == 0 ? "All time" : detailRange == 365 ? "1 year" : "\(detailRange) days") }
                 .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             }
-            Button { Task { await load(mode: .refresh) } } label: {
+            Button { reload(.refresh, trigger: .refresh) } label: {
                 HStack(spacing: 6) { NativeIcon("refresh-cw", size: 12); Text(selectedModel == nil ? "Reload" : "Refresh") }
             }.disabled(state.busy).help("Check for new or changed usage without reparsing unchanged history")
             Menu {
-                Button("Rebuild All") { Task { await load(mode: .rebuild) } }
+                Button("Rebuild All") { reload(.rebuild, trigger: .rebuild) }
                     .help("Reparse every usage file, including files whose size and modification time stayed the same")
             } label: { NativeIcon("ellipsis", size: 14) }
                 .menuStyle(.button).buttonStyle(T3Button(.ghost)).menuIndicator(.hidden)

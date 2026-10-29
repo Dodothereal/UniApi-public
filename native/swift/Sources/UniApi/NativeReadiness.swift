@@ -6,6 +6,18 @@ enum NativePageReadiness: String {
     case pending, ready, failed
 }
 
+enum NativePageVisitTrigger: String {
+    case navigation, refresh, rebuild
+}
+
+enum NativePageVisitEnd: String {
+    case cancelled, incomplete
+}
+
+enum NativePageVisitEndReason: String {
+    case replacedRead, scopeChanged, inactive, disappeared, taskCancelled, noAcceptedCommit
+}
+
 struct NativePageVisit {
     let id: Int
     let page: String
@@ -13,6 +25,8 @@ struct NativePageVisit {
     let userCPU: Double
     let systemCPU: Double
     let initial: Bool
+    let trigger: NativePageVisitTrigger
+    let parentNavigationVisit: Int?
 }
 
 private struct NativePageVisitKey: EnvironmentKey {
@@ -34,6 +48,8 @@ extension EnvironmentValues {
     private var launch: (time: UInt64, usage: rusage)?
     private var sequence = 0
     private var phases: [Int: Set<String>] = [:]
+    private var completed: [Int: NativePageReadiness] = [:]
+    private var closed: Set<Int> = []
     private let output: String?
     private init() {
         let env = ProcessInfo.processInfo.environment
@@ -47,17 +63,41 @@ extension EnvironmentValues {
         var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
         launch = (DispatchTime.now().uptimeNanoseconds, usage)
     }
-    func begin(_ page: NativeDestination) -> NativePageVisit? {
+    func begin(_ page: NativeDestination, trigger: NativePageVisitTrigger = .navigation,
+               parent: NativePageVisit? = nil) -> NativePageVisit? {
         guard enabled else { return nil }
         sequence += 1
         var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
-        let initial = sequence == 1
+        let initial = sequence == 1 && trigger == .navigation
         let start = initial ? launch?.time ?? DispatchTime.now().uptimeNanoseconds : DispatchTime.now().uptimeNanoseconds
         let before = initial ? launch?.usage ?? usage : usage
-        return NativePageVisit(id: sequence, page: page.rawValue, started: start,
-            userCPU: milliseconds(before.ru_utime), systemCPU: milliseconds(before.ru_stime), initial: initial)
+        let visit = NativePageVisit(id: sequence, page: page.rawValue, started: start,
+            userCPU: milliseconds(before.ru_utime), systemCPU: milliseconds(before.ru_stime), initial: initial,
+            trigger: trigger, parentNavigationVisit: parent.flatMap { $0.trigger == .navigation ? $0.id : $0.parentNavigationVisit })
+        if trigger != .navigation { emit("visitStarted", visit: visit, now: start, usage: usage) }
+        return visit
+    }
+    func complete(_ visit: NativePageVisit, readiness: NativePageReadiness) {
+        guard visit.trigger != .navigation, !closed.contains(visit.id) else { return }
+        completed[visit.id] = readiness == .pending ? nil : readiness
+    }
+    func end(_ visit: NativePageVisit, outcome: NativePageVisitEnd, reason: NativePageVisitEndReason) {
+        guard visit.trigger != .navigation, !closed.contains(visit.id) else { return }
+        // A departure after the accepted view commit cannot retract that commit,
+        // but must still prevent a delayed draw callback from extending the visit.
+        if !phases[visit.id, default: []].contains("dataViewCommit"), !phases[visit.id, default: []].contains("failureViewCommit") {
+            let now = DispatchTime.now().uptimeNanoseconds
+            var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
+            emit(outcome.rawValue, visit: visit, now: now, usage: usage, reason: reason)
+        }
+        closed.insert(visit.id); completed[visit.id] = nil
+    }
+    private func admitted(_ visit: NativePageVisit, readiness: NativePageReadiness) -> NativePageReadiness {
+        visit.trigger == .navigation || completed[visit.id] == readiness ? readiness : .pending
     }
     func displayed(_ visit: NativePageVisit, readiness: NativePageReadiness) {
+        guard !closed.contains(visit.id) else { return }
+        let readiness = admitted(visit, readiness: readiness)
         // Timestamp before encoding/writing so the observer's I/O is excluded.
         let now = DispatchTime.now().uptimeNanoseconds
         var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
@@ -67,6 +107,8 @@ extension EnvironmentValues {
         }
     }
     func committed(_ visit: NativePageVisit, readiness: NativePageReadiness) {
+        guard !closed.contains(visit.id) else { return }
+        let readiness = admitted(visit, readiness: readiness)
         let now = DispatchTime.now().uptimeNanoseconds
         var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
         emit("firstViewCommit", visit: visit, now: now, usage: usage)
@@ -74,14 +116,18 @@ extension EnvironmentValues {
             emit(readiness == .ready ? "dataViewCommit" : "failureViewCommit", visit: visit, now: now, usage: usage)
         }
     }
-    private func emit(_ phase: String, visit: NativePageVisit, now: UInt64, usage: rusage) {
+    private func emit(_ phase: String, visit: NativePageVisit, now: UInt64, usage: rusage,
+                      reason: NativePageVisitEndReason? = nil) {
         guard phases[visit.id, default: []].insert(phase).inserted, let output else { return }
-        let record: [String: Any] = ["schema": 1, "pid": ProcessInfo.processInfo.processIdentifier,
+        var record: [String: Any] = ["schema": 1, "pid": ProcessInfo.processInfo.processIdentifier,
             "visit": visit.id, "page": visit.page, "initial": visit.initial, "phase": phase,
+            "trigger": visit.trigger.rawValue,
             "elapsedMs": Double(now - visit.started) / 1e6,
             "userCPUMs": milliseconds(usage.ru_utime) - visit.userCPU,
             "systemCPUMs": milliseconds(usage.ru_stime) - visit.systemCPU,
             "peakResidentBytes": Int64(usage.ru_maxrss), "recordedAt": ISO8601DateFormatter().string(from: Date())]
+        if let parent = visit.parentNavigationVisit { record["parentNavigationVisit"] = parent }
+        if let reason { record["reason"] = reason.rawValue }
         guard var data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { return }
         data.append(10)
         let fd = open(output, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600))

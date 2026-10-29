@@ -1,5 +1,45 @@
 # Preview validation
 
+## Statistics Reload timing and clearer setup actions (unreleased)
+
+The read-only diagnostic recorder now distinguishes Statistics header refresh
+and rebuild actions from navigation. Eight new regression methods cover the
+successful operation receipt arriving before or after the event-owned read,
+stale content, competing scans, failed reads/operations, scope changes and
+departure. The real presentation model and event subscription are exercised
+with a synthetic service that holds the operation return until its scanned-event
+read has committed. Missing detail scan identity remains explicitly incomplete.
+
+The optimized native gate passed **1,263 tests, zero failures**, in 47.116 seconds
+(47.201 seconds including suite completion). The command took 207.983 seconds,
+including a 158.08-second build and all three production product links on
+macOS 27.2/arm64. All 374 frozen source/test/control inputs remained unchanged
+during that gate. This is instrumentation correctness, not a new app latency,
+frame-rate or CPU-improvement result.
+
+Sixteen offscreen native captures then covered Jobs with empty and synthetic
+history, plus Claude/Codex Switcher controls, in Light/Dark at 1050x800 and
+720x1000. The Codex fixture now binds its actual AppStorage to the private
+defaults and asserts the selected engine, correcting the earlier duplicate
+Claude renders. Jobs' Clear old jobs label fits both widths. Its destructive
+confirmation was source-reviewed; no history was removed or confirmation input
+performed by these captures.
+
+That review identified an empty Codex provider section with no setup action and
+an orphan separator before default effort. The Switcher-only follow-up reuses
+the existing Add provider sheet, explains the empty section and joins nonempty
+source/effort text. Eight fresh native captures cover this repair and an
+unchanged Claude control. The two complete optimized UI links took 64.246 and
+64.458 seconds, using 159 source-bound Core/Presentation/C objects from the
+successful gate. The final Switcher UI is therefore covered by the later link
+and renders; the Core, presentation model, tests and Jobs remain gate-exact.
+
+All capture hosts stayed invisible, outside the displays and inactive. Their
+page lifecycles were suppressed and data synthetic. These checks establish
+bounded layout and source behavior, not actual provider creation, authentication,
+alert interaction, complete-shell behavior, installed delivery, compositor
+smoothness, performance comparisons or physical macOS 14 execution.
+
 ## Empty-state grouping and Home card widths (0.1.7)
 
 Independent visual critique covered all 14 destinations using 72 native page
