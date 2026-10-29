@@ -99,3 +99,42 @@ The [validation record](VALIDATION.md) covers source, fixture and native test
 checks. Private raw captures and operator data are kept outside the repository;
 these aggregate timings contain no prompts, credentials, model identities or
 usage totals.
+
+## Summary-only publication candidate
+
+A later diagnostic stack sample of the installed 0.1.9 Reload path showed both
+changed-file parsing and full cached-row assembly, followed by construction of
+the all-source chart board for publication. Publication consumes only token
+total, model count and response count. The selected Codex view then prepares
+its own board. Stack counts identify work, not elapsed-time percentages.
+
+The candidate replaces that premature chart construction with a cached pure
+counter projection. Without lifetime data it keeps original event accumulation
+order. With Claude lifetime data it keeps the same Claude reconciliation and
+UTC fresh tail, then adds every other source together in original order. The
+model count includes cache-only models. Existing view/chart folds, import,
+compression, deduplication and generation-publication checks are unchanged.
+The counter cache is invalidated with the existing query caches.
+
+A private immutable-backup query control also compared the existing indexed
+row traversal with a table scan plus sort. Both produced identical ordered row
+digests, but the alternative was slower and used more peak memory, so it was
+rejected. The production query was not changed.
+
+Eight new native methods compare the projection with the unchanged full-fold
+oracle. They cover every totals field and Double bit pattern, six known sources
+plus an unknown harness, shared and cache-only models, empty inputs, strict UTC
+watermarks, invalid dates and observable floating-point accumulation order. A
+real private service fixture compares both published and requested counters
+before loading the overview, across changed and unchanged refresh generations.
+
+A 20,000-record synthetic six-source/lifetime-cache control, in one test process
+with ABBAAB order and three samples per arm, measured median elapsed time of
+**163.127 ms for the full board versus 6.102 ms for the counter projection**.
+Fixture construction and exact equality checks are outside timing. The test
+imposes no machine-speed cutoff. This is a component result, not an installed
+Reload percentage, CPU reduction, cold-process or memory measurement.
+
+The complete optimized native gate passed 1,279 tests with zero failures. A
+new installed Reload measurement is pending. The 0.1.9 table above remains the
+accepted installed baseline; no app-level improvement follows from these tests.

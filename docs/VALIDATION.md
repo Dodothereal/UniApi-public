@@ -1,5 +1,25 @@
 # Preview validation
 
+## Lightweight Statistics publication (candidate)
+
+The native service now prepares Home/summary counters without first building
+all-source chart boards. The full UI folds, parsing, canonical cache records,
+compression handling and publication barriers are unchanged. The small counter
+cache follows the existing day/generation/stream-timing query invalidations.
+
+Eight new methods compare every totals field and floating-point bit pattern to
+the unchanged full-fold oracle, including UTC lifetime reconciliation, mixed
+sources, model union and a private service refresh. The optimized full gate
+passed **1,279 tests, zero failures**, in 47.367 seconds (47.454 seconds including
+all-suite completion). The command exited after 209.250 seconds, including a
+159.46-second native build and all three product links. Frozen inputs remained
+unchanged during the gate. Independent review cleared both Core files and the
+eight tests. These checks used macOS 27.2/arm64, macOS 14 target and SDK 26.5.
+
+The synthetic elapsed-time comparison and its scope are recorded in
+[Performance observations](PERFORMANCE.md#summary-only-publication-candidate).
+Installed delivery and a new real-input Reload capture remain separate.
+
 ## Explicit in-app performance recording (0.1.9)
 
 The Settings recorder adds no default background work. Its protected file writer
