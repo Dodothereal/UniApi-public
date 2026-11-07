@@ -117,7 +117,8 @@ enum StatisticsFold {
     static func lifetime(_ d: inout StatisticsDerived, events: [StatisticsUsage], cache: StatisticsCache, calendar: Calendar) {
         d.isLifetime = true
         let watermarkValid = cache.computedOn.count == 10 && statisticsDate(cache.computedOn, utc: true) != nil
-        let fresh = watermarkValid ? events.filter { statisticsUTC($0.ts) > cache.computedOn } : nil
+        var utcDays = StatisticsUTCDayKeyCursor()
+        let fresh = watermarkValid ? events.filter { utcDays.key($0.ts) > cache.computedOn } : nil
         let observed = d.summary.totals; var t = cache.totals
         t.thinking = observed.thinking; t.webFetch = observed.webFetch; t.messages = cache.messages
         if let fresh { let tail = summary(fresh, calendar: calendar).totals; t.addReported(tail); t.messages += tail.messages }

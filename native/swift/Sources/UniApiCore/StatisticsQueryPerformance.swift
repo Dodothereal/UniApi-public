@@ -10,9 +10,10 @@ enum StatisticsSourceTotals {
         let watermark = lifetime.flatMap { $0.computedOn.count == 10 && statisticsDate($0.computedOn, utc: true) != nil ? $0.computedOn : nil }
         var totals = Dictionary(uniqueKeysWithValues: StatisticsSource.allCases.map { ($0.rawValue, StatisticsTotals()) })
         var fresh = StatisticsTotals()
+        var utcDays = StatisticsUTCDayKeyCursor()
         for event in events where range == 0 || event.ts >= cutoff {
             totals[event.source, default: StatisticsTotals()].add(event)
-            if event.source == "claude", let watermark, statisticsUTC(event.ts) > watermark { fresh.add(event) }
+            if event.source == "claude", let watermark, utcDays.key(event.ts) > watermark { fresh.add(event) }
         }
         if let lifetime {
             let observed = totals["claude"] ?? StatisticsTotals()

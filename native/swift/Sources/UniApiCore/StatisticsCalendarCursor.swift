@@ -24,3 +24,29 @@ struct StatisticsCalendarCursor {
         return value
     }
 }
+
+/// Lifetime watermarks compare the existing UTC strings, not local dates or
+/// numeric day ordinals. Keep that spelling once per Foundation calendar day.
+struct StatisticsUTCDayKeyCursor {
+    private let calendar: Calendar
+    private var interval: (start: Date, end: Date, key: String)?
+
+    init() {
+        var value = Calendar(identifier: .gregorian)
+        value.timeZone = TimeZone(secondsFromGMT: 0)!
+        calendar = value
+    }
+    mutating func key(_ timestamp: Double) -> String {
+        guard statisticsValidDate(timestamp) else { return statisticsUTC(timestamp) }
+        let date = Date(timeIntervalSince1970: timestamp / 1000)
+        if let interval, date >= interval.start, date < interval.end { return interval.key }
+        let key = statisticsUTC(timestamp)
+        // Compare Date values after the same ms-to-seconds conversion as the
+        // oracle. Rounded millisecond endpoints can straddle a midnight ULP.
+        if let bounds = calendar.dateInterval(of: .day, for: date),
+           bounds.start <= date, date < bounds.end, bounds.end > bounds.start {
+            interval = (bounds.start, bounds.end, key)
+        } else { interval = nil }
+        return key
+    }
+}

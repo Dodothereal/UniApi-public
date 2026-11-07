@@ -455,3 +455,83 @@ process initialization and priming; it is not timed allocation, an installed-pag
 memory measurement or physical system memory. The control uses modern, later-only
 appends and does not establish admission rates for every source or history. It is
 not an installed Reload, GPU/FPS, cold-disk, energy or whole-app improvement claim.
+
+
+## Installed append-publication follow-up (0.1.16)
+
+The guarded 0.1.16 update completed and all 18 installed files matched the reviewed
+package. The first prepared-plan attempt refused a changing work census before
+replacement; its records were retained. A fresh admitted plan, coherent backup
+and guarded update then succeeded. Prior usage rows and provider/client configs
+were preserved. Preference values matched except the saved window frame; normal
+rolling telemetry, statistics file metadata and startup identity changed.
+
+Actual installed-app input repeated three Home → Speed → Statistics → Reload
+passes in both Codex/All-time and All-apps/All-time scopes. The Codex capture has
+60 rows/12 complete visits; its five-minute recording limit stopped before the
+Settings return. All apps has 65 rows/13 complete visits, including that return,
+and was explicitly stopped. All required actions have all five phases, with no
+failed or incomplete visits. Both captures use the same process, with no concurrent
+compiler or component fixture. One immediate Reload helper refused before input
+while navigation was busy; the subsequent enabled click is included. No accepted
+sample was dropped. Original scope/page were restored and installed bytes matched.
+The following values are medians of three visits per category and scope.
+
+| Scope / action | n | 0.1.14 view, ms | 0.1.16 view, ms | 0.1.14 draw, ms | 0.1.16 draw, ms | 0.1.14 host CPU, ms | 0.1.16 host CPU, ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Codex / Home | 3 | 42.109 | 301.236 | 503.661 | 326.669 | 620.919 | 414.201 |
+| Codex / Speed | 3 | 15.589 | 19.232 | 280.584 | 286.546 | 276.405 | 285.053 |
+| Codex / Statistics after Speed | 3 | 22.965 | 25.571 | 328.521 | 318.549 | 328.829 | 334.821 |
+| Codex / Reload | 3 | 970.380 | 596.878 | 992.718 | 631.149 | 1327.796 | 839.299 |
+| All apps / Home | 3 | 43.327 | 289.475 | 315.159 | 303.303 | 453.433 | 412.958 |
+| All apps / Speed | 3 | 13.668 | 17.032 | 254.809 | 253.504 | 254.125 | 254.621 |
+| All apps / Statistics after Speed | 3 | 21.336 | 24.918 | 297.567 | 305.369 | 297.741 | 305.540 |
+| All apps / Reload | 3 | 1226.999 | 904.190 | 1277.967 | 954.491 | 1647.384 | 1215.628 |
+
+These are live-history observations with three samples, not a controlled causal
+version A/B. Home's slower data-view acceptance is retained alongside its draw
+results. Codex Reload draw ranged 597.390–635.063 ms; All apps ranged
+395.551–956.221 ms. Reload is improved in this observation and remains perceptible.
+The earlier all-page table is historical; this follow-up does not retime every
+page or establish GPU presentation, frame rate or whole-app completion.
+
+Process lifetime peak RSS was 596,312,064 B during Codex and 618,053,632 B during
+All apps. This high-water mark includes earlier app work, not per-page or matched
+version memory. CPU is host user plus system time through the draw callback;
+children and GPU cost remain outside it.
+
+A separate actual All-apps Reload triggered a three-second sampler from its
+recorded visit-start row. Matching installed binary/dSYM UUIDs bind the symbols.
+No other UI input occurred before sampling completed. The diagnostic Reload took
+2261.359 ms and is excluded from the two main captures because sampling interferes.
+No full-SQL-assembly frames were observed; remaining samples include the usage
+folds and repeated UTC watermark day-key formatting. Counts are inclusive and
+not elapsed-time percentages. Further calendar-key work needs its own exact
+oracle, resource control and installed follow-up.
+
+## UTC watermark day-key reuse (0.1.17 candidate)
+
+The three lifetime/source/publication folds retain the existing UTC day string
+for the current Foundation calendar-day interval. Each fold owns its cursor.
+The original formatter remains the cache-miss/fallback oracle, and watermark
+string comparison, event order, token totals and pricing are unchanged.
+
+On 2026-11-07, six separate optimized processes ran an ABBAAB comparison over
+180,000 chronological fractional timestamps spanning 90 UTC days. Both arms
+produced exactly the original formatter's UTF-8 keys and the same digest in
+every invocation. Date-array creation, priming, oracle comparison and hashing
+are outside the measured loop. Raw run hashes and medians were recomputed.
+
+| Component metric | Original formatter | Per-fold cursor | Reduction |
+| --- | ---: | ---: | ---: |
+| Median elapsed | 266.720 ms | 8.639 ms | 96.76% |
+| Median process CPU | 265.418 ms | 8.618 ms | 96.75% |
+| Median process peak RSS before oracle | 21,069,824 B | 15,171,584 B | 27.99% |
+
+The executable links the exact Core objects from the resumed successful native
+gate and has macOS 14 minimum/SDK 26.5 headers. Its private environment denies
+network and child execution and initializes no app runtime, database, provider
+or hardware service. The peak includes initialization, priming and arrays; it
+is not allocation during the loop or a page-memory measurement. This sorted
+synthetic component result does not establish an equivalent whole-app speedup,
+installed Reload latency, GPU cadence, energy or physical memory savings.

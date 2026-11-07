@@ -1,6 +1,28 @@
 # Preview validation
 
-## Conservative Codex append publication (candidate)
+## UTC watermark day keys (candidate)
+
+The three lifetime/source/publication folds reuse the existing UTC day string
+within one Foundation calendar-day interval. Each fold owns its cursor; there is
+no shared mutable cache. The fallback still calls the original formatter, and
+the lifetime watermark still uses the original string comparison and accumulation
+order. Invalid, nonpositive and extreme timestamps retain that fallback.
+
+Six methods compare the unchanged formatter's exact UTF-8 output, 5,000 fractional
+timestamps, adjacent midnight Double values, Gregorian leap/century dates,
+unordered input, independent cursors and finite outliers. Literal pre-change
+folds verify all three integrations, including every reported Double bit across
+watermarks, ranges and time zones. Expanded-year string ordering is deliberately
+preserved. Independent source review found no blocking defect in the four Core
+files or these tests. The original source-bound optimized gate passed 1,327 tests
+with zero failures. A fresh resumed gate on 2026-11-07 passed the same 1,327 tests
+with zero failures in 46.076 seconds (46.166 seconds including all-suite
+completion). The all-UI/three-product build took 215.13 seconds and the wrapper
+exited successfully after 279.642 seconds. All 386 frozen inputs remained
+unchanged; all six new methods have individual passing records. Component and
+installed-app measurements remain separate from test-suite completion.
+
+## Conservative Codex append publication (0.1.16)
 
 The final source-bound optimized native gate passed **1,321 tests, zero failures**.
 Its 18 new methods cover canonical-Unicode membership, exact record bytes and
@@ -20,9 +42,9 @@ Core/UI sources had already completed the all-UI/three-product build in 139.43
 seconds; the final delta was the strengthened test only. Sources remained fixed.
 
 The [six-process synthetic refresh control](PERFORMANCE.md#conservative-append-publication)
-measures the admitted warm path separately. Production installation and actual
-running-app follow-up remain separate gates; component results do not establish
-instant Reload or final rewrite acceptance.
+measures the admitted warm path separately. The installed 0.1.16 follow-up in that
+document is a distinct live-data observation; neither result establishes instant
+Reload or final rewrite acceptance.
 
 ## In-place Statistics fold buckets (candidate)
 
