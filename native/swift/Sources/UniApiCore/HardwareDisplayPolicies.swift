@@ -318,6 +318,7 @@ public enum NativeHardwareDisplayPolicies {
             "PPMR": "PMIC & memory rail power",
             "PPSR": "System & PCIe rail power",
             "PHPS": "Thermal subsystem power",
+            "PHPM": "Power management controller",
             "PHPB": "Adapter power budget",
             "PUTC": "USB-C total power",
             "PU5C": "USB-C 5V rail power",
@@ -346,6 +347,7 @@ public enum NativeHardwareDisplayPolicies {
         if id.hasPrefix("VP") { return "Core rail voltage " + id }
         if id.hasPrefix("VR") { return "Cluster rail voltage " + id }
         if id.hasPrefix("IP") { return "Core rail current " + id }
+        if id.hasPrefix("IR") { return "Cluster rail current " + id }
         if id.hasPrefix("I0") { return "Input rail current " + id }
         return "Electrical sensor " + id
     }

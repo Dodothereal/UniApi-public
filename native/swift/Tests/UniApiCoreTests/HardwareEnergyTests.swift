@@ -69,10 +69,30 @@ final class HardwareEnergyTests: XCTestCase {
         XCTAssertEqual(snapshot["adapterLossW"].double, 1.8, accuracy: 0.01)
         XCTAssertEqual(snapshot["wallPowerW"].double, 16.3, accuracy: 0.01)
         XCTAssertEqual(snapshot["efficiencyPercent"].double, 88.96, accuracy: 0.05)
+        XCTAssertEqual(snapshot["powerMode"].string, "ac-charging")
         XCTAssertEqual(snapshot["boot"]["systemEnergyWh"].double, 45.5, accuracy: 0.01)
         XCTAssertEqual(snapshot["boot"]["avgSystemLoadW"].double, 12.0, accuracy: 0.01)
         XCTAssertFalse(snapshot["subsystems"].array.isEmpty)
         XCTAssertFalse(snapshot["sensors"].array.isEmpty)
+
+        let desktopRaw = NativeEnergySystem.RawTelemetry(
+            date: 1_700_000_000_000,
+            batteryRegistry: [
+                "BatteryInstalled": false,
+                "CurrentCapacity": 0,
+                "ExternalConnected": true,
+                "PowerTelemetryData": [
+                    "SystemPowerIn": 13_500,
+                    "SystemLoad": 13_500,
+                    "WallEnergyEstimate": 4_200,
+                    "AdapterEfficiencyLoss": 450
+                ]
+            ],
+            smcSensors: ["PSTR": 13.5, "PDTR": 13.5, "PMVR": 9.2, "PPMR": 7.1, "PHPB": 65.0]
+        )
+        let desktopSnap = NativeEnergySystem.buildSnapshot(desktopRaw)
+        XCTAssertFalse(desktopSnap["battery"]["present"].bool)
+        XCTAssertEqual(desktopSnap["powerMode"].string, "wall-only")
 
         let rows = NativeHardwareDisplayPolicies.energySensorRows(snapshot["sensors"].array, favorites: ["PMVR"], group: "All", query: "")
         XCTAssertEqual(rows.first?["id"].string, "PMVR")

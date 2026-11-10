@@ -147,8 +147,7 @@ public enum NativeEnergySystem {
             "sampleCount": .number(max(0, loadCount.rounded()))
         ]
 
-        // 4. Battery energy capacity & state
-        let batteryPresent = reg["BatteryInstalled"].bool || finite(reg["CurrentCapacity"]) != nil
+        let batteryPresent = reg["BatteryInstalled"].bool || (finite(reg["AppleRawMaxCapacity"]) ?? finite(reg["NominalChargeCapacity"]) ?? finite(reg["DesignCapacity"]) ?? 0) > 0
         let batteryPercent = finite(reg["CurrentCapacity"]).map { max(0, min(100, $0.rounded())) } ?? 0
         let batteryVoltageV = finite(reg["Voltage"]).map { round3(max(0, $0 / 1000.0)) } ?? 0
         let batteryCurrentA = finite(reg["InstantAmperage"]).map { round3($0 / 1000.0) } ?? 0
@@ -161,12 +160,23 @@ public enum NativeEnergySystem {
         let remainingWh = round2((rawCurrentMah * nominalV) / 1000.0)
         let maxCapacityWh = round2((rawMaxMah * nominalV) / 1000.0)
         let designCapacityWh = round2((designMah * nominalV) / 1000.0)
-        let timeRemainingMin = finite(reg["TimeRemaining"]).flatMap { $0 >= 0 && $0 < 6000 ? Int($0.rounded()) : nil }
+        let timeRemainingMin = finite(reg["TimeRemaining"]).flatMap { $0 > 0 && $0 < 6000 ? Int($0.rounded()) : nil }
+        let isCharging = reg["IsCharging"].bool
+
+        let powerMode: String = {
+            if !batteryPresent { return "wall-only" }
+            if externalConnected {
+                if isCharging || batteryPowerW > 0.2 { return "ac-charging" }
+                if batteryPowerW < -0.2 { return "ac-assisting" }
+                return "ac-powered"
+            }
+            return "battery-discharging"
+        }()
 
         let batteryObject: JSONValue = [
             "present": .bool(batteryPresent),
             "percent": .number(batteryPercent),
-            "charging": .bool(reg["IsCharging"].bool),
+            "charging": .bool(isCharging),
             "externalConnected": .bool(externalConnected),
             "fullyCharged": .bool(reg["FullyCharged"].bool),
             "powerW": .number(batteryPowerW),
@@ -176,7 +186,7 @@ public enum NativeEnergySystem {
             "remainingWh": .number(remainingWh),
             "maxCapacityWh": .number(maxCapacityWh),
             "designCapacityWh": .number(designCapacityWh),
-            "cycleCount": finite(reg["CycleCount"]).map { .number($0.rounded()) } ?? .null,
+            "cycleCount": (batteryPresent ? finite(reg["CycleCount"]) : nil).map { .number($0.rounded()) } ?? .null,
             "timeRemainingMinutes": timeRemainingMin.map { .number(Double($0)) } ?? .null,
             "adapterWatts": adapterWatts.map(JSONValue.number) ?? .null,
             "adapterDescription": .string(adapter["Description"].string)
@@ -186,21 +196,24 @@ public enum NativeEnergySystem {
         let socRegulatorW = round3(smcPositive("PMVR") ?? 0)
         let memoryPmicW = round3(smcPositive("PPMR") ?? 0)
         let pcieSystemW = round3(smcPositive("PPSR") ?? 0)
+        let thermalZoneW = round3(smcPositive("PHPS") ?? 0)
         let coreRailsKeys = ["PP0b", "PP1b", "PP2b", "PP4b", "PP7b", "PP7l", "PP9b", "PPbb", "PPeb", "PR4l", "PR5b", "PRcl"]
         let coreRailsW = round3(coreRailsKeys.compactMap { smcPositive($0, max: 200) }.reduce(0, +))
         let usbcTotalW = round3(smcPositive("PUTC") ?? ((smcPositive("PU5C") ?? 0) + (smcPositive("PUAC") ?? 0)))
         let lowVoltageRailsW = round3((smcPositive("PO3R") ?? 0) + (smcPositive("PO5R") ?? 0))
-        let accountedW = socRegulatorW + memoryPmicW + pcieSystemW + usbcTotalW + lowVoltageRailsW
-        let residualSystemW = round3(max(0, systemLoadW - accountedW))
+        // PMVR and PPMR can include downstream rails on desktop M-series Macs; compute non-overlapping board residual.
+        let primaryRegulatorsW = max(socRegulatorW, coreRailsW) + pcieSystemW + usbcTotalW + lowVoltageRailsW
+        let residualSystemW = round3(max(0, systemLoadW - primaryRegulatorsW))
 
         let subsystems: [JSONValue] = [
-            ["id": "soc", "label": "SoC main regulator (PMVR)", "group": "Processor & SoC", "watts": .number(socRegulatorW)],
-            ["id": "pmic", "label": "Memory & PMIC rails (PPMR)", "group": "Memory", "watts": .number(memoryPmicW)],
-            ["id": "cores", "label": "Core & cluster rails (PP*/PR*)", "group": "Processor & SoC", "watts": .number(coreRailsW)],
-            ["id": "pcie", "label": "System & PCIe rail (PPSR)", "group": "System", "watts": .number(pcieSystemW)],
-            ["id": "rails", "label": "3.3V & 5V system rails (PO3R/PO5R)", "group": "Rails", "watts": .number(lowVoltageRailsW)],
-            ["id": "usbc", "label": "USB-C & ports (PUTC/PU5C)", "group": "Ports", "watts": .number(usbcTotalW)],
-            ["id": "other", "label": "Display, storage & rest of system", "group": "System", "watts": .number(residualSystemW)]
+            ["id": "soc", "label": "SoC Main Regulator (PMVR)", "group": "Processor & SoC", "watts": .number(socRegulatorW)],
+            ["id": "pmic", "label": "Memory & PMIC Rails (PPMR)", "group": "Memory", "watts": .number(memoryPmicW)],
+            ["id": "cores", "label": "CPU / GPU / ANE Core Rails (PP* / PR*)", "group": "Processor & SoC", "watts": .number(coreRailsW)],
+            ["id": "thermal", "label": "SoC Thermal Power Zone (PHPS)", "group": "Processor & SoC", "watts": .number(thermalZoneW)],
+            ["id": "usbc", "label": "Thunderbolt & USB-C Ports (PUTC)", "group": "Ports", "watts": .number(usbcTotalW)],
+            ["id": "rails", "label": "3.3V & 5V System Rails (PO3R / PO5R)", "group": "Rails", "watts": .number(lowVoltageRailsW)],
+            ["id": "pcie", "label": "PCIe & Storage Rail (PPSR)", "group": "System", "watts": .number(pcieSystemW)],
+            ["id": "other", "label": "Board & Unmetered System Load", "group": "System", "watts": .number(residualSystemW)]
         ]
 
         // 6. Electrical sensors list (Power W, Voltage V, Current A)
@@ -220,12 +233,14 @@ public enum NativeEnergySystem {
         appendSensor(id: "TELE:WALL", value: wallPowerW, unit: "W")
         appendSensor(id: "TELE:SYSI", value: systemPowerInW, unit: "W")
         appendSensor(id: "TELE:SYSL", value: systemLoadW, unit: "W")
-        appendSensor(id: "TELE:BATT", value: batteryPowerW, unit: "W")
+        if batteryPresent || abs(batteryPowerW) > 0.001 {
+            appendSensor(id: "TELE:BATT", value: batteryPowerW, unit: "W")
+        }
         appendSensor(id: "TELE:LOSS", value: adapterLossW, unit: "W")
         if voltageInV > 0 { appendSensor(id: "TELE:VIN", value: voltageInV, unit: "V") }
         if currentInA > 0 { appendSensor(id: "TELE:IIN", value: currentInA, unit: "A") }
-        if batteryVoltageV > 0 { appendSensor(id: "TELE:VBAT", value: batteryVoltageV, unit: "V") }
-        if batteryCurrentA != 0 { appendSensor(id: "TELE:IBAT", value: batteryCurrentA, unit: "A") }
+        if batteryPresent && batteryVoltageV > 0 { appendSensor(id: "TELE:VBAT", value: batteryVoltageV, unit: "V") }
+        if batteryPresent && batteryCurrentA != 0 { appendSensor(id: "TELE:IBAT", value: batteryCurrentA, unit: "A") }
 
         for key in smc.keys.sorted() {
             guard let first = key.first else { continue }
@@ -240,6 +255,7 @@ public enum NativeEnergySystem {
 
         return [
             "date": .number(raw.date),
+            "powerMode": .string(powerMode),
             "wallPowerW": .number(wallPowerW),
             "systemPowerInW": .number(systemPowerInW),
             "systemLoadW": .number(systemLoadW),
@@ -250,7 +266,7 @@ public enum NativeEnergySystem {
             "currentInA": .number(currentInA),
             "powerBudgetW": powerBudgetW.map(JSONValue.number) ?? .null,
             "externalConnected": .bool(externalConnected),
-            "charging": .bool(reg["IsCharging"].bool),
+            "charging": .bool(isCharging),
             "boot": bootObject,
             "battery": batteryObject,
             "subsystems": .array(subsystems),
@@ -321,6 +337,7 @@ public enum NativeEnergySystem {
         var vers = SMCKeyDataVersion()
         var pLimitData = SMCPLimitData()
         var keyInfo = SMCKeyInfoData()
+        var padding: UInt16 = 0
         var result: UInt8 = 0
         var status: UInt8 = 0
         var data8: UInt8 = 0
@@ -335,7 +352,7 @@ public enum NativeEnergySystem {
 
     private static let candidateSMCKeys: [String] = [
         // Primary system & DC-In power
-        "PSTR", "PDTR", "PMVR", "PPMR", "PPSR", "PHPS", "PHPB",
+        "PSTR", "PDTR", "PMVR", "PPMR", "PPSR", "PHPS", "PHPB", "PHPM",
         // USB-C & low-voltage rails
         "PUTC", "PU5C", "PUAC", "PO3R", "PO5R",
         // Power zones
@@ -347,12 +364,13 @@ public enum NativeEnergySystem {
         "PCPC", "PCPG", "PC0C", "PC0G", "PG0R", "PBLC", "PB0R",
         // Voltages
         "VD0R", "VP0R", "VMVR", "VPMR", "VPSR", "VO3R", "VO5R",
-        "VP0b", "VP1b", "VP2b", "VP4b", "VP7b", "VP7l", "VP9b", "VPbb", "VPeb",
-        "VR4l", "VR5b", "VRcl", "VReb",
+        "VP0b", "VP1b", "VP2b", "VP3b", "VP4b", "VP7b", "VP7l", "VP9b", "VP9l", "VPbb", "VPdb", "VPeb",
+        "VR4l", "VR5b", "VR6b", "VR8b", "VRab", "VRcb", "VRcl", "VReb",
         // Currents
         "ID0R", "IB0R", "IMVR", "IPMR", "IPSR", "IO3R", "IO5R", "IU5C", "IUAC",
         "I000", "I001", "I002", "I003",
-        "IP0b", "IP1b", "IP2b", "IP4b", "IP7b", "IP7l", "IP9b", "IPbb", "IPeb"
+        "IP0b", "IP1b", "IP2b", "IP4b", "IP7b", "IP7l", "IP9b", "IPbb", "IPeb",
+        "IR4l", "IR5b", "IR8b", "IRcl"
     ]
 
     private static func fourCC(_ s: String) -> UInt32 {
