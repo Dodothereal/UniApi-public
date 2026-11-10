@@ -6,7 +6,7 @@ import Foundation
 public struct NativeNavigationPreferences: Equatable, Sendable {
     public enum Page: String, CaseIterable, Sendable {
         case home, speed, results, prompts, arena, switcher, code, stats
-        case activity, fans, battery, transcribe, jobs, settings
+        case activity, fans, battery, energy, transcribe, jobs, settings
     }
 
     public static let startPageKey = "uniapi-start-page"

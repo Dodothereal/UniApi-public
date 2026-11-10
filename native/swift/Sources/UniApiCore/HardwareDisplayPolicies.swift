@@ -288,4 +288,198 @@ public enum NativeHardwareDisplayPolicies {
         }
         return kept + current.filter { !heldIDs.contains($0["id"].string) }
     }
+
+    // MARK: - Energy Display Policies
+
+    public static func energySensorGroup(_ id: String, unit: String) -> String {
+        if id.hasPrefix("TELE:") { return "Telemetry" }
+        if unit == "V" { return "Voltage (V)" }
+        if unit == "A" { return "Current (A)" }
+        if ["PSTR", "PDTR", "PHPB", "PHPS", "PZC0", "PZC1", "PZCU"].contains(id) { return "System Power" }
+        if ["PMVR", "PPMR", "PPSR", "PCPC", "PCPG", "PC0C", "PC0G", "PG0R"].contains(id) || id.hasPrefix("PP") || id.hasPrefix("PR") { return "Processor & SoC" }
+        if ["PUTC", "PU5C", "PUAC", "PO3R", "PO5R", "PBLC", "PB0R"].contains(id) { return "Rails & Ports" }
+        return "Power (W)"
+    }
+
+    public static func energySensorName(_ id: String) -> String {
+        let names: [String: String] = [
+            "TELE:WALL": "Wall power estimate",
+            "TELE:SYSI": "System DC-in power",
+            "TELE:SYSL": "System load power",
+            "TELE:BATT": "Battery net power flow",
+            "TELE:LOSS": "Adapter efficiency loss",
+            "TELE:VIN": "DC-in voltage",
+            "TELE:IIN": "DC-in current",
+            "TELE:VBAT": "Battery pack voltage",
+            "TELE:IBAT": "Battery pack current",
+            "PSTR": "System total power",
+            "PDTR": "DC-in total power",
+            "PMVR": "SoC main voltage regulator",
+            "PPMR": "PMIC & memory rail power",
+            "PPSR": "System & PCIe rail power",
+            "PHPS": "Thermal subsystem power",
+            "PHPM": "Power management controller",
+            "PHPB": "Adapter power budget",
+            "PUTC": "USB-C total power",
+            "PU5C": "USB-C 5V rail power",
+            "PUAC": "USB-C accessory power",
+            "PO3R": "3.3V system rail power",
+            "PO5R": "5V system rail power",
+            "PZC0": "Power zone C0",
+            "PZC1": "Power zone C1",
+            "PZCU": "Power zone CPU/SoC",
+            "PCPC": "CPU package power",
+            "PCPG": "GPU package power",
+            "PBLC": "Backlight power",
+            "VD0R": "DC-in rail voltage",
+            "ID0R": "DC-in rail current",
+            "IMVR": "SoC regulator current",
+            "IPMR": "PMIC rail current",
+            "IPSR": "System rail current",
+            "IO3R": "3.3V rail current",
+            "IO5R": "5V rail current",
+            "IU5C": "USB-C 5V rail current",
+            "IUAC": "USB-C accessory current"
+        ]
+        if let known = names[id] { return known }
+        if id.hasPrefix("PP") { return "Core rail " + id }
+        if id.hasPrefix("PR") { return "Cluster rail " + id }
+        if id.hasPrefix("VP") { return "Core rail voltage " + id }
+        if id.hasPrefix("VR") { return "Cluster rail voltage " + id }
+        if id.hasPrefix("IP") { return "Core rail current " + id }
+        if id.hasPrefix("IR") { return "Cluster rail current " + id }
+        if id.hasPrefix("I0") { return "Input rail current " + id }
+        return "Electrical sensor " + id
+    }
+
+    public static func energySensorRows(_ sensors: [JSONValue], favorites: Set<String>, group: String, query: String) -> [JSONValue] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sensors.filter { sensor in
+            let id = sensor["id"].string
+            let unit = sensor["unit"].string
+            let category = energySensorGroup(id, unit: unit)
+            let matchesGroup: Bool
+            switch group {
+            case "All": matchesGroup = true
+            case "Favorites": matchesGroup = favorites.contains(id)
+            case "Power (W)": matchesGroup = unit == "W"
+            case "Voltage (V)": matchesGroup = unit == "V"
+            case "Current (A)": matchesGroup = unit == "A"
+            default: matchesGroup = category == group
+            }
+            return matchesGroup && (trimmed.isEmpty || (energySensorName(id) + " " + id + " " + category).localizedCaseInsensitiveContains(trimmed))
+        }.sorted { a, b in
+            let aid = a["id"].string, bid = b["id"].string
+            if favorites.contains(aid) != favorites.contains(bid) { return favorites.contains(aid) }
+            if aid.hasPrefix("TELE:") != bid.hasPrefix("TELE:") { return aid.hasPrefix("TELE:") }
+            let order = energySensorName(aid).localizedStandardCompare(energySensorName(bid))
+            return order == .orderedSame ? aid < bid : order == .orderedAscending
+        }
+    }
+
+    public static func energyBadgeText(_ state: JSONValue) -> String {
+        let snapshot = state["snapshot"]
+        guard !snapshot.isNull else { return "" }
+        let metric = state["preferences"]["badgeMetric"].string
+        switch metric {
+        case "none":
+            return ""
+        case "wallPower":
+            guard let w = number(snapshot["wallPowerW"]) else { return "" }
+            return String(format: "%.1fW", w)
+        case "batteryNet":
+            guard let b = number(snapshot["batteryPowerW"]) else { return "" }
+            return String(format: "%+.1fW", b)
+        default:
+            guard let l = number(snapshot["systemLoadW"]) else { return "" }
+            return String(format: "%.1fW", l)
+        }
+    }
+
+    public static func formatEnergyWh(_ wh: Double?) -> String {
+        guard let wh, wh.isFinite else { return "—" }
+        let absWh = abs(wh)
+        if absWh >= 1000 {
+            return String(format: "%.2f kWh", wh / 1000.0)
+        } else if absWh >= 10 {
+            return String(format: "%.1f Wh", wh)
+        } else {
+            return String(format: "%.2f Wh", wh)
+        }
+    }
+
+    public static func formatWatts(_ watts: Double?, signed: Bool = false) -> String {
+        guard let watts, watts.isFinite else { return "—" }
+        return String(format: signed ? "%+.1f W" : "%.1f W", watts)
+    }
+
+    public static func formatCost(wh: Double?, ratePerKwh: Double, currency: String) -> String {
+        guard let wh, wh.isFinite, ratePerKwh >= 0 else { return "—" }
+        let cost = (max(0, wh) / 1000.0) * ratePerKwh
+        if cost < 0.01 && cost > 0 {
+            return String(format: "%@%.4f", currency, cost)
+        }
+        return String(format: "%@%.2f", currency, cost)
+    }
+
+    public static func energyHistoryCSV(_ points: [JSONValue]) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        func timestamp(_ value: JSONValue) -> String {
+            guard let ms = number(value) else { return "" }
+            return formatter.string(from: Date(timeIntervalSince1970: ms / 1000))
+        }
+        func cell(_ value: JSONValue) -> String { number(value).map { JSONValue.number($0).string } ?? "" }
+        func quoted(_ value: String) -> String { "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+        var lines = ["timestamp,end,metric,mean,min,max,energy_wh,samples,resolution_ms"]
+        let metrics: [(key: String, label: String, whKey: String?)] = [
+            ("systemLoadW", "system_load_w", "systemEnergyWh"),
+            ("wallPowerW", "wall_power_w", "wallEnergyWh"),
+            ("systemPowerInW", "system_power_in_w", "systemInEnergyWh"),
+            ("batteryPowerW", "battery_power_w", "batteryNetWh"),
+            ("adapterLossW", "adapter_loss_w", "adapterLossWh"),
+            ("voltageInV", "voltage_in_v", nil),
+            ("currentInA", "current_in_a", nil)
+        ]
+        for point in points {
+            let kinds = ["mean", "min", "max"]
+            for m in metrics {
+                let wh = m.whKey.map { cell(point[$0]) } ?? ""
+                let row = [
+                    timestamp(point["mean"]["date"]),
+                    timestamp(point["end"]),
+                    quoted(m.label),
+                    cell(point["mean"][m.key]),
+                    cell(point["min"][m.key]),
+                    cell(point["max"][m.key]),
+                    wh,
+                    cell(point["count"]),
+                    cell(point["resolutionMs"])
+                ]
+                lines.append(row.joined(separator: ","))
+            }
+            let sensorIDs = Set(kinds.flatMap { point[$0]["sensors"].array.map { $0["id"].string } }).sorted()
+            for id in sensorIDs {
+                let unit = point["mean"]["sensors"].array.first(where: { $0["id"].string == id })?["unit"].string ?? "W"
+                let values = kinds.map { kind in
+                    point[kind]["sensors"].array.first { $0["id"].string == id }?["value"] ?? .null
+                }
+                let row = [
+                    timestamp(point["mean"]["date"]),
+                    timestamp(point["end"]),
+                    quoted("sensor_\(unit.lowercased()):\(id)"),
+                    cell(values[0]),
+                    cell(values[1]),
+                    cell(values[2]),
+                    "",
+                    cell(point["count"]),
+                    cell(point["resolutionMs"])
+                ]
+                lines.append(row.joined(separator: ","))
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
 }
+

@@ -263,6 +263,7 @@ final class NativeAppSession: ObservableObject {
     var activity: NativeActivityService?
     var battery: NativeBatteryService?
     var fans: NativeFanService?
+    var energy: NativeEnergyService?
     var summaries: NativeHubSummaries?
     private var statistics: NativeStatisticsService?
     private var statisticsStartup: Task<Void, Never>?
@@ -287,6 +288,8 @@ final class NativeAppSession: ObservableObject {
             self.battery = battery
             let fans = NativeFanService(runtime: runtime)
             self.fans = fans
+            let energy = NativeEnergyService(runtime: runtime)
+            self.energy = energy
             statistics = NativeStatisticsService.shared(runtime: runtime)
             let benchmark = NativeBenchmarkService.shared(runtime: runtime)
             self.benchmark = benchmark
@@ -348,6 +351,7 @@ final class NativeAppSession: ObservableObject {
                     try await switcher.start()
                     try await battery.start()
                     try await fans.start()
+                    try await energy.start()
                     if !paths.readOnly {
                         try await runtime.jobs.recover()
                         try await arena.reconcileAfterRecovery()
@@ -396,6 +400,7 @@ final class NativeAppSession: ObservableObject {
             await code?.shutdown()
         }
         await fans?.stopMonitoring()
+        await energy?.stop()
         await switcher?.shutdown()
     }
 }

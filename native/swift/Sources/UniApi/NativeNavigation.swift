@@ -14,7 +14,7 @@ extension EnvironmentValues {
 }
 
 enum NativeDestination: String, CaseIterable, Identifiable {
-    case home, speed, results, prompts, arena, switcher, code, stats, activity, fans, battery, transcribe, jobs, settings
+    case home, speed, results, prompts, arena, switcher, code, stats, activity, fans, battery, energy, transcribe, jobs, settings
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -29,6 +29,7 @@ enum NativeDestination: String, CaseIterable, Identifiable {
         case .activity: return "Activity"
         case .fans: return "Fan Control"
         case .battery: return "Battery"
+        case .energy: return "Energy"
         case .transcribe: return "Transcribe"
         case .jobs: return "Jobs"
         case .settings: return "Settings"
@@ -47,6 +48,7 @@ enum NativeDestination: String, CaseIterable, Identifiable {
         case .activity: return "activity"
         case .fans: return "fan"
         case .battery: return "battery-charging"
+        case .energy: return "zap"
         case .transcribe: return "mic"
         case .jobs: return "list-checks"
         case .settings: return "settings"
@@ -57,7 +59,7 @@ enum NativeDestination: String, CaseIterable, Identifiable {
         case .home, .jobs, .settings: return ""
         case .speed, .results, .prompts, .arena: return "Benchmark"
         case .switcher, .code, .stats: return "Coding"
-        case .activity, .fans, .battery: return "Mac"
+        case .activity, .fans, .battery, .energy: return "Mac"
         case .transcribe: return "Media"
         }
     }
@@ -66,7 +68,7 @@ enum NativeDestination: String, CaseIterable, Identifiable {
 /// Registration is kept explicit so a page is admitted only with its native
 /// implementation; the acceptance manifest tracks the remaining destinations.
 enum NativeInstalledPages {
-    static let destinations: Set<NativeDestination> = [.home, .speed, .results, .switcher, .code, .arena, .prompts, .stats, .transcribe, .activity, .battery, .fans, .jobs, .settings]
+    static let destinations: Set<NativeDestination> = [.home, .speed, .results, .switcher, .code, .arena, .prompts, .stats, .transcribe, .activity, .battery, .fans, .energy, .jobs, .settings]
     @MainActor @ViewBuilder static func page(_ destination: NativeDestination, runtime: NativeRuntime, models: NativePageModels? = nil, resultsRun: String? = nil, navigate: @escaping (NativeDestination) -> Void) -> some View {
         switch destination {
         case .home: NativeHomePage(runtime: runtime, navigate: navigate)
@@ -78,6 +80,7 @@ enum NativeInstalledPages {
         case .activity: NativeActivityPage(runtime: runtime)
         case .battery: NativeBatteryPage(runtime: runtime)
         case .fans: NativeFansPage(runtime: runtime)
+        case .energy: NativeEnergyPage(runtime: runtime)
         case .speed: NativeSpeedPage(runtime: runtime, model: models?.speed)
         case .results: NativeResultsPage(runtime: runtime, initialRun: resultsRun)
         case .code: NativeCodePage(runtime: runtime)
@@ -243,6 +246,10 @@ struct NativeShell: View {
                 }
                 if event.topic == "fans.spin" { fansSpinning = event.data["spinning"].bool }
                 if event.topic == "fans.state" { fansSpinning = event.data["snapshot"]["fans"].array.contains { $0["actual"].double > 0 } }
+                if event.topic == "energy.state" {
+                    let badge = NativeHardwareDisplayPolicies.energyBadgeText(event.data)
+                    badges["energy"] = badge.isEmpty ? .null : .string(badge)
+                }
             }
         }.task(id: ShellWork(activation: session.pageActivation, subscribed: subscribed)) {
             guard pageActive, subscribed else { return }
@@ -312,6 +319,7 @@ struct NativeShell: View {
                     if page == .jobs && activeJobs > 0 { Text(String(activeJobs)).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
                     if [.code, .arena].contains(page), badges[page.rawValue].int > 0 { Text(badges[page.rawValue].string).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
                     if page == .battery, !badges["battery"].isNull { Text(badges["battery"].string + "%").font(Theme.mono(10)).foregroundStyle(Theme.muted) }
+                    if page == .energy, !badges["energy"].isNull, !badges["energy"].string.isEmpty { Text(badges["energy"].string).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
                 }
             }.padding(.horizontal, 8).frame(height: 32)
                 .foregroundStyle(destination == page ? Theme.sidebarInk : Theme.sidebarMuted)
@@ -341,6 +349,11 @@ struct NativeShell: View {
             guard reads.accepts(ticket) else { return }
             updateBatteryCapability(value)
             badges["battery"] = value["supported"].bool ? value["hold"]["active"].bool ? value["hold"]["target"] : value["phase"].string == "off" ? .null : value["limit"] : .null
+        }
+        if let energy = session.energy, let value = try? await energy.handle("summary") {
+            guard reads.accepts(ticket) else { return }
+            let badge = value["badge"].string
+            badges["energy"] = badge.isEmpty ? .null : .string(badge)
         }
     }
     private func updateBatteryCapability(_ value: JSONValue) {
