@@ -113,4 +113,46 @@ public enum NativeHardwarePolicies {
         if battery["percent"].double == limit.double { return "holding" }
         return battery["charging"].bool ? "charging-to-limit" : "below-limit-idle"
     }
+    public static func energySnapshot(_ value: JSONValue) -> Bool {
+        guard case .object = value,
+              let date = number(value["date"]), date > 0,
+              let wall = number(value["wallPowerW"]), (0...2000).contains(wall),
+              let sysIn = number(value["systemPowerInW"]), (0...2000).contains(sysIn),
+              let sysLoad = number(value["systemLoadW"]), (0...2000).contains(sysLoad),
+              let batt = number(value["batteryPowerW"]), (-1000...1000).contains(batt),
+              let loss = number(value["adapterLossW"]), (0...1000).contains(loss),
+              case .array(let sensors) = value["sensors"], sensors.count <= 512 else { return false }
+        return sensors.allSatisfy { sensor in
+            guard case .string(let id) = sensor["id"], !id.isEmpty, id.count <= 64,
+                  let reading = number(sensor["value"]), abs(reading) <= 2000,
+                  ["W", "V", "A"].contains(sensor["unit"].string) else { return false }
+            return true
+        }
+    }
+    public static func energyPreferences(_ value: JSONValue, current: JSONObject) throws -> JSONObject {
+        guard case .object(let body) = value else { throw NativeFailure("Invalid energy preferences") }
+        var next = current
+        if let rawRate = body["ratePerKwh"] {
+            guard let rate = number(rawRate), (0...100).contains(rate) else {
+                throw NativeFailure("Electricity rate must be between 0 and 100 per kWh")
+            }
+            next["ratePerKwh"] = .number((rate * 10000).rounded() / 10000)
+        }
+        if let rawCurrency = body["currency"] {
+            let trimmed = rawCurrency.string.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard (1...6).contains(trimmed.count) else {
+                throw NativeFailure("Currency symbol or code must be 1 to 6 characters")
+            }
+            next["currency"] = .string(trimmed)
+        }
+        if let rawBadge = body["badgeMetric"] {
+            let badge = rawBadge.string
+            guard ["systemLoad", "wallPower", "batteryNet", "none"].contains(badge) else {
+                throw NativeFailure("Invalid energy badge metric")
+            }
+            next["badgeMetric"] = .string(badge)
+        }
+        return next
+    }
 }
+
