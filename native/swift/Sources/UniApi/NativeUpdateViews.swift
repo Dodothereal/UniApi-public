@@ -105,7 +105,7 @@ struct NativeUpdateHeaderButton: View {
     }
 }
 
-/// Work with no measurable progress: a still word, not a spinner or a shimmer.
+/// Work with no measurable progress: a still word, never an indeterminate indicator.
 private struct NativeUpdateProgressWord: View {
     let word: String
     init(_ word: String) { self.word = word }

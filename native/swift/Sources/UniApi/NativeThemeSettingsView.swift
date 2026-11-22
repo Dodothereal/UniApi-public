@@ -221,7 +221,7 @@ private struct NativeThemePresetChoice: View {
         .buttonStyle(.plain).pointingHand().onHover { hovering = $0 }
         .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
         .accessibilityLabel("\(name) palette")
-        .accessibilityHint("Applies to the \(variant.rawValue) variant")
+        .accessibilityHint("Applies to the \(NativeThemeSettingsView.lookName(variant)) look")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }
@@ -333,7 +333,7 @@ private struct NativeThemeColorRow: View {
     }
     var body: some View {
         HStack(spacing: 10) {
-            Button { NativeThemeColorPanel.shared.open(NSColor(picker.wrappedValue)) { picker.wrappedValue = Color(nsColor: $0) } } label: {
+            Button { NativeThemeColorPanel.shared.open(NSColor(picker.wrappedValue), owner: token.rawValue) { picker.wrappedValue = Color(nsColor: $0) } } label: {
                 RoundedRectangle(cornerRadius: 3, style: .continuous).fill(picker.wrappedValue)
                     .frame(width: 30, height: 20)
                     .overlay(RoundedRectangle(cornerRadius: 3, style: .continuous).strokeBorder(Theme.ruleStrong, lineWidth: 1))
@@ -371,8 +371,9 @@ private struct NativeThemeColorRow: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: editing)
         .onAppear { draft = "#" + value }
         .onChange(of: value) { _, newValue in if !editing { draft = "#" + newValue; invalid = false } }
+        .onDisappear { NativeThemeColorPanel.shared.detach(owner: token.rawValue) }
         .onChange(of: variant) { _, _ in
-            NativeThemeColorPanel.shared.detach()
+            NativeThemeColorPanel.shared.detach(owner: token.rawValue)
             if editing { commit() }
             editVariant = variant
             editStartingValue = value
@@ -407,10 +408,12 @@ private struct NativeThemeColorRow: View {
 @MainActor final class NativeThemeColorPanel: NSObject {
     static let shared = NativeThemeColorPanel()
     private var apply: ((NSColor) -> Void)?
+    private var owner: String?
 
-    func open(_ color: NSColor, apply: @escaping (NSColor) -> Void) {
+    func open(_ color: NSColor, owner: String, apply: @escaping (NSColor) -> Void) {
         let panel = NSColorPanel.shared
         self.apply = nil
+        self.owner = owner
         panel.showsAlpha = false
         panel.isContinuous = true
         panel.color = color
@@ -419,6 +422,10 @@ private struct NativeThemeColorRow: View {
         self.apply = apply
         panel.orderFront(nil)
     }
-    func detach() { apply = nil }
+    func detach(owner: String) {
+        guard self.owner == owner else { return }
+        apply = nil
+        self.owner = nil
+    }
     @objc private func changed(_ sender: NSColorPanel) { apply?(sender.color) }
 }

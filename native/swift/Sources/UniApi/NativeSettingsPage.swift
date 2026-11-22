@@ -82,7 +82,7 @@ struct NativeSettingsPage: View {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "development"
         let minutes = Int(runtime.uptime / 60)
         let long = minutes >= 120
-        return ReadoutStrip(minimum: 150) {
+        return ReadoutStrip(minimum: 136) {
             SettingsState(name: stateName, detail: stateName == startupStatus ? "Startup confirmed" : startupStatus, tint: stateTint)
             Readout(label: "Version", value: version == "development" ? "dev" : version, detail: session.updates.brief)
             Readout(label: "Uptime", value: long ? String(format: "%.1f", Double(minutes) / 60) : String(minutes),
@@ -338,11 +338,20 @@ private struct SettingsRowLayout: Layout {
         return (available, CGSize(width: room, height: labels.height), control, stacked)
     }
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        // A row with no control is its text at the full width.
+        if subviews.count == 1 {
+            let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? minimumLabel
+            return CGSize(width: width, height: subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil)).height)
+        }
         guard subviews.count == 2 else { return .zero }
         let m = measure(proposal.width, subviews)
         return CGSize(width: m.width, height: m.stacked ? m.labels.height + drop + m.control.height : max(m.labels.height, m.control.height))
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        if subviews.count == 1 {
+            subviews[0].place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+            return
+        }
         guard subviews.count == 2 else { return }
         let m = measure(bounds.width, subviews)
         let labelY = m.stacked ? bounds.minY : bounds.midY - m.labels.height / 2

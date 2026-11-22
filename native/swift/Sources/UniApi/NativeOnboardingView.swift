@@ -34,7 +34,7 @@ struct NativeOnboardingView: View {
                     VStack(alignment: .leading, spacing: gap) {
                         VStack(alignment: .leading, spacing: 0) {
                             Text("What would you like to do?")
-                                .font(Theme.display(26)).tracking(-0.4)
+                                .font(Theme.display(24)).tracking(-0.4)
                                 .accessibilityAddTraits(.isHeader)
                                 .accessibilityFocused($focusedHeading)
                             OnboardingRuler().padding(.top, 14)
@@ -247,8 +247,9 @@ private struct OnboardingTaskLine: View {
 }
 
 /// The choice drawn as an instrument: a four-position selector whose needle
-/// swings to the chosen page. It restates the ledger; it holds no data, opens
-/// nothing and is hidden from assistive technology.
+/// swings to the chosen page. It restates the ledger: its stops select the
+/// same tasks, it holds no data, opens nothing and is hidden from assistive
+/// technology, which already has the ledger.
 private struct OnboardingSelector: View {
     let destination: OnboardingDestination
     var size: CGFloat = 236
