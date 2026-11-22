@@ -56,7 +56,14 @@ struct NativeMarkdownImage: View {
     var body: some View { Group {
         if let raster = image.raster { Image(nsImage: raster).resizable().scaledToFit().frame(maxHeight: 480).accessibilityLabel(span.text.isEmpty ? "Image" : span.text) }
         else if let svg = image.svg { NativeDocumentWebPreview(url: svg, mime: "image/svg+xml").id(svg).frame(height: 350).accessibilityLabel(span.text.isEmpty ? "Image" : span.text) }
-        else { VStack(alignment: .leading, spacing: 4) { Text(span.text.isEmpty ? "Image" : span.text).font(Theme.ui(12)); if !image.error.isEmpty { Text(image.error).font(Theme.ui(11)).foregroundStyle(Theme.muted) } else { ShimmerText(text: "Loading image") } } }
+        else {
+            // A quiet line while the image is read, or the reason it was not.
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                NativeIcon("image", size: 13, strokeWidth: 1.75).foregroundStyle(Theme.muted).offset(y: 2)
+                Text(span.text.isEmpty ? "Image" : span.text).font(Theme.ui(12.5)).foregroundStyle(Theme.dim)
+                Text(image.error.isEmpty ? "Loading image" : image.error).font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
+            }
+        }
     }.help(span.title ?? span.text)
         .nativePageTask(id: span.image) { await image.load(address: span.image ?? "", resolver: resolver) }
         .nativePageActivity(reads: image.reads)
