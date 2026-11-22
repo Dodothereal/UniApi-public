@@ -27,6 +27,8 @@ struct NativeTranscribePage: View {
     @State private var modelTask: Task<Void, Never>?
     @State private var modelProgress: JSONValue = .null
     @State private var installingModel = false
+    @State private var wide = true
+    @Environment(\.nativeInterfaceDensity) private var density
     private let languages = [("", "Auto"), ("en", "English"), ("de", "Deutsch"), ("fr", "Français"), ("es", "Español"), ("it", "Italiano"), ("pt", "Português"), ("nl", "Nederlands"), ("tr", "Türkçe"), ("ja", "日本語"), ("zh", "中文")]
     private var service: NativeTranscriptionService? { session.transcription }
     private var reads: NativePageReadScope { mediaReads.scope }
@@ -37,14 +39,40 @@ struct NativeTranscribePage: View {
     private var pageError: String? { error ?? mediaReads.detailError }
     private var transcriptText: String { NativeTranscriptPresentation.text(detail, parts: parts) }
     var body: some View {
-        NativePage(title: selected == nil ? "Transcribe" : (detail["title"].string.isEmpty ? (detail["source"].string.isEmpty ? "Transcription" : detail["source"].string) : detail["title"].string),
-                   readiness: pageError != nil ? .failed : status.isNull || selected != nil && detail.isNull ? .pending : .ready,
-                   backTitle: "Transcripts", back: selected == nil ? nil : back, actions: {
-            if selected == nil { T3IconButton(system: "refresh-cw", help: "Reload") { Task { await reload() } } }
-            else { transcriptActions }
+        NativePage(title: "Transcribe", maxWidth: .infinity, readiness: pageError != nil ? .failed : status.isNull ? .pending : .ready, scrolls: false, actions: {
+            NativeMenuSelect(title: "Language", selection: $language, options: languages.map { ($0.0, $0.0.isEmpty ? "Detect language" : $0.1) }, width: 150)
+            NativeIconMenu {
+                Toggle("Telegram when done", isOn: $notify)
+                Divider()
+                Button("Reload") { Task { await reload() } }
+                Button("Remove Whisper model (574 MB)") { modelAction("model.remove") }
+                    .disabled(!modelReady || installingModel || status["model"]["inUse"].bool)
+            }
         }) {
-            if let pageError { NativeError(message: pageError) }
-            if selected == nil { input; history } else { transcript }
+            VStack(alignment: .leading, spacing: 0) {
+                composer
+                if let pageError { NativeError(message: pageError).padding(.horizontal, density.pageMargin).padding(.vertical, 10) }
+                if !setup.isEmpty {
+                    NativeSetup(steps: setup).padding(.horizontal, density.pageMargin).padding(.top, 16).padding(.bottom, 8)
+                }
+                GeometryReader { geometry in
+                    Group {
+                        if rows.isEmpty {
+                            NativePane(centered: false) {
+                                if status.isNull && error == nil { ShimmerText(text: "Loading…") }
+                                else if setup.isEmpty { NativeEmptyState(title: "No transcripts", detail: "Paste a link, choose files or drop audio here.", icon: "mic") }
+                            }
+                        } else if geometry.size.width >= 720 {
+                            HStack(spacing: 0) {
+                                list.frame(width: 320)
+                                Theme.border.frame(width: 1)
+                                transcript
+                            }
+                        } else if selected == nil { list } else { transcript }
+                    }
+                    .onChange(of: geometry.size.width >= 720, initial: true) { _, next in wide = next; selectFirstIfNeeded() }
+                }
+            }
         }
         .overlay { if dropTarget { RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])).padding(12).allowsHitTesting(false) } }
         .onDrop(of: [UTType.fileURL], isTargeted: $dropTarget) { providers in acceptFiles(providers) }
@@ -63,7 +91,7 @@ struct NativeTranscribePage: View {
             Button("Cancel", role: .cancel) { deleting = nil }
             Button("Delete", role: .destructive) { if let id = deleting { deleting = nil; Task { await remove(id) } } }
         } message: { Text("Running work will be cancelled. The original file you chose is preserved.") }
-        .background { Button("Back") { back() }.keyboardShortcut(.escape, modifiers: []).hidden().accessibilityHidden(true) }
+        .background { Button("Back") { if !wide { back() } }.keyboardShortcut(.escape, modifiers: []).hidden().accessibilityHidden(true) }
         .nativePageTask {
             let events = await runtime.events.stream()
             await reload()
@@ -84,51 +112,37 @@ struct NativeTranscribePage: View {
         .nativePageActivity(reads: reads, suspended: { dropTarget = false })
     }
     private var modelReady: Bool { status["model"]["available"].bool }
-    private var input: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if !status.isNull, !modelReady || installingModel || !status["localRuntime"].bool { modelRow }
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { sourceField; sourceActions }
-                VStack(alignment: .leading, spacing: 8) { sourceField; HStack(spacing: 8) { sourceActions } }
-            }
-            HStack(spacing: 16) {
-                NativeMenuSelect(title: "Language", selection: $language, options: languages.map { ($0.0, $0.0.isEmpty ? "Detect language" : $0.1) }, width: 150)
-                HStack(spacing: 8) {
-                    T3Switch(isOn: $notify).accessibilityLabel("Telegram when done")
-                    Text("Telegram when done").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.dim)
-                }
-                Spacer(minLength: 0)
-                if !status.isNull && !status["ytdlp"].bool {
-                    Text("Links need yt-dlp").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
-                        .help("Install yt-dlp to transcribe links. WAV, MP3 and M4A files use the built-in decoder; other formats may need ffmpeg.")
-                }
-            }
-        }.padding(.bottom, 8)
+    /// What must exist before a transcription can start. Empty once it does.
+    private var setup: [NativeSetupStep] {
+        guard !status.isNull else { return [] }
+        var steps: [NativeSetupStep] = []
+        if !modelReady || installingModel {
+            steps.append(NativeSetupStep(id: "model", title: "Install Whisper large-v3-turbo", detail: "574 MB. Runs on this Mac, no account.", done: modelReady && !installingModel,
+                busy: installingModel, busyText: modelProgress["message"].string.isEmpty ? "Preparing download…" : modelProgress["message"].string,
+                progress: installingModel && !modelProgress["progress"].isNull ? modelProgress["progress"].double : nil, cancel: { modelTask?.cancel() },
+                actionTitle: "Install", actionIcon: "download", action: { modelAction("model.install") }))
+        }
+        if modelReady && !status["localRuntime"].bool {
+            steps.append(NativeSetupStep(id: "runtime", title: "Reinstall UniApi", detail: "The bundled speech runtime is missing.", done: false))
+        }
+        return steps
     }
-    /// Shown above the source while the model is missing; afterwards it lives at the foot of the list.
-    private var modelRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Whisper large-v3-turbo").font(Theme.mono(Theme.textXs, weight: .medium)).foregroundStyle(Theme.ink)
-                    Text(installingModel ? (modelProgress["message"].string.isEmpty ? "Preparing download…" : modelProgress["message"].string)
-                         : !modelReady ? "574 MB. Runs on this Mac, no account."
-                         : status["localRuntime"].bool ? "574 MB, on this Mac" : "The bundled runtime is missing. Reinstall UniApi.")
-                        .font(Theme.ui(Theme.textXs)).foregroundStyle(modelReady && !status["localRuntime"].bool ? Theme.failFg : Theme.muted)
-                }
-                Spacer(minLength: 12)
-                if installingModel { Button("Cancel") { modelTask?.cancel() }.buttonStyle(T3Button(.outline)) }
-                else if modelReady { Button("Remove") { modelAction("model.remove") }.buttonStyle(T3Button(.outline)).disabled(status["model"]["inUse"].bool) }
-                else { Button("Install model", nativeIcon: "download") { modelAction("model.install") }.buttonStyle(T3Button(.primary)).disabled(status.isNull) }
+    /// The one input of the page: a source, and the action that starts it.
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                NativeTranscribeSourceField(source: $source) { Task { await submit(source, upload: false) } }
+                Button("Files", nativeIcon: "folder-open", action: chooseFiles).buttonStyle(T3Button(.outline)).accessibilityLabel("Choose files")
+                Button { Task { await submit(source, upload: false) } } label: {
+                    Text(submitting ? "Starting…" : "Transcribe").frame(minWidth: 72)
+                }.buttonStyle(T3Button(.primary)).disabled(submitting || source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !status["localReady"].bool)
             }
-            if installingModel {
-                NativeTickMeter(fraction: modelProgress["progress"].double, color: Theme.accent, height: 8)
-                    .accessibilityLabel("Model download").accessibilityValue(String(format: "%.0f percent", modelProgress["progress"].double * 100))
+            if !status.isNull, !status["ytdlp"].bool, source.lowercased().hasPrefix("http") {
+                Text("Links need yt-dlp. Files work without it.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.warnFg)
             }
         }
-        .padding(.vertical, 12)
-        .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
-        .overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
+        .padding(.horizontal, density.pageMargin).padding(.vertical, 12)
+        .overlay(alignment: .bottom) { Theme.border.frame(height: 1) }
     }
     private func modelAction(_ operation: String) {
         guard let service, !installingModel else { return }
@@ -141,34 +155,32 @@ struct NativeTranscribePage: View {
             await reload()
         }
     }
-    private var sourceField: some View {
-        NativeTranscribeSourceField(source: $source) { Task { await submit(source, upload: false) } }
-    }
-    @ViewBuilder private var sourceActions: some View {
-        Button { Task { await submit(source, upload: false) } } label: {
-            Text(submitting ? "Starting…" : "Transcribe").frame(minWidth: 72)
-        }.buttonStyle(T3Button(.primary)).disabled(submitting || source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !status["localReady"].bool)
-        Button("Files", nativeIcon: "folder-open", action: chooseFiles).buttonStyle(T3Button(.outline)).accessibilityLabel("Choose files")
-    }
-    private var history: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if rows.isEmpty {
-                if status.isNull && error == nil { ShimmerText(text: "Loading…") }
-                else { Theme.rule.frame(height: 1); NativeEmptyState(title: "No transcripts", detail: "Paste a link, choose files or drop audio here.", icon: "mic") }
-            } else {
-                Theme.rule.frame(height: 1)
-                LazyVStack(spacing: 0) {
-                    ForEach(rows, id: \.self["id"]) { row in
-                        NativeTranscriptHistoryRow(row: row, progress: progress[row["job_id"].string] ?? .null,
-                            metadata: historyMetadata(row), onOpen: {
-                                selected = row["id"].string; parts = [:]; detail = .null; Task { await loadDetail() }
-                            }, onDelete: { deleting = row["id"].string }) { countdown(row["id"].string) }
-                        Theme.rule.frame(height: 1).accessibilityHidden(true)
-                    }
+    private var list: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(rows, id: \.self["id"]) { row in
+                    NativeTranscriptRow(row: row, selected: selected == row["id"].string, progress: progress[row["job_id"].string] ?? .null,
+                                        metadata: historyMetadata(row), onOpen: { open(row) }) { countdown(row["id"].string) }
+                        .contextMenu { Button("Delete", role: .destructive) { deleting = row["id"].string } }
+                    Theme.rule.frame(height: 1).accessibilityHidden(true)
                 }
             }
-            if !status.isNull, modelReady, !installingModel, status["localRuntime"].bool { modelRow.padding(.top, 32) }
         }
+        .scrollContentBackground(.hidden)
+        .focusable().focusEffectDisabled()
+        .onMoveCommand { direction in
+            guard let index = rows.firstIndex(where: { $0["id"].string == selected }) else { return }
+            let next = direction == .down ? index + 1 : direction == .up ? index - 1 : index
+            if next != index, rows.indices.contains(next) { open(rows[next]) }
+        }
+        .accessibilityLabel("Transcripts")
+    }
+    private func open(_ row: JSONValue) {
+        guard selected != row["id"].string else { return }
+        selected = row["id"].string; parts = [:]; detail = row; Task { await loadDetail() }
+    }
+    private func selectFirstIfNeeded() {
+        if wide, selected == nil, let first = rows.first { open(first) }
     }
     private func historyMetadata(_ row: JSONValue) -> String {
         var values: [String] = []
@@ -179,52 +191,76 @@ struct NativeTranscribePage: View {
         return values.joined(separator: " · ")
     }
     @ViewBuilder private var transcriptActions: some View {
-        T3IconButton(system: "pencil", help: "Rename") { title = detail["title"].string; rename = true }.disabled(detail.isNull)
-        T3IconButton(system: "download", help: "Save text") { Task { await save() } }.disabled(detail["text"].string.isEmpty)
-        T3IconButton(system: "trash-2", help: "Delete transcript") { deleting = selected }.disabled(detail.isNull)
         if NativeTranscriptPresentation.canResume(detail) {
             Button("Resume", nativeIcon: "rotate-cw") { Task { await resume() } }.buttonStyle(T3Button(.outline)).disabled(runtime.paths.readOnly || submitting)
         }
-        Button("Copy", nativeIcon: "copy") { copy(transcriptText) }.buttonStyle(T3Button(.primary)).disabled(transcriptText.isEmpty)
+        T3IconButton(system: "pencil", help: "Rename") { title = detail["title"].string; rename = true }.disabled(detail.isNull)
+        T3IconButton(system: "download", help: "Save text") { Task { await save() } }.disabled(transcriptText.isEmpty)
+        T3IconButton(system: "trash-2", help: "Delete transcript") { deleting = selected }.disabled(detail.isNull)
+        Button("Copy", nativeIcon: "copy") { copy(transcriptText) }.buttonStyle(T3Button(.outline)).disabled(transcriptText.isEmpty)
     }
     private var transcript: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if detail.isNull {
-                if mediaReads.detailError != nil {
-                    NativeReadFailureState(icon: "mic", title: "Could not load transcript", detail: "", retryTitle: "Retry") { Task { await loadDetail() } }
-                } else { ShimmerText(text: "Loading…") }
-            } else {
-                transcriptMetadata
-                if ["queued", "running"].contains(detail["status"].string) {
-                    let job = progress[detail["job_id"].string] ?? detail["job"]
-                    VStack(alignment: .leading, spacing: 6) {
-                        NativeTickMeter(fraction: job["progress"].double, color: Theme.accent, height: 10)
-                            .accessibilityLabel("Transcription progress").accessibilityValue(String(format: "%.0f percent", job["progress"].double * 100))
-                        HStack(spacing: 10) {
-                            Text(job["progress_text"].string.isEmpty ? detail["status"].string : job["progress_text"].string)
-                            if let selected { countdown(selected) }
-                        }.font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if !wide {
+                    Button { back() } label: { HStack(spacing: 5) { NativeIcon("arrow-left", size: 12); Text("Transcripts") }.font(Theme.ui(Theme.textXs, weight: .medium)) }
+                        .buttonStyle(.plain).foregroundStyle(Theme.link).pointingHand()
+                }
+                if detail.isNull {
+                    if mediaReads.detailError != nil {
+                        NativeReadFailureState(icon: "mic", title: "Could not load transcript", detail: "", retryTitle: "Retry") { Task { await loadDetail() } }
                     }
-                }
-                if detail["failed_chunks"].int > 0 {
-                    Text("\(detail["failed_chunks"].int) audio chunks are missing.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.warnFg)
-                }
-                if !detail["error"].isNull { NativeError(message: detail["error"].string) }
-                Theme.rule.frame(height: 1)
-                if !transcriptText.isEmpty {
-                    Text(transcriptText).font(Theme.ui(Theme.textBase)).foregroundStyle(Theme.ink).lineSpacing(7)
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 680, alignment: .leading)
-                }
-                else if detail["status"].string == "cancelled" { Text("Cancelled. Resume continues from the saved chunks.").font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.muted) }
-                else if detail["status"].string == "failed" { Text("No transcript was produced.").font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.muted) }
-                else { ShimmerText(text: detail["status"].string == "queued" ? "Queued…" : "Transcribing…") }
-                if !detail["summary"].string.isEmpty {
-                    NativeCard(title: "Summary") {
-                        Text(detail["summary"].string).font(Theme.ui(Theme.textSm)).lineSpacing(6).textSelection(.enabled).frame(maxWidth: 680, alignment: .leading)
-                        if !detail["summary_model"].string.isEmpty { Text(detail["summary_model"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted) }
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 16) { transcriptHeading; Spacer(minLength: 0); HStack(spacing: 4) { transcriptActions }.fixedSize() }
+                        VStack(alignment: .leading, spacing: 12) { transcriptHeading; HStack(spacing: 4) { transcriptActions } }
+                    }
+                    if ["queued", "running"].contains(detail["status"].string) {
+                        let job = progress[detail["job_id"].string] ?? detail["job"]
+                        VStack(alignment: .leading, spacing: 6) {
+                            NativeTickMeter(fraction: job["progress"].double, color: Theme.accent, height: 10)
+                                .accessibilityLabel("Transcription progress").accessibilityValue(String(format: "%.0f percent", job["progress"].double * 100))
+                            HStack(spacing: 10) {
+                                Text(job["progress_text"].string.isEmpty ? detail["status"].string : job["progress_text"].string)
+                                if let selected { countdown(selected) }
+                            }.font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    if detail["failed_chunks"].int > 0 {
+                        Text("\(detail["failed_chunks"].int) audio chunks are missing.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.warnFg)
+                    }
+                    if !detail["error"].isNull { NativeError(message: detail["error"].string) }
+                    Theme.rule.frame(height: 1)
+                    if !transcriptText.isEmpty {
+                        Text(transcriptText).font(Theme.ui(Theme.textBase)).foregroundStyle(Theme.ink).lineSpacing(7)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 680, alignment: .leading)
+                    }
+                    else if detail["status"].string == "cancelled" { Text("Cancelled. Resume continues from the saved chunks.").font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.muted) }
+                    else if detail["status"].string == "failed" { Text("No transcript was produced.").font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.muted) }
+                    else if ["queued", "running"].contains(detail["status"].string) { ShimmerText(text: detail["status"].string == "queued" ? "Queued…" : "Transcribing…") }
+                    if !detail["summary"].string.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Theme.rule.frame(height: 1)
+                            Text("Summary").font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 8)
+                            Text(detail["summary"].string).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.dim).lineSpacing(6).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 680, alignment: .leading)
+                            if !detail["summary_model"].string.isEmpty { Text(detail["summary_model"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted) }
+                        }
                     }
                 }
             }
+            .padding(.horizontal, 28).padding(.top, 20).padding(.bottom, 48)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .scrollContentBackground(.hidden)
+        .background(Theme.surface)
+    }
+    private var transcriptHeading: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(detail["title"].string.isEmpty ? (detail["source"].string.isEmpty ? "Transcription" : detail["source"].string) : detail["title"].string)
+                .font(Theme.ui(Theme.textLg, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(2).textSelection(.enabled)
+                .accessibilityAddTraits(.isHeader)
+            transcriptMetadata
         }
     }
     /// One line of facts, then where the audio came from.
@@ -267,7 +303,7 @@ struct NativeTranscribePage: View {
             let nextStatus = try await service.handle("status")
             guard reads.accepts(ticket) else { return }
             rows = nextRows; status = nextStatus; error = nil
-            if selected != nil { await loadDetail() }
+            if selected != nil { await loadDetail() } else { selectFirstIfNeeded() }
         } catch { if reads.accepts(ticket) { self.error = error.localizedDescription } }
     }
     private func loadDetail() async {
@@ -332,48 +368,46 @@ private struct NativeTranscribeSourceField: View {
     }
 }
 
-private struct NativeTranscriptHistoryRow<Countdown: View>: View {
+private struct NativeTranscriptRow<Countdown: View>: View {
     let row: JSONValue
+    let selected: Bool
     let progress: JSONValue
     let metadata: String
     let onOpen: () -> Void
-    let onDelete: () -> Void
     @ViewBuilder var countdown: () -> Countdown
     @State private var hovering = false
 
     var body: some View {
         let status = row["status"].string, active = ["queued", "running"].contains(status)
-        HStack(spacing: 0) {
-            Button(action: onOpen) {
-                HStack(spacing: 12) {
-                    NativeIcon(status == "failed" ? "circle-alert" : row["source_kind"].string == "url" ? "link" : "file-audio", size: 14)
-                        .foregroundStyle(status == "failed" ? Theme.failFg : Theme.faint).frame(width: 16)
-                        .accessibilityLabel(status)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(row["title"].string.isEmpty ? row["source"].string : row["title"].string)
-                            .font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                        HStack(spacing: 5) {
-                            if !metadata.isEmpty { Text(metadata + " ·").lineLimit(1) }
-                            Text(NativeListTimeFormat.ago(row["created_at"].double)).lineLimit(1)
-                            if row["failed_chunks"].int > 0 { Text("· \(row["failed_chunks"].int) gaps").foregroundStyle(Theme.warnFg) }
-                            if status == "cancelled" { Text("· cancelled") }
-                        }.font(Theme.num(11.5, weight: .regular)).foregroundStyle(Theme.muted)
-                        if !row["error"].isNull { Text(row["error"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.failFg).lineLimit(2) }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                    if active {
-                        VStack(alignment: .leading, spacing: 4) {
-                            NativeTickMeter(fraction: progress["progress"].double, color: Theme.accent, height: 8)
-                            HStack(spacing: 6) {
-                                Text(progress["progress_text"].string.isEmpty ? status : progress["progress_text"].string).lineLimit(1)
-                                countdown()
-                            }.font(Theme.num(10.5, weight: .regular)).foregroundStyle(Theme.muted)
-                        }.frame(width: 190)
-                    }
-                    NativeIcon("chevron-right", size: 13).foregroundStyle(hovering ? Theme.ink : Theme.faint).accessibilityHidden(true)
-                }.padding(.leading, 4).padding(.trailing, 6).frame(minHeight: 52).contentShape(Rectangle())
-            }.buttonStyle(.plain).pointingHand()
-                .help(row["source"].string)
-            T3IconButton(system: "trash-2", help: "Delete transcript", size: 13, action: onDelete).opacity(hovering ? 1 : 0.35)
-        }.background(hovering ? Theme.subtle : .clear).onHover { hovering = $0 }
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    if status == "failed" { NativeIcon("circle-alert", size: 12).foregroundStyle(Theme.failFg).accessibilityLabel("Failed") }
+                    Text(row["title"].string.isEmpty ? row["source"].string : row["title"].string)
+                        .font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                }
+                HStack(spacing: 5) {
+                    if !metadata.isEmpty { Text(metadata + " ·").lineLimit(1) }
+                    Text(NativeListTimeFormat.ago(row["created_at"].double)).lineLimit(1)
+                    if row["failed_chunks"].int > 0 { Text("· \(row["failed_chunks"].int) gaps").foregroundStyle(Theme.warnFg) }
+                    if status == "cancelled" { Text("· cancelled") }
+                }.font(Theme.num(11.5, weight: .regular)).foregroundStyle(Theme.muted)
+                if active {
+                    NativeTickMeter(fraction: progress["progress"].double, color: Theme.accent, height: 6).padding(.top, 3)
+                    HStack(spacing: 6) {
+                        Text(progress["progress_text"].string.isEmpty ? status : progress["progress_text"].string).lineLimit(1)
+                        countdown()
+                    }.font(Theme.num(10.5, weight: .regular)).foregroundStyle(Theme.muted)
+                }
+            }
+            .padding(.leading, 24).padding(.trailing, 16).padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(selected ? Theme.raised : hovering ? Theme.subtle : .clear)
+        .overlay(alignment: .leading) { Theme.accent.frame(width: 2).opacity(selected ? 1 : 0) }
+        .onHover { hovering = $0 }
+        .help(row["source"].string)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

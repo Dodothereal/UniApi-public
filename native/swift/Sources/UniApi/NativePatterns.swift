@@ -7,6 +7,9 @@ struct NativeSetupStep: Identifiable {
     var detail: String = ""
     var done: Bool
     var busy: Bool = false
+    var busyText: String = "Working…"
+    var progress: Double? = nil
+    var cancel: (() -> Void)? = nil
     var actionTitle: String = ""
     var actionIcon: String? = nil
     var action: (() -> Void)? = nil
@@ -45,7 +48,13 @@ struct NativeSetup: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    if step.busy { ShimmerText(text: "Working…") }
+                    if step.busy {
+                        if let progress = step.progress {
+                            NativeTickMeter(fraction: progress, color: Theme.accent, height: 8).frame(width: 140)
+                                .accessibilityLabel(step.title).accessibilityValue(String(format: "%.0f percent", progress * 100))
+                        } else { ShimmerText(text: step.busyText) }
+                        if let cancel = step.cancel { Button("Cancel", action: cancel).buttonStyle(T3Button(.outline)) }
+                    }
                     else if !step.done, let action = step.action, !step.actionTitle.isEmpty {
                         Button(step.actionTitle, nativeIcon: step.actionIcon ?? "arrow-right", action: action)
                             .buttonStyle(T3Button(step.id == next ? .primary : .outline))
@@ -146,5 +155,25 @@ struct NativeFact: View {
         .padding(.vertical, 7)
         .overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// An icon button that opens a menu: the place for a page's rare actions.
+struct NativeIconMenu<Items: View>: View {
+    var icon: String = "ellipsis"
+    var help: String = "More"
+    @ViewBuilder var items: () -> Items
+    @Environment(\.isEnabled) private var enabled
+    @State private var hovering = false
+    var body: some View {
+        Menu { items() } label: {
+            NativeIcon(icon, size: 15).foregroundStyle(hovering ? Theme.ink : Theme.muted)
+                .frame(width: Theme.control, height: Theme.control)
+                .background(hovering ? Theme.subtle : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .opacity(enabled ? 1 : 0.4).onHover { hovering = $0 && enabled }
+        .help(help).accessibilityLabel(help)
     }
 }
