@@ -14,12 +14,12 @@ extension EnvironmentValues {
 }
 
 enum NativeDestination: String, CaseIterable, Identifiable {
-    case home, speed, results, prompts, arena, switcher, code, stats, activity, fans, battery, energy, keyboard, transcribe, jobs, settings
+    case home, speed, results, arena, prompts, transcribe, switcher, code, stats, activity, fans, energy, battery, keyboard, jobs, settings
     var id: String { rawValue }
     var title: String {
         switch self {
         case .home: return "Home"
-        case .speed: return "Speed"
+        case .speed: return "Benchmark"
         case .results: return "Results"
         case .prompts: return "Prompts"
         case .arena: return "Arena"
@@ -58,11 +58,29 @@ enum NativeDestination: String, CaseIterable, Identifiable {
     }
     var section: String {
         switch self {
-        case .home, .jobs, .settings: return ""
-        case .speed, .results, .prompts, .arena: return "Benchmark"
+        case .home, .jobs, .settings, .results, .prompts, .battery: return ""
+        case .speed, .arena, .transcribe: return "Models"
         case .switcher, .code, .stats: return "Coding"
-        case .activity, .fans, .battery, .energy, .keyboard: return "Mac"
-        case .transcribe: return "Media"
+        case .activity, .fans, .energy, .keyboard: return "Mac"
+        }
+    }
+    /// Results, Prompts and Battery are views of another destination. Their
+    /// identifiers stay valid so saved start pages and links still resolve.
+    var host: NativeDestination {
+        switch self {
+        case .results: return .speed
+        case .prompts: return .arena
+        case .battery: return .energy
+        default: return self
+        }
+    }
+    /// The stored view a hosted destination opens on its host.
+    var hostView: (key: String, value: String)? {
+        switch self {
+        case .results: return (NativeBenchmarkPage.viewKey, "table")
+        case .prompts: return (NativeArenaHost.viewKey, "prompts")
+        case .battery: return (NativeEnergyHost.viewKey, "battery")
+        default: return nil
         }
     }
 }
@@ -76,18 +94,15 @@ enum NativeInstalledPages {
         case .home: NativeHomePage(runtime: runtime, navigate: navigate)
         case .jobs: NativeJobsPage(runtime: runtime)
         case .settings: NativeSettingsPage(runtime: runtime)
-        case .prompts: NativePromptsPage(runtime: runtime)
         case .stats: NativeStatsPage(runtime: runtime, model: models?.statistics)
         case .transcribe: NativeTranscribePage(runtime: runtime)
         case .activity: NativeActivityPage(runtime: runtime)
-        case .battery: NativeBatteryPage(runtime: runtime)
         case .fans: NativeFansPage(runtime: runtime)
-        case .energy: NativeEnergyPage(runtime: runtime)
+        case .energy, .battery: NativeEnergyHost(runtime: runtime, opens: destination.hostView?.value)
         case .keyboard: NativeKeyboardPage(runtime: runtime)
-        case .speed: NativeSpeedPage(runtime: runtime, model: models?.speed)
-        case .results: NativeResultsPage(runtime: runtime, initialRun: resultsRun)
+        case .speed, .results: NativeBenchmarkPage(runtime: runtime, models: models, resultsRun: resultsRun, opens: destination.hostView?.value)
         case .code: NativeCodePage(runtime: runtime)
-        case .arena: NativeArenaPage(runtime: runtime)
+        case .arena, .prompts: NativeArenaHost(runtime: runtime, opens: destination.hostView?.value)
         case .switcher: NativeSwitcherPage(runtime: runtime)
         }
     }
@@ -139,7 +154,9 @@ struct NativeShell: View {
     @State private var paletteOpen = false
     /// The selection plate follows the destination with its own animation;
     /// the page swap itself is never animated.
-    @State private var plate = NativeShell.initialDestination
+    @State private var plate = NativeShell.initialDestination.host
+    /// Running and queued jobs, shown above Settings on every page.
+    @State private var work: [JSONValue] = []
     @Namespace private var navigation
     @StateObject private var notices = NativeNoticeCenter()
     @StateObject private var pageModels: NativePageModels
@@ -196,7 +213,7 @@ struct NativeShell: View {
         }
         .animation(reduceMotion ? nil : (paletteOpen ? NativeMotion.reveal : NativeMotion.dismiss), value: paletteOpen)
         .onChange(of: destination) { _, next in
-            withAnimation(reduceMotion ? nil : NativeMotion.selection) { plate = next }
+            withAnimation(reduceMotion ? nil : NativeMotion.selection) { plate = next.host }
         }
         .background(Theme.bg).foregroundStyle(Theme.ink)
         .overlay(alignment: .topTrailing) { NativeNoticeHost(center: notices) }
@@ -255,7 +272,10 @@ struct NativeShell: View {
                 if event.topic == "notify.error" { notices.push("Telegram notification delivery failed. Check the local notification configuration.", kind: .error) }
                 if event.topic == "stats.scanned" { pageModels.statistics.invalidateSnapshots() }
                 guard pageActive else { continue }
-                if event.topic == "job.updated" { await refreshBadges() }
+                if event.topic == "job.updated" {
+                    if event.data["status"] == "running", let index = work.firstIndex(where: { $0["id"] == event.data["id"] }) { work[index] = event.data }
+                    else { await refreshBadges() }
+                }
                 if event.topic.hasPrefix("code.permission") || ["code.thread", "code.thread.deleted", "code.projects", "arena.match", "arena.match.deleted"].contains(event.topic) { await refreshBadges() }
                 if event.topic == "switcher.changed" { await refreshFooter() }
                 if event.topic == "battery.state" {
@@ -317,7 +337,8 @@ struct NativeShell: View {
                     }
                 }.padding(.horizontal, 10).padding(.bottom, 10)
             }
-            VStack(spacing: 1) { navigationRow(.jobs); navigationRow(.settings) }.padding(.horizontal, 10).padding(.bottom, 10)
+            VStack(spacing: 8) { tray; navigationRow(.settings) }.padding(.horizontal, 10).padding(.bottom, 10)
+                .animation(reduceMotion ? nil : NativeMotion.reveal, value: work.isEmpty)
             Theme.sidebarBorder.frame(height: 1)
             footer
         }
@@ -340,7 +361,13 @@ struct NativeShell: View {
                 }.frame(maxWidth: .infinity).padding(.bottom, 10)
             }.scrollIndicators(.hidden)
             VStack(spacing: 2) {
-                railRow(.jobs); railRow(.settings)
+                if !work.isEmpty {
+                    NativeIcon("list-checks", size: 16).frame(width: 36, height: 32).foregroundStyle(Theme.sidebarMuted)
+                        .overlay(alignment: .topTrailing) { Circle().fill(Theme.accent).frame(width: 5, height: 5).offset(x: -5, y: 5) }
+                        .nativeSidebarRow(selected: plate == .jobs, namespace: navigation) { navigate(.jobs) }
+                        .help("\(work.count) running").accessibilityLabel("\(work.count) running. Open jobs")
+                }
+                railRow(.settings)
                 let shim = NativeShellPolicy.shim(routeStatus)
                 if shim.state == .down || session.error != nil {
                     NativeIcon("triangle-alert", size: 15).foregroundStyle(Theme.failFg).frame(width: 36, height: 30)
@@ -367,7 +394,7 @@ struct NativeShell: View {
             if sidebarBadges, !badge(page).isEmpty { Circle().fill(Theme.accent).frame(width: 5, height: 5).offset(x: -5, y: 5) }
         }
         .nativeSidebarRow(selected: plate == page, namespace: navigation) {
-            if page == .results { resultsRun = nil }; navigate(page)
+            if page == .speed { resultsRun = nil }; navigate(page)
         }
         .help(badge(page).isEmpty ? page.title : page.title + " · " + badge(page))
         .accessibilityLabel(page.title)
@@ -387,10 +414,34 @@ struct NativeShell: View {
             }
         }.padding(10)
     }
+    /// Work in progress. It opens the job history.
+    @ViewBuilder private var tray: some View {
+        if !work.isEmpty {
+            Button { navigate(.jobs) } label: {
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(work.prefix(3), id: \.self["id"]) { job in
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(spacing: 6) {
+                                Text(job["title"].string).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.sidebarInk).lineLimit(1)
+                                Spacer(minLength: 4)
+                                Text(job["status"] == "queued" ? "queued" : job["progress_text"].string).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1)
+                            }
+                            NativeTickMeter(fraction: job["progress"].double, color: Theme.accent, height: 7)
+                        }
+                    }
+                    if work.count > 3 { Text("\(work.count - 3) more").font(Theme.ui(11)).foregroundStyle(Theme.faint) }
+                }
+                .padding(9).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(Theme.sidebarBorder, lineWidth: 1) }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).pointingHand().help("Open jobs").accessibilityLabel("\(work.count) running. Open jobs")
+            .transition(.opacity)
+        }
+    }
     private func badge(_ page: NativeDestination) -> String {
-        if page == .jobs { return activeJobs > 0 ? String(activeJobs) : "" }
         if [.code, .arena].contains(page) { return badges[page.rawValue].int > 0 ? badges[page.rawValue].string : "" }
-        if page == .battery { return badges["battery"].isNull ? "" : badges["battery"].string + "%" }
         if page == .energy { return badges["energy"].isNull ? "" : badges["energy"].string }
         return ""
     }
@@ -407,14 +458,14 @@ struct NativeShell: View {
         }.padding(.horizontal, 9).frame(height: 30)
             .foregroundStyle(plate == page ? Theme.sidebarInk : Theme.sidebarMuted)
             .nativeSidebarRow(selected: plate == page, namespace: navigation) {
-                if page == .results { resultsRun = nil }; navigate(page)
+                if page == .speed { resultsRun = nil }; navigate(page)
             }
     }
     private var paletteCommands: [NativeCommand] {
         let pages = [NativeDestination.home] + visibleSections.flatMap(\.pages) + [.jobs, .settings]
         var commands = pages.map { page in
             NativeCommand(id: "page." + page.rawValue, title: page.title, group: page.section.isEmpty ? "Go to" : page.section, symbol: page.symbol,
-                          current: page == destination) { if page == .results { resultsRun = nil }; navigate(page) }
+                          current: page == destination.host) { if page == .speed { resultsRun = nil }; navigate(page) }
         }
         commands.append(NativeCommand(id: "reload", title: "Reload this page", group: "Window", symbol: "refresh-cw", hint: "\u{2318}R") {
             NotificationCenter.default.post(name: .nativePageReload, object: nil)
@@ -425,8 +476,10 @@ struct NativeShell: View {
         }
         return commands
     }
-    private func navigate(_ page: NativeDestination) {
-        guard NativeShellPolicy.admits(page.rawValue, batterySupported: batterySupported) else { return }
+    private func navigate(_ requested: NativeDestination) {
+        guard NativeShellPolicy.admits(requested.rawValue, batterySupported: batterySupported) else { return }
+        if let view = requested.hostView { UserDefaults.standard.set(view.value, forKey: view.key) }
+        let page = requested.host
         if page != destination { NativePagePanels.shared.invalidatePresentation(); visit = NativeUIReadiness.shared.begin(page) }
         // Only local selection/entrance effects animate, never the complete new chart tree.
         NativeMotion.withoutAnimation { destination = page }
@@ -442,6 +495,11 @@ struct NativeShell: View {
             let value = await summaries.badges()
             guard reads.accepts(ticket) else { return }
             for (key, data) in value.object { badges[key] = data }; activeJobs = value["jobs"].int
+            if activeJobs == 0 { work = [] }
+            else if let rows = try? await runtime.jobs.list(statuses: ["running", "queued"], limit: 12) {
+                guard reads.accepts(ticket) else { return }
+                work = rows.map(JSONValue.object)
+            }
         }
         if let battery = session.battery, let value = try? await battery.handle("status") {
             guard reads.accepts(ticket) else { return }

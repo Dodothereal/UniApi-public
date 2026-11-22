@@ -191,7 +191,7 @@ struct NativeSettingsPage: View {
     }
     private var launchPages: [NativeDestination] {
         NativeDestination.allCases.filter {
-            NativeInstalledPages.destinations.contains($0) && NativeShellPolicy.admits($0.rawValue, batterySupported: batterySupported)
+            $0.host == $0 && NativeInstalledPages.destinations.contains($0) && NativeShellPolicy.admits($0.rawValue, batterySupported: batterySupported)
         }
     }
     private var startupStatus: String {

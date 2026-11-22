@@ -18,9 +18,21 @@ struct NativePage<Content: View>: View {
     var backAction: (() -> Void)?
     @Environment(\.nativePageVisit) private var visit
     @Environment(\.nativeInterfaceDensity) private var density
+    @Environment(\.nativeHostTabs) private var host
     private let content: Content
     private let actions: AnyView
     private let tabs: AnyView?
+    /// One strip: the sibling views of the destination around this page's own.
+    private var barTabs: AnyView? {
+        guard let host else { return tabs }
+        return AnyView(HStack(spacing: 2) {
+            if !host.before.isEmpty || host.current != nil {
+                NativeTabs(options: host.before + (host.current.map { [$0] } ?? []), selection: host.current?.value ?? "", onSelect: host.select)
+            }
+            if let tabs { tabs }
+            if !host.after.isEmpty { NativeTabs(options: host.after, selection: "", onSelect: host.select) }
+        })
+    }
 
     /// `subtitle` and `showsHeader` are accepted for source compatibility and
     /// have no effect: pages do not carry a description under their name.
@@ -52,7 +64,7 @@ struct NativePage<Content: View>: View {
         GeometryReader { viewport in
             let column = max(0, min(max(maxWidth, Theme.contentWidth), viewport.size.width))
             VStack(spacing: 0) {
-                NativePageBar(title: title, backTitle: backTitle, backAction: backAction, tabs: tabs, actions: actions,
+                NativePageBar(title: host?.title ?? title, backTitle: backTitle, backAction: backAction, tabs: barTabs, actions: actions,
                               column: scrolls ? column : viewport.size.width)
                 if scrolls {
                     ScrollView {
@@ -82,6 +94,40 @@ struct NativePage<Content: View>: View {
             }
         }
     }
+}
+
+/// A destination made of several pages shows them as views of one page: its
+/// name in the bar, and every view in one tab strip.
+struct NativeHostTabs {
+    var title: String
+    /// The view the destination shows, by tab value.
+    var view: String
+    var before: [(value: String, label: String)] = []
+    /// Set for a page that has no tabs of its own.
+    var current: (value: String, label: String)? = nil
+    var after: [(value: String, label: String)] = []
+    var select: (String) -> Void
+}
+private struct NativeHostTabsKey: EnvironmentKey { static let defaultValue: NativeHostTabs? = nil }
+extension EnvironmentValues {
+    var nativeHostTabs: NativeHostTabs? {
+        get { self[NativeHostTabsKey.self] }
+        set { self[NativeHostTabsKey.self] = newValue }
+    }
+}
+private struct NativeHostedView: ViewModifier {
+    @Environment(\.nativeHostTabs) private var host
+    let own: [String]
+    let open: (String) -> Void
+    func body(content: Content) -> some View {
+        content
+            .onAppear { if let host, own.contains(host.view) { open(host.view) } }
+            .onChange(of: host?.view ?? "") { _, view in if own.contains(view) { open(view) } }
+    }
+}
+extension View {
+    /// Opens the view the destination last showed, when it is one of `own`.
+    func nativeHostedView(_ own: [String], open: @escaping (String) -> Void) -> some View { modifier(NativeHostedView(own: own, open: open)) }
 }
 
 /// A scrolling pane inside a page that owns its frame (`scrolls: false`).

@@ -4,6 +4,7 @@ import UniApiCore
 import UniApiPresentation
 
 struct NativeResultsPage: View {
+    @Environment(\.nativeHostTabs) private var host
     let runtime: NativeRuntime
     @StateObject private var state: NativeResultsModel
     @State private var showUsage = false
@@ -21,9 +22,13 @@ struct NativeResultsPage: View {
         GeometryReader { geometry in
         let contentWidth = max(0, min(Theme.contentWidth, geometry.size.width) - 2 * density.pageMargin)
         NativePage(title: "Results", readiness: state.busy ? .pending : !state.error.isEmpty ? .failed : state.payload.isNull ? .pending : .ready, tabs: {
-            NativeTabs(options: [("table", "Table"), ("charts", "Charts"), ("runs", "Runs")], selection: showRuns ? "runs" : state.tab,
+            NativeTabs(options: [("table", "Results"), ("charts", "Charts"), ("runs", "Runs")], selection: showRuns ? "runs" : state.tab,
                        counts: ["runs": state.payload["runs"].array.count]) { tab in
                 if tab == "runs" { showRuns = true } else { showRuns = false; state.chooseTab(tab) }
+                host?.select(tab)
+            }
+            .nativeHostedView(["table", "charts", "runs"]) { tab in
+                if tab == "runs" { showRuns = true } else { showRuns = false; if state.tab != tab { state.chooseTab(tab) } }
             }
         }, actions: { headerActions }) {
             if !state.error.isEmpty { NativeError(message: state.error) }
@@ -32,9 +37,9 @@ struct NativeResultsPage: View {
             }
             else if showRuns { runList }
             else if cells.isEmpty {
-                NativeEmptyState(title: "No results in this scope", detail: "Select models on Speed and start a run.", icon: "chart-bar",
-                                 actionTitle: "Benchmark", actionIcon: "gauge") {
-                    NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.speed)
+                NativeEmptyState(title: "No results in this scope", detail: "Pick models on Run and start one.", icon: "chart-bar",
+                                 actionTitle: "Run", actionIcon: "gauge") {
+                    if let host { host.select("bench") } else { NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.speed) }
                 }
             }
             else {
@@ -80,8 +85,8 @@ struct NativeResultsPage: View {
     @ViewBuilder private var runList: some View {
         let runs = state.payload["runs"].array
         if runs.isEmpty {
-            NativeEmptyState(title: "No runs", detail: "Select models on Speed and start a run.", icon: "chart-bar", actionTitle: "Benchmark", actionIcon: "gauge") {
-                NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.speed)
+            NativeEmptyState(title: "No runs", detail: "Pick models on Run and start one.", icon: "chart-bar", actionTitle: "Run", actionIcon: "gauge") {
+                if let host { host.select("bench") } else { NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.speed) }
             }
         } else {
             Card(padding: 0) { LazyVStack(spacing: 0) {

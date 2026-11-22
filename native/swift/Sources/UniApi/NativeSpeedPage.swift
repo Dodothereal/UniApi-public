@@ -8,7 +8,7 @@ struct NativeSpeedPage: View {
     @StateObject private var state: NativeSpeedModel
     @State private var readOwner = UUID()
     @State private var picker: NativePresentedValue?
-    @State private var showResults = false
+    @Environment(\.nativeHostTabs) private var host
     @State private var scheduleTime = "04:00"
     @State private var scheduleRestored = false
     @State private var freeFilter = "all"
@@ -19,10 +19,10 @@ struct NativeSpeedPage: View {
     @State private var tab = "bench"
     var body: some View {
         NativePage(title: "Speed", readiness: !state.error.isEmpty ? .failed : state.catalog.isNull || state.progress.isNull || state.free.isNull ? .pending : .ready, tabs: {
-            NativeTabs(options: [("bench", "Benchmark"), ("free", "Free test")], selection: tab) { tab = $0 }
+            NativeTabs(options: [("bench", "Run"), ("free", "Free test")], selection: tab) { tab = $0; host?.select($0) }
+                .nativeHostedView(["bench", "free"]) { tab = $0 }
         }, actions: {
             T3IconButton(system: "refresh-cw", help: "Reload") { Task { await state.reload() } }
-            Button { showResults = true } label: { HStack(spacing: 6) { NativeIcon("chart-bar", size: 13); Text("Results") } }.buttonStyle(T3Button(.ghost))
             if tab == "bench" {
                 if state.running { Button { Task { await state.cancel() } } label: { HStack(spacing: 6) { NativeIcon("square", size: 11); Text("Stop run") } }.buttonStyle(T3Button(.destructive)) }
                 else {
@@ -78,7 +78,6 @@ struct NativeSpeedPage: View {
                                    change: { state.models(item.value["id"].string, $0) },
                                    refresh: { Task { await state.discover(item.value["id"].string) } })
         }
-        .sheet(isPresented: $showResults) { NativeResultsPage(runtime: runtime).frame(width: 1250, height: 800) }
         .sheet(item: $editor) { item in NativeSpeedProviderEditor(provider: item.value, save: { name, base, key in await state.update(item.value, name: name, base: base, key: key) }) }
     }
     private var description: String { tierDescription(state.selection["tier"].string) }

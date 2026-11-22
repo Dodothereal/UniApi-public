@@ -45,7 +45,6 @@ struct NativeSidebarSettingsView: View {
                         sectionView(section)
                     }
                     Theme.sidebarBorder.frame(height: 1).padding(.vertical, 3)
-                    anchoredRow(.jobs)
                     anchoredRow(.settings)
                 }
                 .padding(10).frame(maxWidth: 460, alignment: .leading)

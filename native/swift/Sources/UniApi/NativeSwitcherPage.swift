@@ -61,7 +61,7 @@ import UniApiCore
             if !result["job"].isNull { jobs.append(result["job"]) }
             if !result["status"].isNull { codex = result["status"]; catalogDraft.accept(codex["catalog"]) }
             selection.acceptCompletedAction(operation, input: input, result: result)
-            message = result["message"].string.isEmpty ? result["job"].isNull ? "Saved." : "Verification queued; follow it in Jobs." : result["message"].string
+            message = result["message"].string.isEmpty ? result["job"].isNull ? "Saved." : "Verification queued." : result["message"].string
             error = ""; await reload(force: true); return true
         }
         catch {
@@ -455,7 +455,7 @@ struct NativeSwitcherPage: View {
             HStack(spacing: 10) {
                 Button("Verify coding tools", nativeIcon: "shield-check") { run("verifyCodexTools") }.disabled(state.controlsBusy || state.codex["installed"] != true || !state.codex["configError"].isNull || state.codex["bridge"]["mode"] != "full" || state.codex["bridge"]["busy"] != false || state.codex["bridge"]["signInChecked"] != true)
                     .help("Browser text access is separate from local coding tools. This runs one ephemeral tool check and stores the evidence for the current bridge configuration.")
-                if NativeSwitcherDisplayPolicies.checksRunning(state.jobs) { Text("A verification is running. Follow it in Jobs.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted) }
+                if NativeSwitcherDisplayPolicies.checksRunning(state.jobs) { Text("A verification is running.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted) }
             }
         }
     }

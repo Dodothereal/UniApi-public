@@ -17,6 +17,7 @@ struct NativeEnergyPage: View {
     @State private var state: JSONValue = .null
     @State private var historySelection = NativeFanHistorySelection()
     @AppStorage("uniapi.energy.tab") private var tab = "flow"
+    @Environment(\.nativeHostTabs) private var host
     @AppStorage("uniapi.energy.range") private var range = "24h"
     @AppStorage("uniapi.energy.statistic") private var statistic = "mean"
     @State private var query = ""
@@ -88,7 +89,8 @@ struct NativeEnergyPage: View {
         GeometryReader { viewport in
             NativePage(title: "Energy", maxWidth: 1280, readiness: pageReadiness, tabs: {
                 if state["supported"].bool {
-                    NativeTabs(options: [("flow", "Flow"), ("history", "History"), ("sensors", "Sensors"), ("settings", "Preferences")], selection: tab) { tab = $0 }
+                    NativeTabs(options: [("flow", "Flow"), ("history", "History"), ("sensors", "Sensors"), ("settings", "Preferences")], selection: tab) { tab = $0; host?.select($0) }
+                        .nativeHostedView(["flow", "history", "sensors", "settings"]) { tab = $0 }
                 }
             }, actions: {
                 if state["supported"].bool, ["flow", "history"].contains(tab) {

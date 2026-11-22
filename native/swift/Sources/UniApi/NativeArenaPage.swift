@@ -9,6 +9,7 @@ struct NativeArenaPage: View {
     let runtime: NativeRuntime
     @StateObject private var model: NativeArenaModel
     @State private var tab = "Judge"
+    @Environment(\.nativeHostTabs) private var host
     @State private var selected = ""
     @State private var preset = ""
     @State private var rankingMode = "all"
@@ -33,8 +34,8 @@ struct NativeArenaPage: View {
         // Keep room for the rail and two minimum-width contestant columns.
         let showsRail = viewport.size.width >= 900
         NativePage(title: "Arena", readiness: pageReadiness, scrolls: false, tabs: {
-            NativeTabs(options: ["Judge", "Ranking", "Presets", "History"].map { (value: $0, label: $0) }, selection: tab, counts: ["Judge": waiting]) { tab = $0 }
-                .accessibilityLabel("Arena view")
+            NativeTabs(options: ["Judge", "Ranking", "Presets", "History"].map { (value: $0, label: $0) }, selection: tab, counts: ["Judge": waiting]) { tab = $0; host?.select($0) }
+                .nativeHostedView(["Judge", "Ranking", "Presets", "History"]) { tab = $0 }
         }, actions: {
             T3IconButton(system: "refresh-cw", help: "Reload") { Task { await model.reload(ranking: tab == "Ranking" ? rankingMode : nil) } }
             if tab == "Presets" { Button("New preset", nativeIcon: "plus") { editing = [:] }.buttonStyle(T3Button(.outline)) }
