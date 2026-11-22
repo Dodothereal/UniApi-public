@@ -34,7 +34,7 @@ struct NativeArenaPage: View {
         let matchLayout = showsRail
             ? AnyLayout(HStackLayout(alignment: .top, spacing: 16))
             : AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
-        NativePage(title: "Arena", subtitle: "One task, several models, each in its own sandboxed Claude Code session. Rank what they present; identities reveal after the verdict, and every verdict joins the shared ranking in the repo.", maxWidth: 1500, readiness: pageReadiness, actions: {
+        NativePage(title: "Arena", maxWidth: 1500, readiness: pageReadiness, actions: {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) { reloadButton; tabs }.fixedSize(horizontal: true, vertical: false)
                 VStack(alignment: .trailing, spacing: 8) { reloadButton; tabs }
@@ -42,19 +42,14 @@ struct NativeArenaPage: View {
         }) {
             if !model.pageError(includeRanking: tab == "Ranking").isEmpty { NativeError(message: model.pageError(includeRanking: tab == "Ranking")) }
             if !model.loaded && tab != "Ranking" {
-                if !model.failed { ShimmerText(text: "Reading Arena presets and matches…").frame(maxWidth: .infinity).padding(.vertical, 40) }
+                if !model.failed { ShimmerText(text: "Reading matches").frame(maxWidth: .infinity).padding(.vertical, 40) }
             } else { switch tab {
             case "New match": NativeArenaNewMatch(model: model, initialPreset: preset) { id in selected = id; tab = "Judge" }
             case "Presets": presets
             case "Ranking": rankings
             default:
                 if visible.isEmpty {
-                    VStack(spacing: 12) {
-                        NativeIcon("swords", size: 24).foregroundStyle(Theme.muted)
-                        Text(tab == "Judge" ? "Nothing to judge" : "No matches yet").font(Theme.ui(14, weight: .medium))
-                        Text("Start a match. Contestants run in the background and wait here for your verdict.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                        Button("New match", nativeIcon: "plus") { preset = ""; tab = "New match" }.buttonStyle(T3Button(.primary))
-                    }.frame(maxWidth: .infinity).padding(.vertical, 48)
+                    NativeEmptyState(title: tab == "Judge" ? "Nothing to judge" : "No matches", detail: "", icon: "swords")
                 } else {
                     matchLayout {
                         if showsRail { matchRail.frame(width: 260) }
@@ -110,11 +105,11 @@ struct NativeArenaPage: View {
         (match["verdict"].isNull ? match["status"].string : match["verdict"].string).replacingOccurrences(of: "_", with: " ")
     }
     private var matchRail: some View {
-        Card(padding: 0) {
+        VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(visible.enumerated()), id: \.offset) { index, match in
-                        if index > 0 { Rectangle().fill(Theme.border).frame(height: 1) }
+                        if index > 0 { NativeRule() }
                         NativeArenaMatchRow(match: match, viewed: match["id"].string == (selected.isEmpty ? visible.first?["id"].string : selected)) { selected = match["id"].string }
                     }
                 }
@@ -122,16 +117,19 @@ struct NativeArenaPage: View {
         }
     }
     private var reloadButton: some View {
-        Button("Reload", nativeIcon: "rotate-cw") { Task { await model.reload(ranking: tab == "Ranking" ? rankingMode : nil) } }.buttonStyle(T3Button(.outline))
+        T3IconButton(icon: "rotate-cw", help: "Reload") { Task { await model.reload(ranking: tab == "Ranking" ? rankingMode : nil) } }
     }
     private var tabs: some View {
-        T3Segmented(options: ["Judge", "New match", "Ranking", "Presets", "History"].map { (value: $0, label: $0) }, selection: tab) { tab = $0 }.accessibilityLabel("Arena view")
+        HStack(spacing: 10) {
+            T3Segmented(options: ["Judge", "Ranking", "Presets", "History"].map { (value: $0, label: $0) }, selection: tab) { tab = $0 }.accessibilityLabel("Arena view")
+            Button("New match", nativeIcon: "plus") { preset = ""; tab = "New match" }.buttonStyle(T3Button(.primary)).disabled(tab == "New match")
+        }
     }
     private var presets: some View { VStack(alignment: .leading, spacing: 20) {
         SectionLabel(text: "Presets") {
             Button("New preset", nativeIcon: "plus") { editing = [:] }.buttonStyle(T3Button(.outline))
         }
-        if model.state["presets"].array.isEmpty { NativeEmptyState(title: "No presets", detail: "Write one and it is one click away on every new match.") }
+        if model.state["presets"].array.isEmpty { NativeEmptyState(title: "No presets", detail: "") }
         ForEach(ArenaPresentationPolicy.presetGroups(model.state["presets"].array)) { group in
             Card(padding: 0) {
                 Text(group.title.uppercased()).font(Theme.ui(11, weight: .medium)).tracking(0.55).foregroundStyle(Theme.muted)
@@ -199,11 +197,10 @@ struct NativeArenaPage: View {
         let phase = model.rankingPhase(for: rankingMode)
         return VStack(alignment: .leading, spacing: 16) {
         NativeCard(title: "Standings") {
-            Text("Pairwise Elo, K=32 shared across multi-way matches. All-bad is a draw; failures affect reliability, not rating.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
             T3Segmented(options: [("all", "All"), ("random", "Random"), ("chosen", "Chosen")], selection: rankingMode) { rankingMode = $0 }.accessibilityLabel("Ranking scope")
             if phase == .loading && hasContent { ShimmerText(text: "Refreshing ranking…") }
             if hasContent {
-                if model.standings.isEmpty { NativeEmptyState(title: "No verdicts yet", detail: "Judge a match or sync the shared ledger.") }
+                if model.standings.isEmpty { NativeEmptyState(title: "No verdicts", detail: "") }
                 ForEach(Array(model.standings.enumerated()), id: \.offset) { i, row in VStack(alignment: .leading, spacing: 5) { HStack { Text("\(i + 1). \(row["route"].string) · \(row["model"].string)").font(Theme.mono(12)); Spacer(); Text("\(row["elo"].int)").font(Theme.mono(13, weight: .semibold)) }; Text("\(row["wins"].int)W \(row["losses"].int)L \(row["draws"].int)D · \(row["failures"].int) failed · \(row["matches"].int) matches · \(ArenaStandingDetail(row).firstPlaceLabel) · \(NativeArenaDuration(row["avg_duration_ms"].double)) · \(Int(row["avg_turns"].double.rounded())) steps").font(Theme.ui(11)).foregroundStyle(Theme.muted); NativeGrowBar(fraction: fraction(row), color: Theme.pairColor(row["key"].string), delay: Double(i) * 0.045) }.padding(.vertical, 6).help(ArenaStandingDetail(row).accessibilitySummary) }
             } else if phase == .failed {
                 NativeEmptyState(title: "Ranking unavailable", detail: "Use Reload to retry this scope.")
@@ -272,8 +269,6 @@ private struct NativeArenaPresetEditor: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(value["id"].isNull ? "New preset" : "Edit preset").font(Theme.ui(18, weight: .semibold))
-                Text("Every contestant receives the prompt verbatim in an empty folder. Say what the judge should be shown at the end.")
-                    .font(Theme.ui(12)).foregroundStyle(Theme.muted)
             }
             HStack(spacing: 12) {
                 T3Field(placeholder: "Title", text: $title).accessibilityLabel("Title")

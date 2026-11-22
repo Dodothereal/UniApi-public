@@ -64,7 +64,7 @@ struct NativeArenaNewMatch: View {
                 }
             } else {
                 SectionLabel(text: "Contestants") { Button("Pick contestants", nativeIcon: "plus") { picker = "chosen" }.buttonStyle(T3Button(.outline)) }
-                Text("Between two and eight. Their positions are shuffled and hidden until you vote.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                Text("Two to eight, shuffled and hidden until you vote.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
                 ForEach(contestants.filter { chosen.contains($0["key"].string) }, id: \.self) { c in
                     HStack {
                         Text(c["label"].string).font(Theme.mono(12)).foregroundStyle(Theme.dim)

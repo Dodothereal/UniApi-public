@@ -148,7 +148,7 @@ struct NativeCodePage: View {
         VStack(spacing: 0) {
             if !state.loaded {
                 VStack(spacing: 12) {
-                    if state.error.isEmpty { ShimmerText(text: "Reading projects and threads…", font: Theme.ui(12)) }
+                    if state.error.isEmpty { ShimmerText(text: "Reading projects", font: Theme.ui(12)) }
                     else {
                         Text("Could not read projects and threads").font(Theme.ui(14, weight: .medium))
                         Button("Retry", nativeIcon: "rotate-cw") { Task { await reload() } }.buttonStyle(T3Button(.outline))
@@ -156,10 +156,7 @@ struct NativeCodePage: View {
                 }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if selectedThread.isEmpty {
                 VStack(spacing: 14) {
-                    NativeIcon("bot", size: 24).foregroundStyle(Theme.muted)
-                    Text(state.projects.isEmpty ? "Add a project folder to start" : "Pick a thread or start a new one").font(Theme.ui(14, weight: .medium))
-                    Text("Each thread keeps its own route, settings, transcript and resumable session. Threads run in parallel and survive closing the window.")
-                        .font(Theme.ui(12.5)).foregroundStyle(Theme.muted).multilineTextAlignment(.center).frame(maxWidth: 460)
+                    Text(state.projects.isEmpty ? "No projects" : "No thread open").font(Theme.display(26)).foregroundStyle(Theme.dim)
                     if state.projects.isEmpty { Button("Add project", nativeIcon: "folder-plus", action: addProject).buttonStyle(T3Button(.primary)) }
                     else { Button("New thread", nativeIcon: "plus") { Task { await newThread() } }.buttonStyle(T3Button(.primary)).disabled(project.isEmpty) }
                 }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -231,7 +228,6 @@ struct NativeCodePage: View {
                 routeControls
             }.padding(10).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border, lineWidth: 1))
-            Text("Enter sends, Shift+Enter breaks a line, paste or drop images.").font(Theme.ui(10.5)).foregroundStyle(Theme.muted).padding(.horizontal, 4)
         }.frame(maxWidth: 860).frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 20)
     }
     private var routeControls: some View {
