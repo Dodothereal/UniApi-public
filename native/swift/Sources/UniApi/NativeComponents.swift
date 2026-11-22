@@ -87,6 +87,7 @@ struct NativePage<Content: View>: View {
     }
 }
 
+/// A titled group. Draws as a `Band`: the title on a rule, content on the canvas.
 struct NativeCard<Content: View>: View {
     var title: String
     private let content: Content
@@ -97,15 +98,10 @@ struct NativeCard<Content: View>: View {
     }
 
     var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                if !title.isEmpty {
-                    Text(title).font(Theme.ui(14, weight: .medium))
-                        .foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-                }
-                content
-            }
-        }
+        VStack(alignment: .leading, spacing: 12) {
+            if !title.isEmpty { SectionLabel(title) }
+            content
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -148,44 +144,14 @@ struct NativeValueTile: View {
     private var reading: String { value.flatMap { $0.isFinite ? format($0) : nil } ?? "-" }
 
     var body: some View {
-        Card(padding: 14) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    StatusDot(color: accent, size: 5)
-                    Text(label).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
-                }
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    NativeNumberText(text: reading, font: Theme.mono(22, weight: .semibold), delay: delay)
-                    if !unit.isEmpty {
-                        Text(unit).font(Theme.mono(12)).foregroundStyle(Theme.muted).lineLimit(1)
-                    }
-                }
-                if !detail.isEmpty {
-                    Text(detail).font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
-        .accessibilityValue([reading, unit, detail].filter { !$0.isEmpty }.joined(separator: " "))
+        Readout(label: label, value: reading, unit: unit, detail: detail, size: .medium,
+                tint: accent == Theme.accent ? nil : accent, delay: delay)
     }
 }
 
 struct NativeError: View {
     var message: String
-    var body: some View {
-        HStack(alignment: .top, spacing: 9) {
-            NativeIcon(systemName: "exclamationmark.circle").foregroundStyle(Theme.failFg)
-                .accessibilityHidden(true)
-            Text(message).font(Theme.ui(12.5)).foregroundStyle(Theme.failFg)
-                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .background(Theme.surfaceFor(Theme.fail), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-        .accessibilityElement(children: .combine).accessibilityLabel("Error: " + message)
-    }
+    var body: some View { Notice(text: message, tone: .fail).accessibilityLabel("Error: " + message) }
 }
 
 struct NativeEmptyState: View {
@@ -209,16 +175,7 @@ struct NativeReadFailureState: View {
     let retry: () -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
-            VStack(spacing: 8) {
-                NativeIcon(icon, size: 24).foregroundStyle(Theme.muted).accessibilityHidden(true)
-                Text(title).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink)
-                Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-            }.accessibilityElement(children: .combine)
-            Button(retryTitle, action: retry).buttonStyle(T3Button(.outline))
-        }
-        .frame(maxWidth: .infinity).padding(.horizontal, 16).padding(.vertical, 48)
+        Blank(icon: icon, title: title, detail: detail, actionTitle: retryTitle, actionIcon: "refresh-cw", primary: false, action: retry)
     }
 }
 
@@ -230,19 +187,7 @@ struct EmptyState: View {
     var actionIcon: String = "plus"
     var action: (() -> Void)? = nil
     var body: some View {
-        VStack(spacing: 16) {
-            VStack(spacing: 10) {
-                NativeIcon(systemName: icon, size: 24)
-                    .foregroundStyle(Theme.muted.opacity(0.8)).accessibilityHidden(true)
-                Text(title).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink)
-                Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-            }.accessibilityElement(children: .combine)
-            if let actionTitle, let action {
-                Button(actionTitle, nativeIcon: actionIcon, action: action).buttonStyle(T3Button(.primary))
-            }
-        }
-        .frame(maxWidth: .infinity).padding(.vertical, 48)
+        Blank(icon: icon, title: title, detail: detail, actionTitle: actionTitle, actionIcon: actionIcon, action: action)
     }
 }
 
@@ -277,8 +222,8 @@ struct StatTile: View {
 /// spread grow together; zero remains truly empty rather than a minimum pill.
 struct NativeGrowBar: View {
     var fraction: Double
-    var color: Color = Theme.accent
-    var height: CGFloat = 6
+    var color: Color = Theme.ink
+    var height: CGFloat = 4
     var delay: Double = 0
     var spread: ClosedRange<Double>? = nil
     var entrance: Bool = true
@@ -288,21 +233,22 @@ struct NativeGrowBar: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                Capsule().fill(Theme.track)
+                Rectangle().fill(Theme.track)
                 ZStack(alignment: .leading) {
                     if let spread {
                         let lower = NativeMotion.fraction(spread.lowerBound)
                         let upper = NativeMotion.fraction(spread.upperBound)
-                        Capsule().fill(color.opacity(0.22))
+                        Rectangle().fill(color.opacity(0.25))
                             .frame(width: geometry.size.width * max(0, upper - lower))
                             .offset(x: geometry.size.width * lower)
                     }
-                    Capsule().fill(color)
+                    Rectangle().fill(color)
                         .frame(width: geometry.size.width * NativeMotion.fraction(fraction))
                 }
                 .animation(reduceMotion || !visible ? nil : NativeMotion.barUpdate, value: fraction)
                 .modifier(OptionalBarEntrance(enabled: entrance, delay: delay))
             }
+            .clipShape(RoundedRectangle(cornerRadius: 1))
         }
         .frame(height: height)
         .accessibilityHidden(true)
@@ -319,8 +265,8 @@ private struct OptionalBarEntrance: ViewModifier {
 
 struct CapsuleBar: View {
     var fraction: Double
-    var color: Color = Theme.accent
-    var height: CGFloat = 5
+    var color: Color = Theme.ink
+    var height: CGFloat = 4
     var body: some View { NativeGrowBar(fraction: fraction, color: color, height: height, entrance: false) }
 }
 
@@ -334,14 +280,14 @@ struct ModelChip: View {
     var body: some View {
         Button(action: onRemove) {
             HStack(spacing: 6) {
-                StatusDot(color: hovering ? Theme.failFg : color)
+                Rectangle().fill(hovering ? Theme.failFg : color).frame(width: 2, height: 10)
                 Text(model).font(Theme.mono(11)).lineLimit(1)
                 NativeIcon(systemName: "xmark", size: 8)
             }
             .foregroundStyle(hovering ? Theme.failFg : Theme.dim)
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(hovering ? Theme.surfaceFor(Theme.fail) : Theme.subtle,
-                        in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+            .padding(.horizontal, 7).frame(height: 22)
+            .background(hovering ? Theme.surfaceFor(Theme.fail) : Theme.hover,
+                        in: RoundedRectangle(cornerRadius: 3, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain).pointingHand(enabled)
@@ -370,10 +316,10 @@ struct NativeKeyPill: View {
                     .lineLimit(1).truncationMode(.middle).frame(width: 108, alignment: .leading)
             }
             .foregroundStyle(hovering ? Theme.ink : Theme.muted)
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(hovering ? Theme.subtle2 : .clear,
-                        in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
+            .padding(.horizontal, 7).frame(height: 22)
+            .background(hovering ? Theme.hover : .clear,
+                        in: RoundedRectangle(cornerRadius: 3, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 3, style: .continuous).strokeBorder(Theme.ruleStrong))
         }
         .buttonStyle(.plain).pointingHand(enabled).onHover { hovering = $0 && enabled }
         .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
@@ -398,35 +344,11 @@ struct NativeScrollRail<Content: View>: View {
     }
 }
 
-/// The HTML app's compact menu trigger, with AppKit retaining menu keyboard behavior.
+/// Earlier name for `Pick`.
 struct NativeMenuSelect<Value: Hashable>: View {
     var title: String
     @Binding var selection: Value
     var options: [(value: Value, label: String)]
     var width: CGFloat? = nil
-    @Environment(\.isEnabled) private var enabled
-    @State private var hovering = false
-    var body: some View {
-        Menu {
-            ForEach(options, id: \.value) { option in
-                Button { selection = option.value } label: {
-                    if option.value == selection { Label { Text(option.label) } icon: { NativeIcon("check", size: 14) } }
-                    else { Text(option.label) }
-                }
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Text(options.first(where: { $0.value == selection })?.label ?? title).lineLimit(1)
-                if width != nil { Spacer(minLength: 0) }
-                NativeIcon("chevron-down", size: 12).foregroundStyle(Theme.muted)
-            }
-            .font(Theme.ui(12)).foregroundStyle(hovering ? Theme.ink : Theme.dim)
-            .padding(.horizontal, 11).frame(width: width, height: 30)
-            .background(hovering ? Theme.subtle2 : Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1))
-        }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        .opacity(enabled ? 1 : 0.45).onHover { hovering = $0 && enabled }
-        .pointingHand(enabled).accessibilityLabel(title)
-    }
+    var body: some View { Pick(title: title, selection: $selection, options: options, width: width) }
 }

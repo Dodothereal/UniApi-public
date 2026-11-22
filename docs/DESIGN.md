@@ -1,43 +1,137 @@
-# Native interface conventions
+# Native interface: the Meter design language
 
-The native interface uses the shared components in `NativeComponents.swift`,
-the `Theme` tokens and `T3Button` styles in `LegacyTheme.swift`, and the bundled
-Lucide icon renderer in `NativeIcon.swift`. Use these components for typography,
-color, button sizing, hover states, radii and borders. Theme overrides and the
-Light/Dark variants are described in [Settings](SETTINGS.md).
+UniApi measures things: latency, tokens per second, tokens, cost, watts, RPM,
+charge, keystrokes, minutes of audio. The interface is a bench of precision
+instruments, not a dashboard of boxes. Five rules hold on every screen.
 
-Normal pages use `NativePage` and its finite scrolling viewport. Keep header
-actions in that page's normal flow. Workbenches can use their existing frame
-when a transcript, project rail or inspector needs the available height. Review
-the complete page at wide and narrow sizes; a small isolated component can hide
-container sizing problems.
+1. **Reading first.** A page opens with the one reading or state the person
+   came for, set large. The one action the page exists for sits top right as
+   the only primary button. Detail follows as a ledger, most used first.
+   No hero copy and no paragraph under a title; an explanation is a one-line
+   hint, a tooltip or an empty state.
+2. **Ruled ledger, not cards.** Content sits on the canvas on one grid.
+   Alignment, whitespace and hairline rules give it structure. A filled well is
+   for something you edit, plot, play or drop onto. Never a grid of bordered
+   boxes, and never a box inside a box.
+3. **The tick scale.** One motif recurs: graduated ticks, as on a ruler or
+   gauge. It appears under the page title, on meters and sliders, on chart
+   axes, on dials and in the mark. A two-point signal tick marks what is
+   selected.
+4. **Chrome is monochrome, color is data.** Buttons, navigation and selection
+   are ink on graphite or paper. Hue belongs to data series and status. One
+   signal color (orange by default) marks live, now, selected and focused, and
+   is never used as a series color or a decorative fill.
+5. **Motion explains.** Content is on screen at once: retained data shows
+   immediately and updates in place, with no skeletons and no blocking
+   spinners. Motion is short and causal. The selection marker slides, numbers
+   roll, meters sweep from their previous value, a panel grows from the
+   control that opened it. Nothing loops unless something is live.
+
+## Tokens (`Theme.swift`)
+
+| Role | Token | Graphite | Paper |
+| --- | --- | --- | --- |
+| Bench | `Theme.canvas` | `#0F1012` | `#F4F3EF` |
+| Index | `Theme.sidebarBG` | `#0A0B0C` | `#EBEAE5` |
+| Filled ground | `Theme.well`, `Theme.field`, `Theme.popover` | `#181A1D` | `#FFFFFF` |
+| Hover, pressed | `Theme.hover`, `Theme.pressed` | white 5%, 9% | black 4.5%, 8% |
+| Text | `Theme.ink`, `.dim`, `.muted`, `.faint` | `#F0F1F2` to `#53585F` | `#131416` to `#A9ABAF` |
+| Hairlines | `Theme.rule`, `Theme.ruleStrong` | white 9%, 17% | black 10%, 20% |
+| Signal | `Theme.signal` | `#FF5A1F` | `#E5480C` |
+| Status | `Theme.ok`, `.warn`, `.fail` and their `Fg` text variants | | |
+| Plots | `Theme.track`, `.grid`, `.baseline`, `.crosshair`, `Theme.pairPalette` | | |
+
+Radii are 5 for controls, 7 for wells and 12 for sheets. Shadows belong only
+to popovers and sheets. No gradients and no translucency. A person can override
+the base tokens under Settings; see [Settings](SETTINGS.md). Use the tokens,
+never a literal color.
+
+Older names such as `Theme.accent`, `Theme.surface` and `Theme.border` still
+resolve to the tokens above so that every file keeps compiling. Do not use
+them in new code.
+
+## Type
+
+Three voices, all system fonts.
+
+| Voice | Call | Use |
+| --- | --- | --- |
+| Expanded | `Theme.display()` 24 | Page title, a named state set large |
+| Expanded | `Theme.heading()` 12 | Section name on its rule |
+| Expanded, uppercase | `MicroLabel` 9.5 | Eyebrows, column heads, units |
+| Condensed numerals | `Theme.readout(_:)` at 54, 34, 24 or 17 | Every measured reading |
+| Plain | `Theme.ui(13)`, `ui(12.5)` muted, `ui(11.5)` | Body, secondary, fine print |
+| Monospace | `Theme.mono(10.5...12)` | Identifiers, model names, timestamps, code |
+
+Numbers in a column are right-aligned with tabular digits and their unit
+follows as a `MicroLabel`. Do not introduce other sizes.
+
+## Layout
+
+A four-point base with steps 4, 8, 12, 16, 24, 32 and 48. `NativePage` supplies
+the margin, the 960-point content column and the gap between sections. All
+content shares one left edge and one right edge. Row heights are 28 dense,
+36 standard and 44 for a setting. `ColumnFlow` gives equal columns that wrap on
+a narrow page; do not hand-roll `GeometryReader` breakpoints for that.
+
+## The kit (`Kit.swift`)
+
+| Component | Purpose |
+| --- | --- |
+| `NativePage(title:eyebrow:readiness:) { actions } content: { }` | Page container: eyebrow, expanded title, actions, tick rule |
+| `Band(title:hint:) { trailing } content: { }` | A named section; the title sits on a rule |
+| `Readout`, `ReadoutStrip` | A reading: label, condensed numerals, unit, one line of detail |
+| `LedgerHead`, `LedgerRow(selected:action:)` | Column heads and ruled rows; hover bleeds into the margin |
+| `OptionRow(title:detail:) { control }` | One setting with its control on the right |
+| `Well` | Filled ground for an editor, plot, transcript or drop target |
+| `Press(.primary / .secondary / .quiet / .danger)` | Button styles; one primary per page |
+| `IconPress` | 28-point square glyph button |
+| `Stops` | Choose one of a few; a signal bar slides to the choice |
+| `Flip` | Two-position switch |
+| `Entry`, `Pick` | Text field and menu trigger |
+| `Tag`, `KeyCap`, `MicroLabel` | Identifier or state chip, a key, an engraved caption |
+| `Scale`, `Dial` | Linear meter and 240-degree gauge with ticks |
+| `Rule`, `TickRule`, `TickScale` | Hairline, ruler hairline, the tick shape itself |
+| `Blank` | Empty or failed-read state |
+| `Notice(text:tone:)` | Inline message |
+
+`Compat.swift` keeps the earlier names (`Card`, `T3Button`, `T3Segmented`,
+`SettingRow` and so on) drawing with the kit until every page is rebuilt. New
+code uses the kit names. Icons come from the bundled Lucide renderer in
+`NativeIcon.swift` at 1.6 to 1.75 stroke; check that a name exists in
+`NativeIconPaths.swift` before using it.
 
 ## Empty states
 
-Keep the explanation and its next action in one centered group. `NativeEmptyState`
-accepts an optional action title, icon and closure, with the action separated
-from the explanatory text by 16 points. Its button remains a separate accessible
-control. Do not place an action after the empty state's outer padding; that
-makes it look unrelated to the explanation.
+`Blank` sits on the content edge where the content will be, not centered in a
+void: a dashed glyph tile, one sentence saying what is missing, and at most one
+action that fixes it. A failed read uses the same shape with a secondary Retry.
+An empty page still shows its structure (section names, column heads) so the
+person can see what will appear.
 
-Speed's provider setup and Results' Benchmark navigation use this group. The
-free-test action has secondary emphasis and is unavailable when no providers
-are configured. Code omits its project rail after a successful read returns
-no projects; the full workspace then offers Add project. Loading, read failures
-and existing projects keep their normal project rail.
+## The shell
 
-Home's destination grid reserves at least 140 points plus its density-scaled
-horizontal padding per card. It uses one, two or four columns as that space is
-available, so destination names do not break mid-word to fit a four-column row.
+The index is 212 points wide and collapses with Command-B to an icon rail
+rather than disappearing. Rows are 28 points with a live reading on the right
+where the page has one. The selected row carries the signal tick, and that one
+marker slides between rows. Command-K opens the jump palette (pages and shell
+commands); Command-1 to Command-9 open the first nine visible pages. The footer
+states where Claude Code is routed and whether the shim is up. Order, hidden
+pages, readings and width remain preferences.
+
+Changing page never animates the page tree: the destination appears complete.
+Only the index marker moves.
 
 ## Review scope
 
-Use source-bound native page renders in Light/Dark at representative sizes.
-Keep synthetic or empty data labelled. An invisible render can establish layout;
-it cannot establish real input, compositor smoothness or service readiness.
-Exercise the relevant controls separately and preserve the user's settings.
-Motion must respect both the app preference and macOS Reduce Motion. Do not
-add frame timers or repeat entrance animations on background refreshes.
+Review the complete page in Graphite and Paper at wide and narrow sizes; an
+isolated component hides container sizing problems. Keep synthetic or empty
+data labelled. An invisible render can establish layout; it cannot establish
+real input, compositor smoothness or service readiness. Exercise the relevant
+controls separately and preserve the user's settings. Motion must respect both
+the app preference and macOS Reduce Motion. Do not add frame timers or repeat
+entrance animations on background refreshes. Keep keyboard access, header
+traits and selected traits on anything rebuilt.
 
 ## Welcome guide
 

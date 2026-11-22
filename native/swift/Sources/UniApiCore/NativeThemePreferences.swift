@@ -35,8 +35,8 @@ public struct NativeThemePreferences: Equatable, Sendable {
             }
         }
         public func defaultHex(_ variant: Variant) -> String {
-            let light = ["FCFCFC", "FFFFFF", "FFFFFF", "FCFCFC", "18181B", "47464E", "71717B", "1447E6", "1447E6", "FFFFFF", "E4E4E7", "D4D4D8", "FFFFFF", "F1F1F4", "047857", "BB4D00", "C10007"]
-            let dark = ["0A0A0A", "111111", "191919", "0A0A0A", "F5F5F5", "A8A8A8", "818181", "346BF1", "8FB2FF", "FFFFFF", "FFFFFF", "FFFFFF", "FFFFFF", "191A1D", "00D492", "FFB900", "FF6467"]
+            let light = ["F4F3EF", "FFFFFF", "FFFFFF", "EBEAE5", "131416", "44474C", "73767C", "E5480C", "B93A06", "FFFFFF", "DCDBD7", "C4C3BF", "FFFFFF", "DDDCD6", "14703C", "8A6100", "B01235"]
+            let dark = ["0F1012", "181A1D", "1D2024", "0A0B0C", "F0F1F2", "B0B4BA", "7F848C", "FF5A1F", "FF9466", "160B05", "25262A", "38393D", "16181B", "1A1C20", "4ADE8F", "FFCB2E", "FF6482"]
             let index = Self.allCases.firstIndex(of: self)!
             return (variant == .light ? light : dark)[index]
         }
