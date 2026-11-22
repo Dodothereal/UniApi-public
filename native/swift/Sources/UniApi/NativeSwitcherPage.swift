@@ -481,14 +481,16 @@ struct NativeSwitcherPage: View {
         func step(_ id: String, _ title: String, _ value: JSONValue, _ actionTitle: String, _ icon: String, enabled: Bool = true, _ operation: String, _ values: JSONObject = [:]) -> NativeSetupStep {
             NativeSetupStep(id: id, title: title, detail: value.isNull ? "Not checked" : "", done: value == true, enabled: enabled && !busy, actionTitle: actionTitle, actionIcon: icon, action: { run(operation, values) })
         }
+        // Connect needs a running runtime with verified tools, so it is last;
+        // "configured" only means bridge settings exist, not that Codex uses them.
         return [
-            step("installed", "Install the bridge", bridge["installed"], "Open Web GPT", "globe", "codexAction", ["action": "setup"]),
-            step("configured", "Point Codex at the bridge", bridge["configured"], "Connect", "plug",
-                 enabled: !(native["connected"] == true || !native["error"].isNull || !native["phase"].isNull), "codexAction", ["action": "connect"]),
+            step("installed", "Install and configure the bridge", bridge["installed"] == true ? bridge["configured"] : bridge["installed"], "Open Web GPT", "globe", "codexAction", ["action": "setup"]),
             step("running", "Start the runtime", bridge["running"], "Start", "play", "codexAction", ["action": "start"]),
             step("signin", "Sign in to ChatGPT in the browser", bridge["signInChecked"], "Open Web GPT", "globe", "codexAction", ["action": "setup"]),
             step("tools", "Verify coding tools", bridge["toolsVerified"], "Verify", "shield-check",
-                 enabled: state.codex["installed"] == true && state.codex["configError"].isNull && bridge["mode"] == "full" && bridge["busy"] == false && bridge["signInChecked"] == true, "verifyCodexTools")
+                 enabled: state.codex["installed"] == true && state.codex["configError"].isNull && bridge["mode"] == "full" && bridge["busy"] == false && bridge["signInChecked"] == true, "verifyCodexTools"),
+            step("integrated", "Point Codex at the bridge", bridge["integrated"], "Connect", "plug",
+                 enabled: !(native["connected"] == true || !native["error"].isNull || !native["phase"].isNull), "codexAction", ["action": "connect"])
         ]
     }
     private var bridgeSection: some View {
