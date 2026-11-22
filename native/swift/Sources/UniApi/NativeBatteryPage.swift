@@ -153,7 +153,7 @@ struct NativeBatteryPage: View {
                     }
                 }
                 .padding(.top, 4)
-                Text(status["battery"].isNull ? "Reading battery" : status["battery"]["externalConnected"].bool ? (status["battery"]["charging"].bool ? "Charging" : "Plugged in, not charging") : "On battery")
+                Text(status["battery"].isNull ? "Reading battery" : status["battery"]["externalConnected"].bool ? (status["battery"]["charging"].bool ? "Charging" : "Plugged in, not charging") : "Unplugged")
                     .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).padding(.top, 2)
             }
             VStack(alignment: .leading, spacing: 0) {
@@ -161,8 +161,10 @@ struct NativeBatteryPage: View {
                 MicroLabel("State")
                 Text(stateName).font(Theme.display()).tracking(-0.4).foregroundStyle(targetKnown ? Theme.ink : Theme.muted)
                     .lineLimit(1).minimumScaleFactor(0.7).padding(.top, 12)
-                Text(phase).font(Theme.ui(12.5)).foregroundStyle(Theme.muted).lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true).padding(.top, 8)
+                if let phaseNote {
+                    Text(phaseNote).font(Theme.ui(12.5)).foregroundStyle(Theme.muted).lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true).padding(.top, 8)
+                }
             }
             .accessibilityElement(children: .combine)
         }
@@ -254,6 +256,11 @@ struct NativeBatteryPage: View {
             "charging-to-limit": "Charging to \(target)%",
             "below-limit-idle": "Idle below \(target)%"
         ][status["phase"].string] ?? "Reading"
+    }
+    /// The sentence under the state, only where it says more than the name does.
+    private var phaseNote: String? {
+        guard targetKnown else { return nil }
+        return ["off", "holding", "holding-low", "charging-to-limit"].contains(status["phase"].string) ? nil : phase
     }
     private var phase: String {
         guard targetKnown else { return "Reading charge-limit policy" }
