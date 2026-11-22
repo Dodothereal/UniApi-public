@@ -48,10 +48,8 @@ struct NativePromptsPage: View {
     var body: some View {
         GeometryReader { geometry in
         let contentWidth = min(1500, geometry.size.width) - 2 * density.pageMargin
-        NativePage(title: "Prompts & Results", subtitle: "Keep full prompts and compare the files models made for them.", maxWidth: 1500, readiness: pageError != nil ? .failed : catalog.isNull || selected != nil && detail.isNull ? .pending : .ready, actions: {
-            Button { Task { await reload() } } label: {
-                HStack(spacing: 6) { NativeIcon("rotate-cw", size: 14); Text("Reload") }
-            }.buttonStyle(T3Button(.outline))
+        NativePage(title: "Prompts", maxWidth: 1500, readiness: pageError != nil ? .failed : catalog.isNull || selected != nil && detail.isNull ? .pending : .ready, actions: {
+            T3IconButton(icon: "rotate-cw", help: "Reload") { Task { await reload() } }
             Button { error = nil; promptEditor = NativePresentedValue(value: .null) } label: {
                 HStack(spacing: 6) { NativeIcon("plus", size: 14); Text("New prompt") }
             }.buttonStyle(T3Button(.primary))
@@ -101,13 +99,10 @@ struct NativePromptsPage: View {
             if prompts.isEmpty {
                 if catalog.isNull && error == nil { ShimmerText(text: "Loading prompts …") }
                 else {
-                    NativePromptEmptyState(icon: "file-text", title: error == nil ? "No prompts yet" : "Could not load prompts", detail: error == nil ? "Create a prompt to start collecting results." : "Try reloading your saved prompts.")
+                    NativePromptEmptyState(icon: "file-text", title: error == nil ? "No prompts yet" : "Could not load prompts", detail: "")
                 }
             }
             else {
-                SectionLabel(text: "Prompts") {
-                    NativeNumberText(text: "\(prompts.count) \(prompts.count == 1 ? "prompt" : "prompts")", font: Theme.ui(12), color: Theme.muted)
-                }
                 LazyVStack(spacing: 8) {
                     ForEach(prompts, id: \.self["id"]) { prompt in
                         NativePromptListRow(prompt: prompt, selected: selected == prompt["id"].string, onSelect: {

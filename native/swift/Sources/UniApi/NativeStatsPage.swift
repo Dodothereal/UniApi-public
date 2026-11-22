@@ -351,7 +351,7 @@ private struct NativeStatsContents: View {
                 }
             }
             if !payload["cache"].isNull { NativeCard {
-                NativeChartHeading(title: "Why this disagrees with /stats", caption: "Lifetime history and de-duplicated on-disk records measure different things.")
+                NativeChartHeading(title: "Lifetime and on-disk totals")
                 Text("Lifetime \(nativeStatsCount(nativeStatsGrand(payload["cache"]["totals"]))) · raw disk \(nativeStatsCount(payload["scan"]["rawGrand"].double)) · deduplicated disk \(nativeStatsCount(d["onDiskGrand"].double))")
                 Text("\(payload["scan"]["duplicates"].int) repeated blocks; \(payload["dayMatch"]["matched"].int)/\(payload["dayMatch"]["checked"].int) comparable UTC days agree.")
                 DisclosureGroup("How these totals differ") { Text("Claude's lifetime cache includes repeated content blocks and retained pruned history. Dated charts deduplicate response IDs. Only responses on UTC days after the cache watermark are added to the lifetime baseline.") }
@@ -361,7 +361,7 @@ private struct NativeStatsContents: View {
             if detail || payload["source"].string == "all" {
                 if detail && (benchmark["spend"]["calls"].int > 0 || !benchmark["trend"].array.isEmpty) {
                     Rectangle().fill(Theme.border).frame(height: 1).padding(.top, 6)
-                    NativeChartHeading(title: "Benchmarks for this model", caption: "UniApi benchmark records for this exact model and date range, across providers. Separate from coding-app usage.")
+                    NativeChartHeading(title: "Benchmarks for this model")
                 }
                 NativeStatsBenchmark(data: benchmark)
             }
@@ -399,7 +399,7 @@ private struct NativeStatsLedger: View {
     let totals: JSONValue
     private var rows: [(String, String)] { [("Fresh input", "input"), ("Output", "output"), ("Thinking (inside output)", "thinking"), ("Cache writes", "cacheWrite"), ("Cache reads", "cacheRead")].sorted { totals[$0.1].double > totals[$1.1].double } }
     var body: some View { NativeCard {
-        NativeChartHeading(title: "Where the tokens go", caption: "Five token kinds. Thinking is counted inside output; its share is measured against output.")
+        NativeChartHeading(title: "Token kinds")
         ForEach(Array(rows.enumerated()), id: \.element.1) { index, row in
             let (label, key) = row
             let denominator = key == "thinking" ? totals["output"].double : nativeStatsGrand(totals)
@@ -423,7 +423,7 @@ private struct NativeStatsModelBoard: View {
     @AppStorage("uniapi.stats.metric") private var metric = "tokens"
     private func value(_ row: JSONValue) -> Double { metric == "tokens" ? nativeStatsGrand(row["totals"]) : row["totals"][metric == "output" ? "output" : "messages"].double }
     var body: some View { NativeCard {
-        NativeChartHeading(title: "Models", caption: lifetime ? "\(models.count) served lifetime · pruned transcripts retain their totals." : "\(models.count) served this window.")
+        NativeChartHeading(title: "Models", caption: "")
         T3Segmented(options: [("tokens", "Tokens"), ("output", "Output")] + (lifetime ? [] : [("messages", "Responses")]), selection: metric) { metric = $0 }
         ForEach(Array(models.sorted { value($0) > value($1) }.enumerated()), id: \.offset) { index, row in
             Button { select(row["model"].string) } label: {
@@ -449,7 +449,7 @@ private struct NativeStatsModelBoard: View {
 private struct NativeStatsProjectBoard: View {
     let rows: [JSONValue], all: Bool
     var body: some View { NativeCard {
-        NativeChartHeading(title: "Projects", caption: !all && rows.count > 8 ? "Top 8 of \(rows.count) working directories." : "Working directories recorded by the selected apps.")
+        NativeChartHeading(title: "Projects", caption: !all && rows.count > 8 ? "Top 8 of \(rows.count) working directories." : "")
         ForEach(Array((all ? rows : Array(rows.prefix(8))).enumerated()), id: \.offset) { index, row in VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) { Text(String(format: "%02d", index + 1)).font(Theme.mono(10)).foregroundStyle(Theme.muted).frame(width: 18); Text(row["name"].string).font(Theme.mono(12, weight: .medium)).lineLimit(1).help(row["path"].string); Spacer(minLength: 2); Text("\(row["sessions"].int) sessions").font(Theme.ui(10.5)).foregroundStyle(Theme.muted); Text(nativeStatsCount(nativeStatsGrand(row["totals"]))).font(Theme.mono(12, weight: .medium)) }
             NativeGrowBar(fraction: nativeStatsGrand(row["totals"]) / max(1, rows.map { nativeStatsGrand($0["totals"]) }.max() ?? 0), color: Theme.pairColor(row["path"].string))
@@ -462,7 +462,7 @@ private struct NativeStatsHeat: View {
     let grid: [JSONValue]
     private var maximum: Double { grid.flatMap(\.array).map(\.double).max() ?? 0 }
     var body: some View { NativeCard {
-        NativeChartHeading(title: "When you work", caption: "Responses by local weekday and hour, brightest at your busiest hour.")
+        NativeChartHeading(title: "Hours")
         VStack(spacing: 3) {
         ForEach(0..<min(7, grid.count), id: \.self) { day in HStack(spacing: 3) { Text(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day]).frame(width: 35); ForEach(0..<24, id: \.self) { hour in let value = grid[day].array.count > hour ? grid[day].array[hour].double : 0; RoundedRectangle(cornerRadius: 2).fill(value > 0 ? Theme.accent.opacity(0.2 + 0.8 * value / max(1, maximum)) : Theme.track).frame(minWidth: 5, maxWidth: .infinity, minHeight: 12, maxHeight: 12).help("\(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][day]) \(hour):00: \(Int(value)) responses").accessibilityLabel("Day \(day + 1), hour \(hour), \(Int(value)) responses") } } }
         }
@@ -475,7 +475,7 @@ private struct NativeStatsHeat: View {
 private struct NativeStatsDrive: View {
     let summary: JSONValue
     var body: some View { NativeCard {
-        NativeChartHeading(title: "How you drive it", caption: "Thinking effort, subagents and server-side tools - the settings behind the numbers above.")
+        NativeChartHeading(title: "Effort and tools")
         ForEach(summary["effort"].object.keys.sorted(), id: \.self) { key in HStack { Text("Effort \(key)"); Spacer(); Text(summary["effort"][key].string).font(Theme.mono(12)) } }
         Rectangle().fill(Theme.border).frame(height: 1)
         fact("Subagent turns", value: summary["sidechainMessages"].int, detail: "\(nativeStatsCount(summary["sidechainTokens"].double)) tokens")

@@ -18,20 +18,19 @@ struct NativeResultsPage: View {
     var body: some View {
         GeometryReader { geometry in
         let contentWidth = max(0, min(1500, geometry.size.width) - 2 * density.pageMargin)
-        NativePage(title: "Results", subtitle: history ? "Historical records per provider and model, with links to their source runs." : cells.contains(where: \.browser) ? "One run per view. First response is a median; browser text timing and estimated tokens are labeled." : "One run per view. First token is a median; speed is the last successful throughput test.", maxWidth: 1500, readiness: state.busy ? .pending : !state.error.isEmpty ? .failed : state.payload.isNull ? .pending : .ready, actions: { headerActions }) {
+        NativePage(title: "Results", maxWidth: 1500, readiness: state.busy ? .pending : !state.error.isEmpty ? .failed : state.payload.isNull ? .pending : .ready, actions: { headerActions }) {
             VStack(alignment: .leading, spacing: 20) {
             if !state.error.isEmpty { NativeError(message: state.error) }
             if state.busy || state.payload.isNull {
-                if state.error.isEmpty { ShimmerText(text: "Loading matching result scope…", font: Theme.ui(12)) }
+                if state.error.isEmpty { ShimmerText(text: "Loading results", font: Theme.ui(12)) }
             }
             else if cells.isEmpty {
-                NativeEmptyState(title: "No results in this scope", detail: "Select models on Speed and start a run.", icon: "chart-bar",
-                                 actionTitle: "Benchmark", actionIcon: "gauge") {
+                NativeEmptyState(title: "No results", detail: "", icon: "chart-bar",
+                                 actionTitle: "Run a benchmark", actionIcon: "gauge") {
                     NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.speed)
                 }
             }
             else {
-                if history { Text("Speed and first-token records come from individual run summaries; each column can come from a different run. Reliability includes every test, including failures. Gap is measured at the recorded best speed.").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
                 if cells.contains(where: \.browser) { Text(BenchmarkMath.browserNote).font(Theme.ui(12)).foregroundStyle(Theme.muted) }
                 VStack(alignment: .leading, spacing: 10) {
                     if !history, let award = NativeResultCell.winner(cells) {
@@ -49,7 +48,7 @@ struct NativeResultsPage: View {
                 }
                 if state.tab == "charts" { rankingBoard; NativeResultsCharts(cells: cells, rows: state.curves, history: history, open: state.choose) }
                 else { NativeResultsComparison(cells: cells, history: history, availableWidth: contentWidth, open: state.choose) }
-                DisclosureGroup("Raw measurements, failures and transport details") {
+                DisclosureGroup("Raw rows") {
                     ForEach(Array(state.raw.filter { state.family.isEmpty || BenchmarkMath.family($0["model"].string) == state.family }.enumerated()), id: \.offset) { _, row in
                         DisclosureGroup(rawTitle(row)) {
                             Text(String(decoding: (try? row.encoded(pretty: true)) ?? Data(), as: UTF8.self)).font(Theme.mono(10)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
@@ -58,30 +57,21 @@ struct NativeResultsPage: View {
                 }
             }
             if !state.payload["runs"].array.isEmpty {
-                Rectangle().fill(Theme.border).frame(height: 1).padding(.top, 6)
-                HStack { Text("Runs").font(Theme.ui(14, weight: .medium)); Spacer(); Text("\(state.payload["runs"].array.count) runs").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
-                Card(padding: 0) { LazyVStack(spacing: 0) {
-                ForEach(state.payload["runs"].array, id: \.self["id"]) { run in
-                    VStack(spacing: 0) {
-                        Button { state.choose(run["id"].string) } label: {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    HStack(spacing: 7) {
-                                        Text(runStamp(run)).font(Theme.mono(12)).help(run["id"].string)
-                                        Text(run["tier"].string).font(Theme.mono(10)).foregroundStyle(Theme.muted).padding(.horizontal, 6).padding(.vertical, 2).background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                                    }
-                                    Text("\(run["pairs"].array.count) \(run["pairs"].array.count == 1 ? "pair" : "pairs") · took \(runDuration(run))").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                                }
-                                Spacer(minLength: 8)
-                                StatCount(count: run["ok"].int, label: "ok", color: Theme.okFg)
-                                StatCount(count: run["err"].int, label: "failed", color: Theme.failFg)
-                                Text(state.payload["scope"].string == run["id"].string ? "Viewing" : "View").font(Theme.ui(12, weight: .medium)).foregroundStyle(state.payload["scope"].string == run["id"].string ? Theme.okFg : Theme.muted).frame(width: 72).padding(.vertical, 5).background(state.payload["scope"].string == run["id"].string ? Theme.okFg.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusSm)).overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border, lineWidth: 1))
-                            }.padding(.horizontal, 14).padding(.vertical, 10).contentShape(Rectangle())
-                        }.buttonStyle(.plain).pointingHand().help("View run \(run["id"].string)")
-                        if run["id"].string != state.payload["runs"].array.last?["id"].string { Rectangle().fill(Theme.border).frame(height: 1) }
-                    }
+                NativeSection("Runs", count: String(state.payload["runs"].array.count)) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(state.payload["runs"].array, id: \.self["id"]) { run in
+                            let viewing = state.payload["scope"].string == run["id"].string
+                            NativeLedgerRow(height: 46, action: { state.choose(run["id"].string) }) {
+                                Text(runStamp(run)).font(Theme.num(13, weight: .medium)).foregroundStyle(viewing ? Theme.accent : Theme.ink).frame(minWidth: 150, alignment: .leading)
+                                Text(run["tier"].string.capitalized).font(Theme.ui(12)).foregroundStyle(Theme.muted).frame(width: 72, alignment: .leading)
+                                Text("\(run["pairs"].array.count) \(run["pairs"].array.count == 1 ? "pair" : "pairs") in \(runDuration(run))").font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
+                            } trailing: {
+                                if run["err"].int > 0 { Text("\(run["err"].int) failed").font(Theme.num(12, weight: .medium)).foregroundStyle(Theme.failFg) }
+                                Text("\(run["ok"].int) ok").font(Theme.num(12, weight: .regular)).foregroundStyle(Theme.muted).frame(width: 60, alignment: .trailing)
+                            }.help(run["id"].string)
+                        }
+                    }.padding(.top, -14)
                 }
-                } }
             }
             }
         }
@@ -98,8 +88,8 @@ struct NativeResultsPage: View {
     }
     private var reloadControls: some View {
         HStack(spacing: 8) {
-            Button { Task { await state.load() } } label: { HStack(spacing: 5) { NativeIcon("refresh-cw", size: 12); Text("Reload") } }.buttonStyle(T3Button()).help("Reload results")
-            Button { Task { await state.loadUsage(); showUsage = true } } label: { NativeIcon("database", size: 12) }.buttonStyle(T3Button()).help("Token usage").accessibilityLabel("Token usage")
+            T3IconButton(icon: "refresh-cw", help: "Reload") { Task { await state.load() } }
+            T3IconButton(icon: "database", help: "Token usage") { Task { await state.loadUsage(); showUsage = true } }
         }.fixedSize(horizontal: true, vertical: false)
     }
     private var scopeControls: some View {
@@ -155,7 +145,7 @@ struct NativeResultsPage: View {
             }
         }
     }
-    private var rankingHeading: some View { NativeChartHeading(title: "Ranking", caption: history ? "Each measurement retains its source run; reliability pools all tests. Browser timing and token rates remain estimated." : "Measured comparisons within this run. Missing observations are omitted from the ranking.") }
+    private var rankingHeading: some View { NativeChartHeading(title: "Ranking") }
     private var rankingOptions: some View { T3Segmented(options: [("ttft", cells.contains(where: \.browser) ? "First response" : "First token"), ("decode", "Output speed"), ("context", "Max input"), ("reliability", "Reliability"), ("gap", "Worst pause")], selection: ranking) { ranking = $0 } }
     private func rankingValue(_ cell: NativeResultCell) -> Double? {
         switch ranking { case "decode": return cell.speed; case "context": return cell.input; case "reliability": return cell.reliability; case "gap": return cell.gap; default: return cell.ttft }
@@ -175,22 +165,26 @@ struct NativeResultsPage: View {
     }
     private func headlineTiles(width: CGFloat) -> some View {
         let first = cells.filter { $0.ttft != nil }.min { $0.ttft! < $1.ttft! }, speed = cells.filter { $0.speed != nil }.max { $0.speed! < $1.speed! }, input = cells.filter { $0.input != nil }.max { $0.input! < $1.input! }, reliable = cells.filter { $0.reliability != nil }.max { $0.reliability! < $1.reliability! }
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: width >= 840 ? 4 : 2)) {
-            tile(cells.contains(where: \.browser) ? (history ? "Best response median" : "Fastest first response") : (history ? "Best first-token median" : "Fastest first token"), cell: first, value: first?.ttft, format: nativeBenchMilliseconds, metric: "latency")
-            tile(history ? "All-time top speed" : "Top output speed", cell: speed, value: speed?.speed, format: { String(format: "%.2f tok/s", $0) }, metric: "throughput")
-            tile("Largest input taken", cell: input, value: input?.input, format: nativeBenchTokens, metric: "context")
-            tile(history ? "All-tests reliability" : "Most reliable", cell: reliable, value: reliable?.reliability, format: { String(format: "%.0f%%", $0) }, metric: nil)
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 24, alignment: .top), count: width >= 700 ? 4 : 2), spacing: 20) {
+            tile(cells.contains(where: \.browser) ? "First response" : "First token", cell: first, value: first?.ttft, format: nativeBenchMilliseconds, metric: "latency")
+            tile("Output speed", cell: speed, value: speed?.speed, format: { String(format: "%.2f tok/s", $0) }, metric: "throughput")
+            tile("Largest input", cell: input, value: input?.input, format: nativeBenchTokens, metric: "context")
+            tile("Reliability", cell: reliable, value: reliable?.reliability, format: { String(format: "%.0f%%", $0) }, metric: nil)
         }
     }
     private func tile(_ label: String, cell: NativeResultCell?, value: Double?, format: @escaping (Double) -> String, metric: String?) -> some View {
-        Card(padding: 14) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) { StatusDot(color: cell.map { Theme.pairColor($0.id) } ?? Theme.accent, size: 5); Text(label).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1) }
-                NativeNumberText(text: value.map { (cell?.estimated == true && (metric == "throughput" || metric == "context") ? "~" : "") + format($0) + (metric == "context" && cell?.capped == false ? "+" : "") } ?? "—", font: Theme.mono(22, weight: .semibold))
-                Text(cell.map { $0.short + " on " + $0.value["provider_name"].string } ?? "No data").font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1)
-                if let cell, let metric, !cell.source(metric).isEmpty { Button("View source run") { state.choose(cell.source(metric)) }.buttonStyle(.link).font(Theme.ui(10.5)) }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
+            NativeNumberText(text: value.map { (cell?.estimated == true && (metric == "throughput" || metric == "context") ? "~" : "") + format($0) + (metric == "context" && cell?.capped == false ? "+" : "") } ?? "-", font: Theme.display(30))
+            HStack(spacing: 6) {
+                if let cell { Capsule().fill(Theme.pairColor(cell.id)).frame(width: 3, height: 11) }
+                Text(cell.map { $0.short } ?? "No data").font(cell == nil ? Theme.ui(12) : Theme.mono(11.5)).foregroundStyle(Theme.dim).lineLimit(1)
+                    .help(cell.map { $0.short + " on " + $0.value["provider_name"].string } ?? "")
+                if let cell, let metric, !cell.source(metric).isEmpty {
+                    Button { state.choose(cell.source(metric)) } label: { NativeIcon("arrow-up-right", size: 11) }.buttonStyle(.plain).foregroundStyle(Theme.accent).pointingHand().help("Open source run").accessibilityLabel("Open source run")
+                }
+            }
+        }.frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 

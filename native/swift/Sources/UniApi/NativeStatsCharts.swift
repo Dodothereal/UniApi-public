@@ -263,7 +263,7 @@ struct NativeStatsCumulative: View {
         let chart = projection.value(for: [.array(days), .string(measure)], build: project)
         NativeCard {
         HStack(alignment: .top, spacing: 16) {
-            NativeChartHeading(title: "Cumulative usage", caption: "Running total from dated records in this range.")
+            NativeChartHeading(title: "Cumulative usage")
             Spacer(minLength: 8)
             T3Segmented(options: [("tokens", "Tokens"), ("output", "Output"), ("messages", "Responses")], selection: measure) { measure = $0 }
         }
@@ -411,15 +411,11 @@ struct NativeStatsThroughput: View {
         if metric == .streaming && !NativeStatsThroughputPresentation.hasMeasurements(board) {
             NativeCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    NativeChartHeading(title: "Streaming speed needs token-arrival timestamps",
-                        caption: "These responses have token totals but no matching streaming clock. That is a history limitation, not zero speed. Tool waits and total response time cannot be used as streaming time.")
-                    Text("Antigravity and DeepSeek Harness can supply streaming clocks. Older Codex, Claude Code and other histories may not contain them.")
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    NativeChartHeading(title: "No streaming timestamps in this history",
+                        caption: "Token totals are recorded, but not when each token arrived.")
                     if NativeStatsThroughputPresentation.hasMeasurements(data) {
-                        Button("Show response averages instead") { metric = .response }
+                        Button("Show response averages") { metric = .response }
                             .buttonStyle(T3Button(.outline))
-                        Text("Response averages include latency and are a different measurement.")
-                            .font(Theme.ui(11)).foregroundStyle(Theme.muted)
                     }
                 }
             }
@@ -515,7 +511,7 @@ struct NativeStatsBenchmark: View {
         Group {
         if data["spend"]["calls"].int > 0 { NativeCard {
             let s = data["spend"]
-            NativeChartHeading(title: "What the benchmark spent", caption: "Tokens UniApi's own measuring pushed through each provider. Separate from coding-app usage.")
+            NativeChartHeading(title: "Benchmark tokens")
             HStack {
                 spendReading("Benchmark tokens", nativeStatsCount(s["input"].double + s["output"].double), value: s["input"].double + s["output"].double)
                 spendReading("Calls", nativeStatsCount(s["calls"].double) + " · \(s["runs"].int) runs · \(s["pairs"].array.count) targets")
@@ -526,7 +522,7 @@ struct NativeStatsBenchmark: View {
         } }
         if !data["trend"].array.isEmpty { NativeCard {
             HStack(alignment: .top, spacing: 16) {
-                NativeChartHeading(title: "First token over time", caption: "Median successful latency per provider/model/run. A rising line is a provider getting slower.")
+                NativeChartHeading(title: "First token over time")
                 Spacer(minLength: 8)
                 T3Segmented(options: [(true, "Log"), (false, "Linear")], selection: logarithmic) { logarithmic = $0 }
             }
@@ -543,7 +539,6 @@ struct NativeStatsBenchmark: View {
                     .accessibilityAddTraits(chart.isolation == key ? [.isSelected] : [])
                     .help(chart.isolation == key ? "Show every series" : "Show only " + key)
             } } }
-            Text("Median successful latency samples per provider/model/run. Benchmark history is separate from coding usage.").font(Theme.ui(11)).foregroundStyle(Theme.muted)
         } }
         }.onChange(of: chart.keys) { _, available in
             if let isolated, !available.contains(isolated) { self.isolated = nil }
