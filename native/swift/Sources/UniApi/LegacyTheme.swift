@@ -479,6 +479,13 @@ struct T3IconButton: View {
     @State private var hovering = false
     private var isHovering: Bool { hovering && enabled && visible }
 
+    init(system: String, help: String = "", size: CGFloat = 13, active: Bool = false, action: @escaping () -> Void) {
+        self.system = system; self.help = help; self.size = size; self.active = active; self.action = action
+    }
+    init(icon: String, help: String, size: CGFloat = 14, active: Bool = false, action: @escaping () -> Void) {
+        self.init(system: icon, help: help, size: size, active: active, action: action)
+    }
+
     var body: some View {
         Button(action: action) {
             NativeIcon(systemName: system, size: size)

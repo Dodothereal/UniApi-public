@@ -91,17 +91,16 @@ struct NativeSwitcherPage: View {
     private var tab: String { NativeSwitcherDisplayPolicies.engine(savedEngine) }
     init(runtime: NativeRuntime) { self.runtime = runtime; _state = StateObject(wrappedValue: NativeSwitcherModel(runtime: runtime)) }
     var body: some View {
-        NativePage(title: tab == "claude" ? "Claude Code" : "Codex", subtitle: tab == "claude" ? "What new Claude Code sessions talk to. Sessions already open keep their old route." : "Providers and models for Codex desktop and new CLI sessions.", readiness: state.readiness, actions: {
+        NativePage(title: "Switcher", readiness: state.readiness, actions: {
             HStack(spacing: 8) {
-                if tab == "claude" { NativeStatusDot(color: state.claude["shim"]["ok"] == true ? Theme.okFg : Theme.muted) }
-                Button { Task { await state.reload() } } label: { HStack(spacing: 6) { NativeIcon("rotate-cw", size: 12); Text("Reload") } }.disabled(state.busy)
-                if tab == "codex" { Button { run("codexAction", ["action": "open"]) } label: { HStack(spacing: 6) { NativeIcon("external-link", size: 12); Text("Open Codex") } }.disabled(state.controlsBusy) }
+                T3IconButton(icon: "rotate-cw", help: "Reload") { Task { await state.reload() } }.disabled(state.busy)
+                if tab == "codex" { T3IconButton(icon: "external-link", help: "Open Codex") { run("codexAction", ["action": "open"]) }.disabled(state.controlsBusy) }
+                T3Segmented(options: [("claude", "Claude Code"), ("codex", "Codex")], selection: tab) { savedEngine = $0 }
             }
         }) {
-            T3Segmented(options: [("claude", "Claude Code"), ("codex", "Codex")], selection: tab) { savedEngine = $0 }
             if !state.error.isEmpty { NativeError(message: state.error) }
             if !state.message.isEmpty { Text(state.message).font(Theme.ui(12)).foregroundStyle(Theme.muted).textSelection(.enabled) }
-            if state.claude.isNull || state.codex.isNull { ShimmerText(text: "Reading native configuration…") }
+            if state.claude.isNull || state.codex.isNull { ShimmerText(text: "Reading configuration") }
             else if tab == "claude" { claude }
             else { codex }
         }
@@ -110,72 +109,60 @@ struct NativeSwitcherPage: View {
     }
     private func run(_ operation: String, _ values: JSONObject = [:]) { Task { _ = await state.act(operation, values) } }
     private var claude: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            NativeCard {
-                HStack(spacing: 14) {
-                    NativeIcon(state.claude["snapshot"]["baseUrl"].string.isEmpty ? "sparkle" : "git-branch", size: 17)
-                        .foregroundStyle(Theme.accent).frame(width: 40, height: 40)
-                        .background(Theme.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
+        let gateway = !state.claude["snapshot"]["baseUrl"].string.isEmpty
+        let shimUp = state.claude["shim"]["ok"] == true
+        return VStack(alignment: .leading, spacing: 30) {
+            // The current route, stated once and large. Everything else on the
+            // page is a way to change it.
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(state.claude["currentName"].string).font(Theme.ui(18, weight: .semibold))
-                        Text(state.claude["snapshot"]["model"].string.isEmpty ? "No gateway · Claude Code picks its own models" : state.claude["snapshot"]["model"].string).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                        Text("Route").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                        NativeNumberText(text: state.claude["currentName"].string, font: Theme.display(34), isolateLayout: true).lineLimit(1).minimumScaleFactor(0.6)
+                        Text((state.claude["snapshot"]["model"].string.isEmpty ? "Claude Code default model" : state.claude["snapshot"]["model"].string))
+                            .font(state.claude["snapshot"]["model"].string.isEmpty ? Theme.ui(12.5) : Theme.mono(12)).foregroundStyle(Theme.dim).lineLimit(1).textSelection(.enabled)
+                        Text(gateway ? state.claude["snapshot"]["baseUrl"].string : "api.anthropic.com").font(Theme.mono(11.5)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                     }
                     Spacer(minLength: 8)
-                    if !state.claude["snapshot"]["baseUrl"].string.isEmpty {
-                        Button("Restore subscription") { run("restore") }.disabled(state.busy)
-                    }
+                    if gateway { Button("Restore subscription") { run("restore") }.disabled(state.busy) }
                 }
-            }
-            VStack(alignment: .leading, spacing: 20) {
-                SettingRow(title: "Model", desc: "Gateways need an explicit model ID; the subscription uses its own default.") {
-                    Text(state.claude["snapshot"]["model"].string.isEmpty ? "not set" : state.claude["snapshot"]["model"].string).font(Theme.mono(12)).foregroundStyle(Theme.muted).lineLimit(1).frame(maxWidth: 240, alignment: .trailing)
-                }
-                SettingRow(title: "Thinking effort", desc: "Applies to new Claude sessions.") {
+                HStack(spacing: 12) {
+                    Text("Effort").font(Theme.ui(12)).foregroundStyle(Theme.muted)
                     T3Segmented(options: [("", "Default")] + state.claude["efforts"].array.map { ($0.string, $0.string.capitalized) }, selection: state.claude["snapshot"]["effort"].string, enabled: !state.busy) { run("effort", ["effort": $0.isEmpty ? .null : .string($0)]) }
+                        .help("Applies to new Claude Code sessions")
+                    Spacer(minLength: 0)
+                }.padding(.leading, -2)
+            }.padding(.top, 14)
+            NativeSection("Providers", count: String(state.claude["providers"].array.count + 1), trailing: {
+                HStack(spacing: 10) {
+                    if state.claude["shim"]["owned"] == true { Button("Stop shim") { run("stopShim") }.buttonStyle(T3Button(.ghost)).disabled(state.busy) }
+                    else if !shimUp {
+                        NativeStatusText(text: state.claude["shim"]["legacyPresent"] == true ? "Legacy listener" : "Shim down", color: state.claude["shim"]["legacyPresent"] == true ? Theme.warnFg : Theme.failFg)
+                        Button("Start shim") { run("startShim") }.disabled(state.busy)
+                    }
+                    Button { addProvider = true } label: { HStack(spacing: 6) { NativeIcon("plus", size: 12); Text("Add") } }.disabled(state.busy)
                 }
-                SettingRow(title: "Base URL", desc: "An empty base URL uses the real Anthropic API.") {
-                    Text(state.claude["snapshot"]["baseUrl"].string.isEmpty ? "api.anthropic.com" : state.claude["snapshot"]["baseUrl"].string).font(Theme.mono(12)).foregroundStyle(Theme.muted).lineLimit(1).frame(maxWidth: 240, alignment: .trailing)
-                }
-            }
-            Rectangle().fill(Theme.border).frame(height: 1)
-            VStack(alignment: .leading, spacing: 12) {
-                SectionLabel(text: "Providers") {
-                    Button { addProvider = true } label: { HStack(spacing: 6) { NativeIcon("plus", size: 12); Text("Add provider") } }.disabled(state.busy)
-                }
-                Text("API providers can also serve Claude Code. Use switches to it; Enable auto-detects the wire format of one that is benchmark-only.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                Card(padding: 0) {
-                    NativeSwitcherListRow(active: state.claude["snapshot"]["baseUrl"].string.isEmpty) {
+            }) {
+                VStack(spacing: 0) {
+                    NativeSwitcherListRow(active: !gateway) {
                         HStack(spacing: 11) {
-                            NativeIcon("sparkle", size: 15).foregroundStyle(Theme.muted).frame(width: 30)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Anthropic subscription").font(Theme.ui(14, weight: .medium))
-                                Text("No gateway · Claude Code picks its own models").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Anthropic subscription").font(Theme.ui(13.5, weight: .medium))
+                                Text("Direct").font(Theme.ui(12)).foregroundStyle(Theme.muted)
                             }
                             Spacer()
-                            if state.claude["snapshot"]["baseUrl"].string.isEmpty { activeBadge }
+                            if !gateway { activeBadge }
                         }
                     }
                     ForEach(state.claude["providers"].array, id: \.self["id"]) { provider in
-                        Rectangle().fill(Theme.border).frame(height: 1)
                         providerRow(provider)
                     }
-                }
-                if state.claude["providers"].array.contains(where: { !$0["format"].isNull }) {
-                    Text("Text probes check replies only. Responses and coding tools have separate verification.").font(Theme.ui(11)).foregroundStyle(Theme.muted)
-                }
-            }
-            Rectangle().fill(Theme.border).frame(height: 1)
-            SettingRow(title: "Translation shim", desc: state.claude["shim"]["ok"] == true ? "Swift listener is available." : state.claude["shim"]["legacyPresent"] == true ? "The existing legacy listener was preserved." : "Swift listener is unavailable.") {
-                HStack(spacing: 8) {
-                    StatusDot(color: state.claude["shim"]["ok"] == true ? Theme.okFg : Theme.muted, size: 7)
-                    if state.claude["shim"]["owned"] == true { Button("Stop owned shim") { run("stopShim") }.disabled(state.busy) }
-                    else if state.claude["shim"]["ok"] != true { Button("Start native shim") { run("startShim") }.disabled(state.busy) }
-                }
+                }.padding(.top, -14)
             }
         }
     }
     private var activeBadge: some View {
-        HStack(spacing: 5) { NativeIcon("check", size: 12); Text("Active") }.font(Theme.ui(11.5, weight: .medium)).foregroundStyle(Theme.okFg).frame(width: 78, alignment: .trailing)
+        Text("In use").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 78, alignment: .trailing)
     }
     private func providerRow(_ provider: JSONValue) -> some View {
         let id = provider["id"].string, chosen = chosenModel(provider)
@@ -199,15 +186,10 @@ struct NativeSwitcherPage: View {
         }
     }
     private func providerIdentity(_ provider: JSONValue) -> some View {
-        HStack(spacing: 11) {
-            NativeIcon(provider["directUrl"].isNull ? "git-branch" : "external-link", size: 15).foregroundStyle(state.claude["current"] == provider["id"] ? Theme.accent : Theme.muted).frame(width: 30)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 7) {
-                        Text(provider["name"].string).font(Theme.ui(14, weight: .medium))
-                        if !provider["format"].isNull { Text(provider["format"].string).font(Theme.mono(11)).foregroundStyle(provider["format"] == "anthropic" ? Theme.okFg : Theme.warnFg) }
-                    }
-                    Text(provider["format"].isNull ? "Benchmark-only · not wired for Claude Code yet" : "\(provider["models"].array.count) models · " + (provider["directUrl"].isNull ? "via shim" : "direct")).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                }
+        VStack(alignment: .leading, spacing: 3) {
+            Text(provider["name"].string).font(Theme.ui(13.5, weight: .medium))
+            Text(provider["format"].isNull ? "Benchmark only" : [provider["format"].string, provider["directUrl"].isNull ? "via shim" : "direct", "\(provider["models"].array.count) models"].joined(separator: " · "))
+                .font(Theme.ui(12)).foregroundStyle(Theme.muted)
         }
     }
     private func providerRowActions(_ provider: JSONValue, id: String, chosen: String) -> some View {
@@ -217,6 +199,7 @@ struct NativeSwitcherPage: View {
                     } else { Color.clear.frame(width: 190, height: 1) }
                     Group {
                         if provider["format"].isNull { Button("Enable") { run("provider", ["operation": "adopt", "id": provider["id"]]) } }
+                        else if state.claude["current"] == provider["id"] && chosen == state.claude["snapshot"]["model"].string { activeBadge }
                         else { Button("Use") { run("applyAndProbe", ["id": provider["id"], "model": .string(chosen)]) }.buttonStyle(T3Button(.primary)) }
                     }.frame(width: 78, alignment: .trailing).disabled(state.busy)
                     Button { run("provider", ["operation": "refresh", "id": provider["id"]]) } label: { NativeIcon("rotate-cw", size: 13) }.buttonStyle(T3Button(.ghost)).help("Refresh models").accessibilityLabel("Refresh models for " + provider["name"].string).frame(width: 28).disabled(state.busy)
@@ -244,14 +227,13 @@ struct NativeSwitcherPage: View {
             NativeCard {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("Default in config").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                        Text(state.codex["current"]["model"].string.isEmpty ? "Native model default" : state.codex["current"]["model"].string).font(Theme.ui(18, weight: .semibold)).textSelection(.enabled)
+                        Text("Default model").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                        Text(state.codex["current"]["model"].string.isEmpty ? "Codex default" : state.codex["current"]["model"].string).font(Theme.display(34)).lineLimit(1).minimumScaleFactor(0.6).textSelection(.enabled)
                         Text([state.codex["current"]["source"].string, state.codex["current"]["effort"].string.isEmpty ? "default effort" : state.codex["current"]["effort"].string].filter { !$0.isEmpty }.joined(separator: " · ")).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
                     }
                     Spacer()
-                    Text(state.codex["installed"] == true ? "Codex installed" : "Codex not found").font(Theme.ui(11)).foregroundStyle(Theme.muted).padding(.horizontal, 7).padding(.vertical, 4).background(Theme.subtle, in: RoundedRectangle(cornerRadius: 5))
+                    if state.codex["installed"] != true { NativeStatusText(text: "Codex not found", color: Theme.warnFg) }
                 }
-                Text("Already-open tasks can keep their previous model. Reload Codex after a change when requested.").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
             }
             ForEach(Array(state.codex["warnings"].array.enumerated()), id: \.offset) { _, warning in HStack(alignment: .top, spacing: 8) { NativeIcon("triangle-alert", size: 13); Text(warning.string) }.font(Theme.ui(12)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true) }
             nativeRoutingSection
@@ -264,9 +246,8 @@ struct NativeSwitcherPage: View {
     }
     private var nativeRoutingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionLabel("UniApi native API routing")
+            SectionLabel("Native routing")
             NativeCard {
-                Text("Use API providers and ChatGPT subscription models with UniApi's background service. Codex Web GPT is optional.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
                 HStack(spacing: 18) {
                     readiness("Connected", state.codex["native"]["connected"])
                     readiness("Service ready", state.codex["native"]["running"])
@@ -278,7 +259,6 @@ struct NativeSwitcherPage: View {
                     Button("Restore direct Codex") { run("codexAction", ["action": "restore"]) }
                         .disabled(state.controlsBusy || state.codex["restoreAvailable"] != true)
                 }
-                Text("Connecting hands off an idle Web route and keeps the selected default, providers and workers. Reload Codex when requested.").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
             }
         }
     }
@@ -310,7 +290,6 @@ struct NativeSwitcherPage: View {
     private var catalogSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             SectionLabel("Models in Codex")
-            Text("Keep native and API models in one picker, with Web models when the optional bridge is connected. One native row is reserved; select at most four preferred workers. Existing chats retain their current roster until reloaded.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
             VStack(alignment: .leading, spacing: 8) {
                 let providers = state.catalogDraft.visibleProviders(state.codex["catalog"]["providers"].array)
                 HStack {
@@ -318,9 +297,6 @@ struct NativeSwitcherPage: View {
                     Spacer()
                     Button { addProvider = true } label: { HStack(spacing: 6) { NativeIcon("plus", size: 12); Text("Add provider") } }
                         .disabled(state.controlsBusy)
-                }
-                if providers.isEmpty {
-                    Text("Add a provider to set up its API models for Codex.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
                 }
                 ForEach(providers, id: \.self["id"]) { provider in
                     HStack(alignment: .top, spacing: 8) {
@@ -347,11 +323,10 @@ struct NativeSwitcherPage: View {
                     }
                 }.frame(maxHeight: 288)
             }
-            if state.catalogDraft.workers.count >= 4 { Text("All four preferred worker slots are full. You can still add a model; remove a worker to select it.").font(Theme.ui(11)).foregroundStyle(Theme.muted) }
             if let issue = codexCatalogIssue { Text(issue).font(Theme.ui(11)).foregroundStyle(Theme.warnFg) }
             HStack(spacing: 12) {
-                Button("Save catalog and workers") { run("catalog", state.catalogDraft.body) }.buttonStyle(T3Button(.primary)).disabled(state.controlsBusy || !state.catalogDraft.dirty || state.catalogDraft.workers.count > 4 || codexCatalogIssue != nil)
-                Text(state.catalogDraft.dirty ? "Unsaved catalog changes" : "Catalog matches saved settings").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
+                Button("Save") { run("catalog", state.catalogDraft.body) }.buttonStyle(T3Button(.primary)).disabled(state.controlsBusy || !state.catalogDraft.dirty || state.catalogDraft.workers.count > 4 || codexCatalogIssue != nil)
+                if state.catalogDraft.dirty { Text("Unsaved").font(Theme.ui(12)).foregroundStyle(Theme.warnFg) }
             }
         }
     }
@@ -517,7 +492,6 @@ struct NativeSwitcherPage: View {
                         }.disabled(state.controlsBusy || action == "restore" && state.codex["restoreAvailable"] != true || action == "stop" && state.codex["bridge"]["canStop"] != true || action == "connect" && (state.codex["native"]["connected"] == true || !state.codex["native"]["error"].isNull || !state.codex["native"]["phase"].isNull))
                     }
                 }
-                Text("Browser text access is separate from full local coding tools. Verification runs one explicit ephemeral tool check and stores evidence for the current bridge configuration.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
                 if NativeSwitcherDisplayPolicies.checksRunning(state.jobs) { Text("A Codex verification is queued or running. Follow it in Jobs before starting another check.").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
                 Button("Verify coding tools") { run("verifyCodexTools") }.disabled(state.controlsBusy || state.codex["installed"] != true || !state.codex["configError"].isNull || state.codex["bridge"]["mode"] != "full" || state.codex["bridge"]["busy"] != false || state.codex["bridge"]["signInChecked"] != true)
             }
@@ -531,7 +505,7 @@ struct NativeSwitcherPage: View {
     private var catalogWorkers: [(key: String, row: JSONValue)] { state.catalogDraft.visibleWorkers(state.codex["models"].array).filter { matches($0, workerQuery) }.map { (NativeSwitcherCatalogDraft.workerID($0), $0) } }
     private var selectedRow: JSONValue? { availableModels.first { $0.key == state.selection.key }?.row }
     private var selectionEffort: String { NativeSwitcherSelectionDraft.supportedEffort(selectedRow, state.selection.effort) }
-    private func readiness(_ label: String, _ value: JSONValue) -> some View { HStack { Text(label).font(Theme.ui(12)); Spacer(); Text(value.isNull ? "Unknown" : value.bool ? "Available" : "Not verified").font(Theme.mono(11)).foregroundStyle(value == true ? Theme.okFg : Theme.muted) } }
+    private func readiness(_ label: String, _ value: JSONValue) -> some View { NativeStatusText(text: label, color: value == true ? Theme.okFg : Theme.muted) }
 }
 
 /// Measure wrapped labels at their actual column width, then give every choice
@@ -564,9 +538,11 @@ private struct NativeSwitcherListRow<Content: View>: View {
     @State private var hovering = false
     var body: some View {
         VStack(alignment: .leading, spacing: 10) { content() }
-            .padding(.horizontal, 14).padding(.vertical, 11)
-            .background(active ? Theme.accent.opacity(0.09) : hovering ? Theme.subtle : .clear)
-            .onHover { hovering = $0 }
+            .padding(.vertical, 12).frame(minHeight: 56)
+            .overlay(alignment: .leading) {
+                if active { Capsule().fill(Theme.accent).frame(width: 3).padding(.vertical, 12).offset(x: -14) }
+            }
+            .overlay(alignment: .bottom) { NativeRule() }
     }
 }
 
@@ -638,7 +614,6 @@ private struct NativeSwitcherProviderForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Add API provider").font(Theme.ui(18, weight: .semibold)); T3Field(placeholder: "Name", text: $name); T3Field(placeholder: "Base URL", text: $url, mono: true); T3Field(placeholder: "Free API key", text: $key, mono: true)
-            Text("This explicitly discovers models and detects the provider format. Browser session credentials stay in Codex Web GPT.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
             if failed { NativeError(message: "Provider could not be added; inspect the Switcher message and retry explicitly.") }
             HStack { Button("Cancel") { dismiss() }.buttonStyle(T3Button(.outline)).keyboardShortcut(.cancelAction); Spacer(); Button(busy ? "Detecting…" : "Add and detect") { busy = true; Task { let ok = await save(["operation": "add", "name": .string(name), "url": .string(url), "key": .string(key)]); busy = false; if ok { dismiss() } else { failed = true } } }.buttonStyle(T3Button(.primary)).disabled(busy || name.isEmpty || url.isEmpty) }
         }.padding(20).frame(width: 650).background(Theme.bg).foregroundStyle(Theme.ink)

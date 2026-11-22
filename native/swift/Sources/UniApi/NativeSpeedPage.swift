@@ -17,43 +17,39 @@ struct NativeSpeedPage: View {
     init(runtime: NativeRuntime, model: NativeSpeedModel? = nil) { self.runtime = runtime; _state = StateObject(wrappedValue: model ?? NativeSpeedModel(runtime: runtime)) }
     private var browserSelected: Bool { state.catalog["providers"].array.contains { $0["transport"] == "chatgpt-web" && state.selection["included"].array.contains($0["id"]) } }
     var body: some View {
-        NativePage(title: "Benchmark", subtitle: "Measure first-token latency, decode speed, context ceilings and reliability against every provider you enable.", readiness: !state.error.isEmpty ? .failed : state.catalog.isNull || state.progress.isNull || state.free.isNull ? .pending : .ready, actions: {
+        NativePage(title: "Speed", readiness: !state.error.isEmpty ? .failed : state.catalog.isNull || state.progress.isNull || state.free.isNull ? .pending : .ready, actions: {
             HStack(spacing: 8) {
-                Button { Task { await state.reload() } } label: { HStack(spacing: 6) { NativeIcon("rotate-cw", size: 12); Text("Reload") } }
-                Button { showResults = true } label: { HStack(spacing: 6) { NativeIcon("chart-bar", size: 12); Text("Results") } }
+                T3IconButton(icon: "rotate-cw", help: "Reload") { Task { await state.reload() } }
+                T3IconButton(icon: "chart-bar", help: "Results") { showResults = true }
+                T3Segmented(options: [("quick", "Quick"), ("standard", "Standard"), ("deep", "Deep")], selection: state.selection["tier"].string, enabled: !state.anyRunning) { state.tier($0) }
+                if state.running { Button { Task { await state.cancel() } } label: { HStack(spacing: 6) { NativeIcon("square", size: 12); Text("Stop") } }.buttonStyle(T3Button(.destructive)) }
+                else {
+                    Button { Task { await state.run() } } label: {
+                        HStack(spacing: 6) { NativeIcon("zap", size: 13); Text("Run"); if !state.pairs.isEmpty { Text(String(state.pairs.count)).font(Theme.num(12)).opacity(0.6) } }
+                    }.buttonStyle(T3Button(.primary)).disabled(state.busy || state.freeRunning || state.pairs.isEmpty || !state.issues.isEmpty)
+                        .help(state.pairs.isEmpty ? "Select at least one model" : "Start a " + state.selection["tier"].string + " run on \(state.pairs.count) models")
+                }
             }
         }) {
             if !state.error.isEmpty { NativeError(message: state.error) }
-            VStack(alignment: .leading, spacing: 20) {
-                SettingRow(title: "Depth", desc: description, descVariants: BenchmarkTier.names.map(tierDescription)) {
-                    T3Segmented(options: [("quick", "Quick"), ("standard", "Standard"), ("deep", "Deep")], selection: state.selection["tier"].string, enabled: !state.anyRunning) { state.tier($0) }
-                }
-                SettingRow(title: "Selection", desc: "Providers run in parallel; models inside one provider run in sequence so a shared rate limit cannot skew the numbers.") { NativeNumberText(text: "\(state.pairs.count) models", font: Theme.mono(12)) }
-            }
-            if browserSelected { Text(BenchmarkMath.browserNote).font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
-            Rectangle().fill(Theme.border).frame(height: 1)
-            VStack(alignment: .leading, spacing: 12) {
-                SectionLabel(text: "Providers") { Text(state.catalog.isNull ? "Reading…" : "\(state.catalog["providers"].array.count) configured").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
-                if state.catalog.isNull { ShimmerText(text: "Reading provider configuration…") }
-                else if state.catalog["providers"].array.isEmpty {
-                    NativeEmptyState(title: "No providers yet", detail: "Add a provider in Switcher, then return here to choose models.",
-                                     actionTitle: "Add provider in Switcher") {
-                        NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.switcher)
-                    }
-                }
-                VStack(spacing: 2) { ForEach(state.catalog["providers"].array, id: \.self["id"]) { provider in providerRow(provider) } }.padding(.horizontal, -8)
-            }
-            HStack {
-                if state.running { Button { Task { await state.cancel() } } label: { HStack(spacing: 6) { NativeIcon("square", size: 12); Text("Stop run") } }.buttonStyle(T3Button(.destructive)) }
-                else { Button { Task { await state.run() } } label: { HStack(spacing: 6) { NativeIcon("zap", size: 14); Text("Start " + state.selection["tier"].string + " run") } }.buttonStyle(T3Button(.primary)).disabled(state.busy || state.freeRunning || state.pairs.isEmpty || !state.issues.isEmpty) }
-                Spacer()
-                NativeNumberText(text: "\(state.pairs.count) selected", font: Theme.mono(11), color: Theme.muted)
-            }
             ForEach(state.issues, id: \.self) { NativeError(message: $0) }
             if state.running || state.progress["progress"]["done"].bool || state.progress["interrupted"].bool { progressPanel }
-            if !state.progress["job"]["log"].array.isEmpty { DisclosureGroup("Persistent run log") { ScrollView { Text(state.progress["job"]["log"].array.map(\.string).joined(separator: "\n")).font(Theme.mono(11)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 240) } }
             if state.progress["job"]["status"] == "failed" { NativeError(message: state.progress["job"]["error"].string) }
-            Rectangle().fill(Theme.border).frame(height: 1)
+            if !state.progress["job"]["log"].array.isEmpty { DisclosureGroup("Run log") { ScrollView { Text(state.progress["job"]["log"].array.map(\.string).joined(separator: "\n")).font(Theme.mono(11)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 240) }.font(Theme.ui(12.5)).foregroundStyle(Theme.dim) }
+            tierFacts
+            if browserSelected { Text(BenchmarkMath.browserNote).font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+            NativeSection("Providers", count: state.catalog.isNull ? "" : String(state.catalog["providers"].array.count)) {
+                if state.catalog.isNull { ShimmerText(text: "Reading providers") }
+                else if state.catalog["providers"].array.isEmpty {
+                    NativeEmptyState(title: "No providers", detail: "", icon: "server",
+                                     actionTitle: "Add provider") {
+                        NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.switcher)
+                    }.padding(.top, -14)
+                }
+                VStack(spacing: 0) {
+                    ForEach(state.catalog["providers"].array, id: \.self["id"]) { provider in providerRow(provider); NativeRule() }
+                }.padding(.top, -14)
+            }
             freePanel
         }
         .nativePageTask {
@@ -73,46 +69,50 @@ struct NativeSpeedPage: View {
         .sheet(isPresented: $showResults) { NativeResultsPage(runtime: runtime).frame(width: 1250, height: 800) }
         .sheet(item: $editor) { item in NativeSpeedProviderEditor(provider: item.value, save: { name, base, key in await state.update(item.value, name: name, base: base, key: key) }) }
     }
-    private var description: String { tierDescription(state.selection["tier"].string) }
-    private func tierDescription(_ name: String) -> String {
-        guard let tier = BenchmarkTier.configurations[name] else { return "Choose a depth." }
-        return "\(tier.latency) latency samples, \(tier.throughput) output tests at \(tier.output) tokens, input sweep \(tier.contexts.map(String.init).joined(separator: "/"))"
-            + (tier.maxOutput > 0 ? ", maximum output \(tier.maxOutput)" : "") + (tier.probe ? ", grow/bisect context probes." : ".")
-            + (browserSelected ? " Browser modes skip output-cap and vision tests." : " Vision-capable selections get an image round-trip.")
+    /// What the chosen depth actually measures, as readings rather than a sentence.
+    @ViewBuilder private var tierFacts: some View {
+        if let tier = BenchmarkTier.configurations[state.selection["tier"].string] {
+            NativeFigureRow(minimum: 120) {
+                NativeFigure(label: "Latency samples", value: String(tier.latency), size: .small)
+                NativeFigure(label: "Output tests", value: String(tier.throughput), unit: "at " + NativeNumberFormat.compact(Double(tier.output)), size: .small)
+                NativeFigure(label: "Input sweep", value: NativeNumberFormat.compact(Double(tier.contexts.max() ?? 0)), unit: "\(tier.contexts.count) steps", size: .small)
+                if tier.maxOutput > 0 { NativeFigure(label: "Output ceiling", value: NativeNumberFormat.compact(Double(tier.maxOutput)), size: .small) }
+                NativeFigure(label: "Context probe", value: tier.probe ? "On" : "Off", size: .small, color: tier.probe ? Theme.ink : Theme.muted)
+            }.padding(.top, 6)
+        }
     }
     private func providerRow(_ provider: JSONValue) -> some View {
         let id = provider["id"].string, included = state.selection["included"].array.contains(provider["id"]), browser = provider["transport"] == "chatgpt-web"
         return NativeSpeedProviderRow {
             HStack(spacing: 10) {
-                NativeIcon(browser ? "globe" : "server", size: 13).foregroundStyle(included ? Theme.ink : Theme.muted).frame(width: 18)
-                    .overlay(alignment: .bottomTrailing) { StatusDot(color: browser && !provider["ready"].bool ? Theme.warnFg : included ? Theme.okFg : Theme.muted, size: 5).offset(x: 3, y: 3) }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(provider["name"].string).font(Theme.ui(14, weight: .medium)).foregroundStyle(included ? Theme.ink : Theme.muted)
-                    Text(browser ? "\(state.selection["models"][id].array.count) modes · " + (provider["ready"].bool ? "Ready for browser tests" : "Setup needed") : (state.selection["models"][id].array.isEmpty ? "" : "\(state.selection["models"][id].array.count) models · ") + provider["baseUrl"].string).font(Theme.ui(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
+                T3Switch(isOn: Binding(get: { included }, set: { _ in state.toggle(id) }), enabled: !state.anyRunning && (!browser || provider["ready"].bool || included)).accessibilityLabel("Include " + provider["name"].string)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(provider["name"].string).font(Theme.ui(13.5, weight: .medium)).foregroundStyle(included ? Theme.ink : Theme.muted)
+                        if browser && !provider["ready"].bool { NativeStatusText(text: "Setup needed", color: Theme.warnFg) }
+                    }
+                    Text(browser ? "Browser session" : provider["baseUrl"].string).font(browser ? Theme.ui(12) : Theme.mono(11)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                 }
                 Spacer()
-                if browser { Text("Browser session").font(Theme.ui(11.5)).foregroundStyle(Theme.muted) }
-                else {
+                if !browser {
                     NativeKeyPill(key: provider["maskedKey"].string) { Task { await state.copyKey(id) } }
                     Button { Task { if let value = await state.editable(provider) { editor = NativePresentedValue(value: value) } } } label: { NativeIcon("pencil", size: 12) }.buttonStyle(T3Button(.ghost)).help("Edit provider").accessibilityLabel("Edit provider").disabled(state.anyRunning)
                 }
-                Button { picker = NativePresentedValue(value: provider); if !browser && provider["catalog"].array.isEmpty { Task { await state.discover(id) } } } label: { HStack(spacing: 6) { NativeIcon("grid-2x2", size: 12); Text(browser ? "Modes" : "Models") } }.buttonStyle(T3Button()).disabled(state.anyRunning)
-                T3Switch(isOn: Binding(get: { included }, set: { _ in state.toggle(id) }), enabled: !state.anyRunning && (!browser || provider["ready"].bool || included)).accessibilityLabel("Include " + provider["name"].string)
+                Button { picker = NativePresentedValue(value: provider); if !browser && provider["catalog"].array.isEmpty { Task { await state.discover(id) } } } label: { HStack(spacing: 6) { NativeIcon("plus", size: 12); Text(browser ? "Modes" : "Models"); if !state.selection["models"][id].array.isEmpty { Text(String(state.selection["models"][id].array.count)).font(Theme.num(12)).foregroundStyle(Theme.muted) } } }.buttonStyle(T3Button()).disabled(state.anyRunning)
             }
-            if !provider["catalogError"].isNull { Text(provider["catalogError"].string).font(Theme.ui(12)).foregroundStyle(Theme.warnFg).padding(.leading, 28) }
+            if !provider["catalogError"].isNull { Text(provider["catalogError"].string).font(Theme.ui(12)).foregroundStyle(Theme.warnFg).padding(.leading, 46) }
             NativeScrollRail {
                 ForEach(state.selection["models"][id].array, id: \.self) { model in
                     ModelChip(model: model.string, color: Theme.pairColor(id + "|" + model.string)) { state.models(id, state.selection["models"][id].array.map(\.string).filter { $0 != model.string }) }.disabled(state.anyRunning)
                 }
-            }.padding(.leading, 28)
+            }.padding(.leading, 46)
         }
     }
     private var progressPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionLabel(text: state.progress["interrupted"].bool ? "Run interrupted" : state.progress["progress"]["aborted"].bool ? "Run stopped" : state.running ? "Run in progress" : "Run finished") {
-                Text(state.progress["progress"]["run_id"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted)
-            }
-            NativeCard {
+        NativeSection(state.progress["interrupted"].bool ? "Interrupted" : state.progress["progress"]["aborted"].bool ? "Stopped" : state.running ? "Running" : "Finished", trailing: {
+                Text(state.progress["progress"]["run_id"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted).textSelection(.enabled)
+            }) {
+            VStack(alignment: .leading, spacing: 12) {
             ForEach(state.progress["progress"]["pairs"].object.keys.sorted(), id: \.self) { key in
                 let pair = state.progress["progress"]["pairs"][key]
                 VStack(alignment: .leading, spacing: 5) {
@@ -121,44 +121,48 @@ struct NativeSpeedPage: View {
                     if !pair["current"].isNull { ShimmerText(text: pair["current"].string) }
                 }
             }
-            if state.progress["progress"]["pairs"].object.isEmpty { ShimmerText(text: "Starting the native benchmark engine…") }
+            if state.progress["progress"]["pairs"].object.isEmpty { ShimmerText(text: "Starting") }
             if state.progress["resumeAvailable"].bool {
-                Text("Completed test units are saved. Resume keeps this run's original depth and selection.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                Button("Resume saved run") { Task { await state.resume() } }.buttonStyle(T3Button()).disabled(state.busy)
+                Button("Resume") { Task { await state.resume() } }.buttonStyle(T3Button()).disabled(state.busy)
             }
             }
         }
     }
     private var freePanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionLabel("Free test")
-            Text("One eight-token request per configured Claude route. Rate limits get one retry; entitlement refusals remain distinct from temporary limits.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            if state.free.isNull {
-                if state.error.isEmpty { ShimmerText(text: "Reading the saved report and schedule…") }
-            } else {
-            HStack {
-                if state.freeRunning { Button { Task { await state.cancel() } } label: { HStack(spacing: 6) { NativeIcon("square", size: 12); Text("Stop free test") } }.buttonStyle(T3Button(.destructive)) }
-                else { Button { Task { await state.sweep() } } label: { HStack(spacing: 6) { NativeIcon("sparkles", size: 14); Text("Run free test") } }.buttonStyle(T3Button(.outline)).disabled(state.running || state.catalog["providers"].array.isEmpty) }
-                Spacer()
-                Text("\(state.free["report"]["done"].int)/\(state.free["report"]["total"].int)").font(Theme.mono(11))
-            }
-            SettingRow(title: "Run it automatically", desc: "Catches up after sleep; enabling begins with the next daily slot.") {
-                HStack {
-                    T3Field(placeholder: "04:00", text: Binding(get: { scheduleTime }, set: { scheduleTime = $0; scheduleRestored = true }), mono: true, width: 80)
+        let report = state.free["report"], rows = BenchmarkPresentation.freeRows(report, query: freeQuery, outcome: freeFilter)
+        let working = report["rows"].array.filter { $0["outcome"] == "works" }.count
+        return NativeSection("Free test", trailing: {
+            if !state.free.isNull {
+                HStack(spacing: 8) {
+                    Text("Daily").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                    T3Field(placeholder: "04:00", text: Binding(get: { scheduleTime }, set: { scheduleTime = $0; scheduleRestored = true }), mono: true, width: 64)
                         .accessibilityLabel("Daily free-test time")
+                        .onSubmit { if NativeBenchmarkService.validTime(scheduleTime) { Task { await state.saveSchedule(enabled: state.free["schedule"]["enabled"].bool, time: scheduleTime) } } }
+                    if scheduleTime != state.free["schedule"]["time"].string && NativeBenchmarkService.validTime(scheduleTime) {
+                        Button("Save") { Task { await state.saveSchedule(enabled: state.free["schedule"]["enabled"].bool, time: scheduleTime) } }.buttonStyle(T3Button())
+                    }
                     T3Switch(isOn: Binding(get: { state.free["schedule"]["enabled"].bool }, set: { flag in Task { await state.saveSchedule(enabled: flag, time: scheduleTime) } }))
-                        .accessibilityLabel("Run free test automatically")
-                    Button("Save time") { Task { await state.saveSchedule(enabled: state.free["schedule"]["enabled"].bool, time: scheduleTime) } }.buttonStyle(T3Button()).disabled(!NativeBenchmarkService.validTime(scheduleTime))
+                        .accessibilityLabel("Run free test automatically").help("Run every day at this time")
+                    if state.freeRunning { Button { Task { await state.cancel() } } label: { HStack(spacing: 6) { NativeIcon("square", size: 12); Text("Stop") } }.buttonStyle(T3Button(.destructive)) }
+                    else { Button { Task { await state.sweep() } } label: { HStack(spacing: 6) { NativeIcon("sparkles", size: 13); Text("Run") } }.buttonStyle(T3Button(.outline)).disabled(state.running || state.catalog["providers"].array.isEmpty) }
                 }
             }
-            let report = state.free["report"], rows = BenchmarkPresentation.freeRows(report, query: freeQuery, outcome: freeFilter)
-            HStack {
-                Text("\(report["rows"].array.filter { $0["outcome"] == "works" }.count) working · \(report["done"].int)/\(report["total"].int) tested" + (report["cancelled"].bool ? " · stopped early; partial results retained" : report["finishedAt"].isNull ? "" : " · completed")).font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                Spacer()
-                if !report["finishedAt"].isNull { Text(Date(timeIntervalSince1970: report["finishedAt"].double / 1000).formatted(date: .abbreviated, time: .shortened)).font(Theme.ui(11)).foregroundStyle(Theme.muted) }
+        }) {
+        VStack(alignment: .leading, spacing: 14) {
+            if state.free.isNull {
+                if state.error.isEmpty { ShimmerText(text: "Reading report") }
+            } else {
+            if !state.free["job"].isNull { ShimmerText(text: state.free["job"]["progress_text"].string.isEmpty ? "Starting" : state.free["job"]["progress_text"].string) }
+            if report["total"].int > 0 || !report["rows"].array.isEmpty {
+                NativeFigureRow(minimum: 120) {
+                    NativeFigure(label: "Working", value: String(working), size: .small, color: working > 0 ? Theme.okFg : Theme.ink)
+                    NativeFigure(label: "Tested", value: String(report["done"].int), unit: "of \(report["total"].int)", size: .small)
+                    if !report["finishedAt"].isNull {
+                        NativeFigure(label: report["cancelled"].bool ? "Stopped early" : "Finished", value: Date(timeIntervalSince1970: report["finishedAt"].double / 1000).formatted(date: .abbreviated, time: .shortened), size: .small)
+                    }
+                }
             }
-            if !state.free["job"].isNull { ShimmerText(text: state.free["job"]["progress_text"].string.isEmpty ? "Starting the sweep…" : state.free["job"]["progress_text"].string) }
-            Card(padding: 14) { VStack(alignment: .leading, spacing: 12) {
+            if !report["rows"].array.isEmpty { VStack(alignment: .leading, spacing: 12) {
             HStack {
                 T3Field(placeholder: "Filter by model or provider", text: $freeQuery, mono: true, leadingIcon: "search")
                 Menu {
@@ -187,11 +191,12 @@ struct NativeSpeedPage: View {
                             }
                         }
                     }
-                    if rows.isEmpty { Text(report["rows"].array.isEmpty ? "No recorded model outcomes yet." : "No matching model or provider.").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
+                    if rows.isEmpty { Text("No match").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.frame(maxHeight: 420)
             } }
             }
+        }
         }
     }
 }
@@ -201,9 +206,7 @@ private struct NativeSpeedProviderRow<Content: View>: View {
     @State private var hovering = false
     var body: some View {
         VStack(alignment: .leading, spacing: 8) { content() }
-            .padding(.horizontal, 8).padding(.vertical, 9)
-            .background(hovering ? Theme.subtle : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-            .onHover { hovering = $0 }
+            .padding(.vertical, 12)
     }
 }
 
@@ -226,7 +229,6 @@ private struct NativeSpeedProviderEditor: View {
             T3Field(placeholder: "Name", text: $name)
             T3Field(placeholder: "Base URL", text: $base, mono: true)
             T3Field(placeholder: "Free API key", text: $key, mono: true)
-            Text("Updates the shared provider configuration. Existing model and route settings are preserved.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
             if failed { NativeError(message: "Provider could not be saved. Check the name, endpoint and key, and finish any active benchmark first.") }
             HStack {
                 Button("Cancel") { dismiss() }.buttonStyle(T3Button(.outline)).keyboardShortcut(.cancelAction)
