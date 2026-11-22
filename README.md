@@ -210,60 +210,55 @@ Hardware controls may require compatible devices and an explicitly installed hel
 
 ## Screenshots
 
-These are native views captured offscreen with empty fixture data. Setup uses
-820×660 and 640×520 viewports; the page views use 1050×800 points.
-The capture-only session bypasses normal background-service
-startup. They illustrate views, not full-shell interaction, fresh-install
-acceptance or compositor behavior. The [sanitized manifest](assets/screenshots/manifest.json)
-records capture scope and image checksums.
+These are whole-window captures of a development build at 1280×860 points,
+running against an isolated scratch data folder on a virtual Mac. Usage and
+benchmark figures are synthetic samples, not an operator's usage, billed spend
+or provider performance. They illustrate the interface; they are not
+fresh-install acceptance. The [manifest](assets/screenshots/manifest.json)
+records each capture's data and checksum.
 
-**Welcome — Dark**
+**Home — Graphite**
 
-Choose a starting page, preview the appearance and spacing, then open that page
-directly. The single-screen guide can be skipped or replayed from Settings.
+![Home with the current route, the last benchmark and background work, Graphite look](assets/screenshots/home-dark.png)
 
-![Native welcome guide, Dark appearance](assets/screenshots/onboarding-dark.png)
+[Home — Paper](assets/screenshots/home-light.png)
 
-[Welcome — Light](assets/screenshots/onboarding-light.png) ·
-[Compact layout](assets/screenshots/onboarding-compact-dark.png)
+**Statistics — sample usage**
 
-**Statistics — sample usage, Dark**
+![Statistics leading with total tokens, a composition tape and a daily chart, Graphite look](assets/screenshots/stats-dark.png)
 
-![Native Statistics page with two synthetic records and a partial cost estimate, Dark appearance](assets/screenshots/stats-populated-dark.png)
+[Statistics — Paper](assets/screenshots/stats-light.png)
 
-[Sample usage — Light](assets/screenshots/stats-populated-light.png) ·
-[Empty state — Dark](assets/screenshots/stats-dark.png) ·
-[Empty state — Light](assets/screenshots/stats-light.png)
+The sample uses invented session records. Models without a known price show no
+cost estimate.
 
-The sample contains two synthetic records. Its cost is a reference estimate,
-not an operator's usage or billed spend.
+**Results — sample comparison**
 
-**Results — sample comparison, Dark**
+![Results with two synthetic models, a leading winner readout and a ranking ledger](assets/screenshots/results-dark.png)
 
-![Native Results with two synthetic models, a leading winner readout and a ranking ledger](assets/screenshots/results-dark.png)
-
-[Results — Light](assets/screenshots/results-light.png) ·
-[Home — Dark](assets/screenshots/home-dark.png) ·
-[Home — Light](assets/screenshots/home-light.png)
+[Results — Paper](assets/screenshots/results-light.png) ·
+[Speed](assets/screenshots/speed-dark.png)
 
 The comparison uses invented measurements, not provider performance claims.
-The Home illustrations use empty readings.
 
-**Transcribe — Dark**
+**Welcome**
 
-![Transcribe native page with empty fixture data, Dark appearance](assets/screenshots/transcribe-dark.png)
+Choose a starting page, preview the look and spacing, then open that page
+directly. The single-screen guide can be skipped or replayed from Settings.
 
-[Transcribe — Light](assets/screenshots/transcribe-light.png)
+![Welcome guide, Graphite look](assets/screenshots/onboarding-dark.png)
 
-**Settings — Dark**
+[Welcome — Paper](assets/screenshots/onboarding-light.png)
 
-![Settings native page with empty fixture data, Dark appearance](assets/screenshots/settings-dark.png)
+**More pages**
 
-[Settings — Light](assets/screenshots/settings-light.png)
-
-[Color customization](assets/screenshots/settings-theme-common-dark-1050x800.png) ·
-[Sidebar editor](assets/screenshots/settings-sidebar-dark-1050x800.png) ·
-[Telegram setup](assets/screenshots/settings-telegram-dark-1050x800.png)
+[Switcher](assets/screenshots/switcher-dark.png) ·
+[Activity](assets/screenshots/activity-dark.png) ·
+[Keyboard Stats](assets/screenshots/keyboard-dark.png) ·
+[Transcribe — Graphite](assets/screenshots/transcribe-dark.png) ·
+[Transcribe — Paper](assets/screenshots/transcribe-light.png) ·
+[Settings — Graphite](assets/screenshots/settings-dark.png) ·
+[Settings — Paper](assets/screenshots/settings-light.png)
 
 ## Help, validation and contributing
 

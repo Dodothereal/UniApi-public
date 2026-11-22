@@ -133,7 +133,7 @@ struct NativeHomePage: View {
                 NativeNumberText(text: String(run["pairs"].array.count), font: Theme.readout(34), color: Theme.ink)
                 MicroLabel(run["pairs"].array.count == 1 ? "pair measured" : "pairs measured")
             }
-            Text(stamp(run["started"].string) + " · " + run["tier"].string).font(Theme.mono(11.5)).foregroundStyle(Theme.muted).lineLimit(1)
+            Text([stamp(run["started"].string), run["tier"].string].filter { !$0.isEmpty }.joined(separator: " · ")).font(Theme.mono(11.5)).foregroundStyle(Theme.muted).lineLimit(1)
             HStack(spacing: 6) {
                 Tag(run["err"].int == 0 ? "all " + homeCount(run["ok"].int, "test") + " passed" : "\(run["err"].int) of \(run["ok"].int + run["err"].int) failed",
                     tone: run["err"].int == 0 ? Theme.okFg : Theme.warnFg, dot: true)
@@ -224,7 +224,7 @@ private struct NativeHomeRunRow: View {
         LedgerRow(minHeight: 40, action: action) {
             HStack(spacing: 12) {
                 Text(timestamp).font(Theme.mono(12)).foregroundStyle(Theme.ink).frame(width: 150, alignment: .leading)
-                Tag(run["tier"].string)
+                if !run["tier"].string.isEmpty { Tag(run["tier"].string) }
                 Text(homeCount(run["pairs"].array.count, "pair") + " in " + duration).font(Theme.ui(12.5)).foregroundStyle(Theme.muted).lineLimit(1).help(run["id"].string)
                 Spacer(minLength: 8)
                 Text("\(run["ok"].int) passed").font(Theme.mono(11)).foregroundStyle(Theme.okFg).frame(width: 78, alignment: .trailing)

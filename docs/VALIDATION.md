@@ -1,5 +1,31 @@
 # Preview validation
 
+## Meter redesign (candidate)
+
+Every native page, the shell, onboarding, update views and notices were redrawn
+in the Meter design language described in [DESIGN.md](DESIGN.md). Services,
+stored preferences, provider boundaries and background jobs were not changed.
+The unused fan airflow renderer and its eight fixture tests were removed with
+the view that drew it.
+
+The optimized native gate passed 1,356 tests with zero failures on macOS with
+Swift 6.4 and SDK 26.5. The secret scan, resource admission and pricing-source
+checks were clean. The static gate ran 72 Python tests; the nine
+`NativeBuildDiscoveryTests` cases that use a fixture Xcode path failed
+identically on the unmodified base revision on that host and are not counted
+as evidence either way.
+
+Fifteen pages and the welcome guide were rendered from a debug development
+build against an isolated data folder on one arm64 virtual Mac, in the Graphite
+and Paper looks at 1280×860; narrow layouts were checked at the 900-point
+minimum width. Results and Statistics were also rendered with synthetic
+records. That host exposes no fan, battery or power sensors: Battery is not
+offered there, and Fan Control and Energy show their unavailable states. Their
+populated layouts were reviewed only from synthetic readings during
+development. Live benchmark runs, provider routing,
+coding sessions, transcription, keyboard recording, Telegram delivery, an
+installed production build, Intel hardware and VoiceOver were not exercised.
+
 ## In-app update and Keyboard Stats (candidate)
 
 The optimized native gate passed 1,364 tests with zero failures on macOS with

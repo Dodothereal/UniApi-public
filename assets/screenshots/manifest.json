@@ -1,265 +1,225 @@
 {
-  "kind": "offscreen-native-views-isolated-fixtures",
-  "label": "Actual native views in offscreen viewports with empty or explicitly labeled synthetic fixtures; no full-shell or compositor claim.",
-  "requiresVisualReview": false,
-  "parentVisualReviewed": true,
-  "quiet": true,
-  "completeShell": false,
-  "compositorCapture": false,
+  "kind": "window-captures-development-build",
+  "label": "Whole-window captures of a debug development build running against an isolated scratch data folder on one arm64 virtual Mac. Sample data is synthetic and labelled per case.",
+  "sourceRevisionBeforeCapture": "32e10821ecdf58aa4179a81ef08dbc53c59d1d44",
+  "build": "UNIAPI_NATIVE_CONFIGURATION=debug bash native/swift/build.sh",
+  "completeShell": true,
+  "compositorCapture": true,
   "freshInstalledAcceptance": false,
-  "sessionInitializer": "captureRuntime",
-  "sessionBypass": "Capture-only session initializer; normal background-service startup is bypassed.",
+  "installedApp": false,
+  "limits": [
+    "The host has no fan, battery or power sensors, so Fan Control, Battery and Energy are not shown populated.",
+    "Providers, routing, transcription and keyboard recording were not exercised.",
+    "Settings reports the development build's own version and startup state."
+  ],
   "cases": [
     {
-      "page": "onboarding-welcome",
+      "page": "onboarding",
+      "title": "Welcome guide, first screen",
       "appearance": "dark",
-      "image": "onboarding-compact-dark.png",
-      "sha256": "2c708b4a6e4aa46a250589e5a1add09944c5ca0d08c9aed9f2a06cb2ae2b24b9",
-      "viewport": [
-        640,
-        520
-      ],
-      "label": "Task-first production onboarding; non-interactive appearance preview, private preferences and reduced motion. Exact finite host size asserted. No app session or services.",
-      "sessionInitializer": "none",
-      "sessionBypass": "No app session is constructed.",
-      "parentVisualReviewed": true,
-      "sourceSHA256": "deb15e0e972a08632e311ae21cb35538b308e75c0f8a3e3ada632e3b8ad72f70",
-      "compositionSHA256": "be04208d4236fb59bc13ef12899009dfd24a9a030f994363c5a62f90fd705023",
-      "harnessSHA256": "e8f92d896d031e57d8224bb4027bc01afd6ad350619753d03ab313705980d8f0"
-    },
-    {
-      "page": "onboarding-welcome",
-      "appearance": "light",
-      "image": "onboarding-light.png",
-      "sha256": "1b910fadf3a909301db3237472b1ec60afa813943e67c65d5b6d7912a37df4af",
-      "viewport": [
-        820,
-        660
-      ],
-      "label": "Task-first production onboarding; non-interactive appearance preview, private preferences and reduced motion. Exact finite host size asserted. No app session or services.",
-      "sessionInitializer": "none",
-      "sessionBypass": "No app session is constructed.",
-      "parentVisualReviewed": true,
-      "sourceSHA256": "deb15e0e972a08632e311ae21cb35538b308e75c0f8a3e3ada632e3b8ad72f70",
-      "compositionSHA256": "be04208d4236fb59bc13ef12899009dfd24a9a030f994363c5a62f90fd705023",
-      "harnessSHA256": "e8f92d896d031e57d8224bb4027bc01afd6ad350619753d03ab313705980d8f0"
-    },
-    {
-      "page": "onboarding-welcome",
-      "appearance": "dark",
+      "look": "Graphite",
       "image": "onboarding-dark.png",
-      "sha256": "c9f148f018aaa96f48bfde286d05f63e0abe84c690b872ccff4ef9021c242fc6",
-      "viewport": [
-        820,
-        660
+      "sha256": "00f32b1a4b76fe0a2f25045b7d7baf2ff8f09b5051be712698df6d812cefe6e2",
+      "window": [
+        1280,
+        860
       ],
-      "label": "Task-first production onboarding; non-interactive appearance preview, private preferences and reduced motion. Exact finite host size asserted. No app session or services.",
-      "sessionInitializer": "none",
-      "sessionBypass": "No app session is constructed.",
-      "parentVisualReviewed": true,
-      "sourceSHA256": "deb15e0e972a08632e311ae21cb35538b308e75c0f8a3e3ada632e3b8ad72f70",
-      "compositionSHA256": "be04208d4236fb59bc13ef12899009dfd24a9a030f994363c5a62f90fd705023",
-      "harnessSHA256": "e8f92d896d031e57d8224bb4027bc01afd6ad350619753d03ab313705980d8f0"
+      "data": "none"
     },
     {
-      "page": "transcribe",
-      "appearance": "dark",
-      "image": "transcribe-dark.png",
-      "label": "Offscreen native page, empty fixture; capture-only session and Settings-state instrumentation",
-      "sha256": "b6ce451f1a3f7810d726f384ed56a675a5f676a8e79edce60ee962cc273dd8de",
-      "viewport": [
-        1050,
-        800
-      ],
-      "parentVisualReviewed": true
-    },
-    {
-      "page": "transcribe",
+      "page": "onboarding",
+      "title": "Welcome guide, first screen",
       "appearance": "light",
-      "image": "transcribe-light.png",
-      "label": "Offscreen native page, empty fixture; capture-only session and Settings-state instrumentation",
-      "sha256": "0f8cf286da0358694ff84efa486e75776d23f736404492a5b7ad0303dd5403f8",
-      "viewport": [
-        1050,
-        800
+      "look": "Paper",
+      "image": "onboarding-light.png",
+      "sha256": "4ef30c590dba0a1b17c26030ed73f73cd5d15310473eaa8fc3d019dc2e1b039b",
+      "window": [
+        1280,
+        860
       ],
-      "parentVisualReviewed": true
-    },
-    {
-      "page": "settings",
-      "appearance": "dark",
-      "image": "settings-dark.png",
-      "label": "Offscreen native page, empty fixture; capture-only session and Settings-state instrumentation",
-      "sha256": "368004131209db768180311f0ae1bc1f0da82c2ed9a8d9e8b1a4137c3d057fed",
-      "viewport": [
-        1050,
-        800
-      ],
-      "parentVisualReviewed": true
-    },
-    {
-      "page": "settings",
-      "appearance": "light",
-      "image": "settings-light.png",
-      "label": "Offscreen native page, empty fixture; capture-only session and Settings-state instrumentation",
-      "sha256": "d16fe31c50e236e6212a0ab35b03b91fef0e0b389a68bd2c8ee7841c7e39a07b",
-      "viewport": [
-        1050,
-        800
-      ],
-      "parentVisualReviewed": true
-    },
-    {
-      "page": "settings-sidebar",
-      "appearance": "dark",
-      "image": "settings-sidebar-dark-1050x800.png",
-      "label": "Offscreen native Settings page, empty fixture; capture-only expanded state and scroll",
-      "sha256": "9400cf499fe3c46e3503a8f404d5715bd47365ffa5b1b673228f6f95f8869876",
-      "viewport": [
-        1050,
-        800
-      ],
-      "parentVisualReviewed": true
-    },
-    {
-      "page": "settings-telegram",
-      "appearance": "dark",
-      "image": "settings-telegram-dark-1050x800.png",
-      "label": "Offscreen native Settings page, empty fixture; capture-only expanded state and scroll",
-      "sha256": "d0d208a214ad9e1087fb690e915519d55805ca02bc33aee28968fe4791eea382",
-      "viewport": [
-        1050,
-        800
-      ],
-      "parentVisualReviewed": true
-    },
-    {
-      "page": "settings-theme-common",
-      "appearance": "dark",
-      "image": "settings-theme-common-dark-1050x800.png",
-      "label": "Offscreen native Settings page, empty fixture; capture-only expanded state and scroll",
-      "sha256": "0c93f77c50c6e94a82552129f9f7c2b5e4170bb767727e47162f6b917d8128bb",
-      "viewport": [
-        1050,
-        800
-      ],
-      "parentVisualReviewed": true
-    },
-    {
-      "page": "stats",
-      "appearance": "dark",
-      "image": "stats-dark.png",
-      "label": "Offscreen complete native Statistics page; empty fixture",
-      "sha256": "2517ea5c70666c20032f46302483f49ddb0d82568fc093eeda79044095abc78c",
-      "viewport": [
-        1050,
-        800
-      ],
-      "parentVisualReviewed": true
-    },
-    {
-      "page": "stats",
-      "appearance": "light",
-      "image": "stats-light.png",
-      "label": "Offscreen complete native Statistics page; empty fixture",
-      "sha256": "02ac92a12fac205ad10f72bec66db9eb8d9dc02c4e5a6db62fd4f4b7088b94a2",
-      "viewport": [
-        1050,
-        800
-      ],
-      "parentVisualReviewed": true
-    },
-    {
-      "page": "stats",
-      "appearance": "dark",
-      "image": "stats-populated-dark.png",
-      "sha256": "5d4773c494ec1de6bdfa8a34aa5d584221fdbb4930b37bd6864b6d1d2c853bb2",
-      "viewport": [
-        1050,
-        800
-      ],
-      "label": "Complete native Statistics page; two synthetic Codex records, 1,320,000 tokens, 912,000 priced and 408,000 unpriced. Reference API estimate, not operator data or billed spend. Capture-only session bypass, no input.",
-      "parentVisualReviewed": true,
-      "sourceSHA256": "472becd9f249eb71906f175be0f2aafa0e32a8f1d2c6a12f70f4df3ece30f834"
-    },
-    {
-      "page": "stats",
-      "appearance": "light",
-      "image": "stats-populated-light.png",
-      "sha256": "0d8c3510606068cca369b0d4f9f9f0bd002adb5d42a1b1bc71246fb534904e2e",
-      "viewport": [
-        1050,
-        800
-      ],
-      "label": "Complete native Statistics page; two synthetic Codex records, 1,320,000 tokens, 912,000 priced and 408,000 unpriced. Reference API estimate, not operator data or billed spend. Capture-only session bypass, no input.",
-      "parentVisualReviewed": true,
-      "sourceSHA256": "472becd9f249eb71906f175be0f2aafa0e32a8f1d2c6a12f70f4df3ece30f834"
+      "data": "none"
     },
     {
       "page": "home",
+      "title": "Home",
       "appearance": "dark",
+      "look": "Graphite",
       "image": "home-dark.png",
-      "sha256": "4e1e72d88d49781f94e4880b2acf18ed06ff38bdf4eb1757179368a42f6e767e",
-      "viewport": [
-        1050,
-        800
+      "sha256": "4515da418f2dc58abdd289adfb7c2b11d8b272eff6f8aec965a6516689d1800d",
+      "window": [
+        1280,
+        860
       ],
-      "label": "Actual native page with synthetic empty dashboard summaries; inactive capture lifecycle, reduced motion and no service/hardware/input execution.",
-      "parentVisualReviewed": true,
-      "sourceSHA256": "d7e10f0458d98285c9fd5db5c29ad55521f1a09b2b1b43660f209ec2d04907b3",
-      "compositionSHA256": "b30034cce032037202a906ebbd75bd05c556a1ab79aa6b66fba838d005ab5b15",
-      "harnessSHA256": "49104f8c2ebcbd7973d3135212417b3d422a9da0c76e0bba7a4758d875d7bebb",
-      "retainedCorePresentation": "Earlier retained objects; current UI compiled separately. No current service or compositor claim."
+      "data": "sample benchmark run and sample usage"
     },
     {
       "page": "home",
+      "title": "Home",
       "appearance": "light",
+      "look": "Paper",
       "image": "home-light.png",
-      "sha256": "ecbc7cbdeef8278fa338e2d29d18af93e08cad8dbbcf323a9b85e90f62a62568",
-      "viewport": [
-        1050,
-        800
+      "sha256": "0d1a29c6c35f32b5749e7b88f3ced52a257e044147594ea45ecf6dd3d0064efc",
+      "window": [
+        1280,
+        860
       ],
-      "label": "Actual native page with synthetic empty dashboard summaries; inactive capture lifecycle, reduced motion and no service/hardware/input execution.",
-      "parentVisualReviewed": true,
-      "sourceSHA256": "d7e10f0458d98285c9fd5db5c29ad55521f1a09b2b1b43660f209ec2d04907b3",
-      "compositionSHA256": "b30034cce032037202a906ebbd75bd05c556a1ab79aa6b66fba838d005ab5b15",
-      "harnessSHA256": "49104f8c2ebcbd7973d3135212417b3d422a9da0c76e0bba7a4758d875d7bebb",
-      "retainedCorePresentation": "Earlier retained objects; current UI compiled separately. No current service or compositor claim."
+      "data": "sample benchmark run and sample usage"
     },
     {
-      "page": "results",
+      "page": "stats",
+      "title": "Statistics",
       "appearance": "dark",
-      "image": "results-dark.png",
-      "sha256": "f5a8ae12a53e3eaab81ee2ac73702c5428a013df04db35ec3b13a1a6cd1b1c7d",
-      "viewport": [
-        1050,
-        800
+      "look": "Graphite",
+      "image": "stats-dark.png",
+      "sha256": "38651c1fb41e107f75f8dbe7d26549578566d9463aa81505b98c5626a9d596b0",
+      "window": [
+        1280,
+        860
       ],
-      "label": "Actual native page with two synthetic benchmark model results and an inline winner; inactive capture lifecycle, reduced motion and no service/hardware/input execution.",
-      "parentVisualReviewed": true,
-      "sourceSHA256": "0a52d13c35d3843ce43bb5d73715728b4b5ffbda2aa03fa484ffc2adb834daf1",
-      "compositionSHA256": "b30034cce032037202a906ebbd75bd05c556a1ab79aa6b66fba838d005ab5b15",
-      "harnessSHA256": "49104f8c2ebcbd7973d3135212417b3d422a9da0c76e0bba7a4758d875d7bebb",
-      "retainedCorePresentation": "Earlier retained objects; current UI compiled separately. No current service or compositor claim."
+      "data": "55 synthetic Codex session files, three models, 24 days"
+    },
+    {
+      "page": "stats",
+      "title": "Statistics",
+      "appearance": "light",
+      "look": "Paper",
+      "image": "stats-light.png",
+      "sha256": "88ba1c93e2ee97688d53840aee9a25017edae927acce2dea89fd5da082e3485b",
+      "window": [
+        1280,
+        860
+      ],
+      "data": "55 synthetic Codex session files, three models, 24 days"
     },
     {
       "page": "results",
-      "appearance": "light",
-      "image": "results-light.png",
-      "sha256": "3bba5ef4c5271135d6be08e3cec6ef8d188a48062cce04cc23fa9ef7e008ccfd",
-      "viewport": [
-        1050,
-        800
+      "title": "Results",
+      "appearance": "dark",
+      "look": "Graphite",
+      "image": "results-dark.png",
+      "sha256": "5f423d7d3f32f6ffc8e661b258cef2040aef28dac7f8449da7f94515e90c961a",
+      "window": [
+        1280,
+        860
       ],
-      "label": "Actual native page with two synthetic benchmark model results and an inline winner; inactive capture lifecycle, reduced motion and no service/hardware/input execution.",
-      "parentVisualReviewed": true,
-      "sourceSHA256": "0a52d13c35d3843ce43bb5d73715728b4b5ffbda2aa03fa484ffc2adb834daf1",
-      "compositionSHA256": "b30034cce032037202a906ebbd75bd05c556a1ab79aa6b66fba838d005ab5b15",
-      "harnessSHA256": "49104f8c2ebcbd7973d3135212417b3d422a9da0c76e0bba7a4758d875d7bebb",
-      "retainedCorePresentation": "Earlier retained objects; current UI compiled separately. No current service or compositor claim."
+      "data": "one synthetic run, two invented models"
+    },
+    {
+      "page": "results",
+      "title": "Results",
+      "appearance": "light",
+      "look": "Paper",
+      "image": "results-light.png",
+      "sha256": "f95a9bcd9fddb092e7fba7db5bb4ac6d20b8d0a5ad2e27cc8df87275be680a6f",
+      "window": [
+        1280,
+        860
+      ],
+      "data": "one synthetic run, two invented models"
+    },
+    {
+      "page": "speed",
+      "title": "Speed",
+      "appearance": "dark",
+      "look": "Graphite",
+      "image": "speed-dark.png",
+      "sha256": "0c3011081b4bed48c326dadf114e23e633466374782e634e73952d381210c381",
+      "window": [
+        1280,
+        860
+      ],
+      "data": "no provider configured"
+    },
+    {
+      "page": "switcher",
+      "title": "Switcher",
+      "appearance": "dark",
+      "look": "Graphite",
+      "image": "switcher-dark.png",
+      "sha256": "27eb30d050d63447e8ff4d98a2e4106cb339567678580d913d74851e19c80a79",
+      "window": [
+        1280,
+        860
+      ],
+      "data": "no provider configured"
+    },
+    {
+      "page": "activity",
+      "title": "Activity",
+      "appearance": "dark",
+      "look": "Graphite",
+      "image": "activity-dark.png",
+      "sha256": "204132dd943acfe1cbcff9d8cf63893f250d48e6c0e721883cd99477ab25798e",
+      "window": [
+        1280,
+        860
+      ],
+      "data": "live process readings of the capture host"
+    },
+    {
+      "page": "keyboard",
+      "title": "Keyboard Stats",
+      "appearance": "dark",
+      "look": "Graphite",
+      "image": "keyboard-dark.png",
+      "sha256": "11399dfb9b9925ab7561270538c89e626c943f29729e5ab3ec228cdc51c5281f",
+      "window": [
+        1280,
+        860
+      ],
+      "data": "recording off"
+    },
+    {
+      "page": "transcribe",
+      "title": "Transcribe",
+      "appearance": "dark",
+      "look": "Graphite",
+      "image": "transcribe-dark.png",
+      "sha256": "edaaed2cf9d0634d2c77761c54f8391fba78174d6b2f9153213bdc899734f21b",
+      "window": [
+        1280,
+        860
+      ],
+      "data": "no model installed"
+    },
+    {
+      "page": "transcribe",
+      "title": "Transcribe",
+      "appearance": "light",
+      "look": "Paper",
+      "image": "transcribe-light.png",
+      "sha256": "8c2d5862c3d9c2ae4723dec587b54ee9e052a965cd55554f0ae630a15bc16e78",
+      "window": [
+        1280,
+        860
+      ],
+      "data": "no model installed"
+    },
+    {
+      "page": "settings",
+      "title": "Settings",
+      "appearance": "dark",
+      "look": "Graphite",
+      "image": "settings-dark.png",
+      "sha256": "e5775e0ad0e18c173b7d50b29cff497e4fb3f6219de9fe271be9a96f259d17ad",
+      "window": [
+        1280,
+        860
+      ],
+      "data": "defaults"
+    },
+    {
+      "page": "settings",
+      "title": "Settings",
+      "appearance": "light",
+      "look": "Paper",
+      "image": "settings-light.png",
+      "sha256": "f4d391b1fe5c29f65e6f4b39145a45d7922e46dda1a30474ac023538ce216b13",
+      "window": [
+        1280,
+        860
+      ],
+      "data": "defaults"
     }
-  ],
-  "onboardingReview": "Single-screen welcome: eight exact finite Default-spacing Light/Dark captures at 820x660, 760x580, 700x580 and 640x520, visually reviewed; no compositor or fresh-user acceptance.",
-  "settingsCaptureScope": "Default pages plus disclosure state and programmatic scrolling in detail captures; no interaction proof."
+  ]
 }

@@ -34,7 +34,7 @@ struct NativeResultsPage: View {
         if state.payload.isNull || runs.isEmpty { return "Benchmark" }
         if history { return "All-time best · " + (runs.count == 1 ? "1 run" : "\(runs.count) runs") }
         guard let run = runs.first(where: { $0["id"].string == state.payload["scope"].string }) else { return scopeLabel }
-        return (state.scope == "latest" ? "Latest run · " : "Run · ") + runStamp(run) + " · " + run["tier"].string
+        return (state.scope == "latest" ? "Latest run · " : "Run · ") + runLabel(run)
     }
 
     var body: some View {
@@ -114,7 +114,7 @@ struct NativeResultsPage: View {
         } label: { BenchMenuFace(title: "Export CSV", icon: "upload") }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().disabled(state.busy || state.payload.isNull)
         Pick(title: scopeLabel, selection: Binding(get: { state.scope }, set: { state.choose($0) }),
-             options: [("latest", "Latest run"), ("all", "All-time best")] + runs.map { ($0["id"].string, runStamp($0) + " · " + $0["tier"].string) })
+             options: [("latest", "Latest run"), ("all", "All-time best")] + runs.map { ($0["id"].string, runLabel($0)) })
             .help(scopeLabel).accessibilityLabel("Result scope: " + scopeLabel)
         Button("New run", nativeIcon: "play") {
             NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.speed)
@@ -181,6 +181,9 @@ struct NativeResultsPage: View {
                 }
             }
         }
+    }
+    private func runLabel(_ run: JSONValue) -> String {
+        [runStamp(run), run["tier"].string].filter { !$0.isEmpty }.joined(separator: " · ")
     }
     private func runStamp(_ run: JSONValue) -> String {
         let started = BenchmarkMath.timestamp(run["started"].string)
