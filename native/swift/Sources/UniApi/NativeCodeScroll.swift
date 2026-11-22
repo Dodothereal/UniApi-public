@@ -29,16 +29,17 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
         coordinator.binding = $follows
         if coordinator.jump != jump { coordinator.jump = jump; coordinator.policy.jumpToBottom() }
         coordinator.updating = true
-        let width = max(1, scroll.contentSize.width)
+        let content = content, activation = activation, motionVisible = motionVisible, reducedMotion = reducedMotion, density = density, colorScheme = colorScheme
         // A nested NSHostingView starts a new environment. Forward policy and
         // appearance explicitly so retained transcripts cannot keep child
         // image reads/motion active or silently lose the chosen density/theme.
-        coordinator.host.rootView = AnyView(content.padding(12).frame(width: width, alignment: .topLeading).fixedSize(horizontal: false, vertical: true).frame(maxHeight: .infinity, alignment: .topLeading)
+        coordinator.render = { width in AnyView(content.padding(12).frame(width: width, alignment: .topLeading).fixedSize(horizontal: false, vertical: true).frame(maxHeight: .infinity, alignment: .topLeading)
             .environment(\.nativePageActivation, activation)
             .environment(\.nativeMotionVisible, motionVisible)
             .environment(\.nativeReducedMotion, reducedMotion)
             .environment(\.nativeInterfaceDensity, density)
-            .environment(\.colorScheme, colorScheme))
+            .environment(\.colorScheme, colorScheme)) }
+        coordinator.apply(width: max(1, scroll.contentSize.width))
         coordinator.updating = false; coordinator.layout(scroll)
         DispatchQueue.main.async { [weak coordinator, weak scroll] in if let scroll { coordinator?.layout(scroll) } }
     }
@@ -59,8 +60,14 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     final class Coordinator {
         let host = Host(rootView: AnyView(EmptyView()))
         var policy = CodeScrollPolicy(), binding: Binding<Bool>, jump = 0, updating = false, layingOut = false
+        /// The content is laid out at a fixed width, so a view made before
+        /// the scroll view has a size must be rendered again once it has one;
+        /// otherwise a settled thread stays one point wide until its next update.
+        var render: ((CGFloat) -> AnyView)?
+        private var rendered: CGFloat = 0
         private var observer: NSObjectProtocol?
         private var keys: Any?
+        func apply(width: CGFloat) { guard let render else { return }; rendered = width; host.rootView = render(width) }
         init(follows: Binding<Bool>) { binding = follows; host.isFlipped = true }
         func observe(_ scroll: Scroll) {
             observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self, weak scroll] _ in
@@ -86,6 +93,7 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
         func layout(_ scroll: Scroll) {
             guard !layingOut else { return }; layingOut = true; defer { layingOut = false }
             let width = max(1, scroll.contentSize.width), viewport = scroll.contentSize.height, old = host.frame.height, offset = scroll.contentView.bounds.origin.y
+            if abs(rendered - width) > 0.5 { let was = updating; updating = true; apply(width: width); updating = was }
             if abs(host.frame.width - width) > 0.5 { host.setFrameSize(NSSize(width: width, height: old)) }
             host.layoutSubtreeIfNeeded()
             let fitted = max(viewport, host.fittingSize.height)
