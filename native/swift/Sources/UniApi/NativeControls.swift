@@ -252,6 +252,29 @@ extension View {
     func nativeField(mono: Bool = false) -> some View { modifier(NativeFieldModifier(mono: mono)) }
 }
 
+/// Multi-line text in the standard field surface.
+struct NativeEditor: View {
+    @Binding var text: String
+    var placeholder: String = ""
+    var mono = false
+    @FocusState private var focused: Bool
+    @Environment(\.nativeReducedMotion) private var reduceMotion
+    var body: some View {
+        TextEditor(text: $text)
+            .font(mono ? Theme.mono(Theme.textSm) : Theme.ui(Theme.textSm)).lineSpacing(3)
+            .scrollContentBackground(.hidden).focused($focused)
+            .padding(.horizontal, 7).padding(.vertical, 9)
+            .overlay(alignment: .topLeading) {
+                if text.isEmpty && !placeholder.isEmpty {
+                    Text(placeholder).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.faint)
+                        .padding(.horizontal, 12).padding(.vertical, 9).allowsHitTesting(false).accessibilityHidden(true)
+                }
+            }
+            .nativeFieldChrome(focused: focused)
+            .animation(reduceMotion ? nil : NativeMotion.hover, value: focused)
+    }
+}
+
 // ======================================================================
 // MARK: - Segmented, tabs
 // ======================================================================
@@ -550,5 +573,33 @@ struct NativeMenuSelect<Value: Hashable>: View {
         .opacity(enabled ? 1 : 0.4).onHover { hovering = $0 && enabled }
         .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
         .pointingHand(enabled).accessibilityLabel(title)
+    }
+}
+
+/// The select surface around arbitrary menu content (sections, actions).
+struct NativeMenuSelectLabel<Items: View>: View {
+    var title: String
+    var width: CGFloat? = nil
+    @ViewBuilder var items: () -> Items
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.nativeReducedMotion) private var reduceMotion
+    @State private var hovering = false
+    var body: some View {
+        Menu { items() } label: {
+            HStack(spacing: 8) {
+                Text(title).lineLimit(1)
+                if width != nil { Spacer(minLength: 0) }
+                NativeIcon("chevrons-up-down", size: 12).foregroundStyle(Theme.faint)
+            }
+            .font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.ink)
+            .padding(.leading, 10).padding(.trailing, 8).frame(width: width, height: Theme.control)
+            .background(hovering ? Theme.raised : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(hovering ? Theme.input : Theme.border, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .opacity(enabled ? 1 : 0.4).onHover { hovering = $0 && enabled }
+        .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+        .pointingHand(enabled)
     }
 }

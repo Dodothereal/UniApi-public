@@ -84,6 +84,23 @@ struct NativePage<Content: View>: View {
     }
 }
 
+/// A scrolling pane inside a page that owns its frame (`scrolls: false`).
+/// It carries the same margins and column as a scrolling page.
+struct NativePane<Content: View>: View {
+    var maxWidth: CGFloat = Theme.contentWidth
+    var centered = true
+    @Environment(\.nativeInterfaceDensity) private var density
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: density.pageGap) { content() }
+                .padding(.horizontal, density.pageMargin).padding(.top, density.pageGap).padding(.bottom, 48)
+                .frame(maxWidth: maxWidth, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: centered ? .top : .topLeading)
+        }.scrollContentBackground(.hidden)
+    }
+}
+
 /// The fixed bar of a page. Workbenches that own their whole frame use it
 /// directly above their panes.
 struct NativePageBar: View {
