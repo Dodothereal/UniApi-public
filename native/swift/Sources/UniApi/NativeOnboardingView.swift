@@ -10,54 +10,57 @@ struct NativeOnboardingView: View {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var destination = OnboardingDestination.home
     @AccessibilityFocusState private var focusedHeading: Bool
+    @Namespace private var marker
     private let onFinish: (String?) -> Void
 
     init(onFinish: @escaping (String?) -> Void) { self.onFinish = onFinish }
 
     private var reducedMotion: Bool { systemReduceMotion || motion == "reduced" }
     private var scheme: ColorScheme? { appearance == "dark" ? .dark : appearance == "light" ? .light : nil }
+    private var spacing: NativeInterfaceDensity { NativeInterfaceDensity(rawValue: density) ?? .standard }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             GeometryReader { geometry in
-                let compact = geometry.size.height < 460
-                let wide = geometry.size.width >= 720 && !compact
+                // The ledger and the selector share whatever height is left, so
+                // every supported window shows all four tasks without scrolling.
+                let gap: CGFloat = spacing.pageGap
+                let room: CGFloat = geometry.size.height - 77 - gap
+                let wanted: CGFloat = spacing == .compact ? 56 : spacing == .spacious ? 72 : 64
+                let line: CGFloat = max(44, min(wanted, (room / 4).rounded(.down)))
+                let wide = geometry.size.width >= 720 && line >= 52
                 ScrollView {
-                    VStack(alignment: .leading, spacing: compact ? 18 : 28) {
-                        VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: gap) {
+                        VStack(alignment: .leading, spacing: 0) {
                             Text("What would you like to do?")
-                                .font(Theme.ui(compact ? 24 : 26, weight: .semibold)).tracking(-0.6)
+                                .font(Theme.display(24)).tracking(-0.4)
                                 .accessibilityAddTraits(.isHeader)
                                 .accessibilityFocused($focusedHeading)
-                            Text("Start with one thing. Everything else is available in the sidebar.")
-                                .font(Theme.ui(13)).foregroundStyle(Theme.dim)
-                                .fixedSize(horizontal: false, vertical: true)
+                            OnboardingRuler().padding(.top, 14)
                         }
                         if wide {
-                            HStack(alignment: .top, spacing: 32) {
-                                destinations(grid: false).frame(width: 278)
-                                customization(showPreview: true)
+                            HStack(alignment: .center, spacing: 28) {
+                                tasks(height: line)
+                                OnboardingSelector(destination: destination, size: max(168, min(236, room - 44))) { destination = $0 }
                             }
                         } else {
-                            VStack(alignment: .leading, spacing: 16) {
-                                destinations(grid: true)
-                                customization(showPreview: false)
-                            }
+                            tasks(height: line)
                         }
                     }
                     .frame(maxWidth: 704, alignment: .leading)
-                    .padding(.horizontal, 32).padding(.vertical, compact ? 12 : 20)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, 32).padding(.top, 14).padding(.bottom, 10)
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .center)
                 }
             }
+            customization
             footer
         }
         .frame(maxWidth: 820, maxHeight: 660)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.bg).foregroundStyle(Theme.ink)
+        .background(Theme.canvas).foregroundStyle(Theme.ink)
         .preferredColorScheme(scheme)
-        .environment(\.nativeInterfaceDensity, NativeInterfaceDensity(rawValue: density) ?? .standard)
+        .environment(\.nativeInterfaceDensity, spacing)
         .environment(\.nativeReducedMotion, reducedMotion)
         .task {
             await Task.yield()
@@ -67,141 +70,90 @@ struct NativeOnboardingView: View {
     }
 
     private var header: some View {
-        HStack {
-            UniApiWordmark(markSize: 24, textSize: 16)
+        HStack(spacing: 8) {
+            UniApiWordmark(markSize: 30, textSize: 16)
             Spacer(minLength: 12)
             Button("Skip for now") { onFinish(nil) }
-                .buttonStyle(OnboardingActionStyle(primary: false))
+                .buttonStyle(Press(.quiet))
                 .keyboardShortcut(.cancelAction)
+            KeyCap("esc")
         }
         .frame(maxWidth: 704)
-        .padding(.horizontal, 32).padding(.top, 16).padding(.bottom, 6)
+        .padding(.horizontal, 32).padding(.top, 22).padding(.bottom, 10)
         .frame(maxWidth: .infinity)
     }
 
-    private func destinations(grid: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Start here").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-            if grid {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                    ForEach(OnboardingDestination.allCases) { destinationChoice($0, compact: true) }
+    /// The four tasks as one ledger. The signal tick is the only selection
+    /// mark and slides to the chosen line.
+    private func tasks(height: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            Rule()
+            ForEach(OnboardingDestination.allCases) { value in
+                let selected = destination == value
+                Button { destination = value } label: {
+                    OnboardingTaskLine(value: value, selected: selected, showsDetail: height >= 52, height: height, marker: marker)
                 }
-            } else {
-                VStack(spacing: 6) {
-                    ForEach(OnboardingDestination.allCases) { destinationChoice($0, compact: false) }
-                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(value.spokenChoice)
+                .accessibilityHint(value.spokenHint)
+                .accessibilityAddTraits(selected ? [.isSelected] : [])
             }
-        }
-    }
-
-    private func destinationChoice(_ value: OnboardingDestination, compact: Bool) -> some View {
-        let selected = destination == value
-        return Button { destination = value } label: {
-            HStack(alignment: .center, spacing: 12) {
-                NativeIcon(value.icon, size: 19).foregroundStyle(selected ? Theme.link : Theme.dim)
-                    .frame(width: 24, height: 24).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(value.actionTitle).font(Theme.ui(13, weight: .medium))
-                    Text(value.title + " · " + value.detail).font(Theme.ui(11.5)).foregroundStyle(Theme.dim)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                NativeIcon("check", size: 14).foregroundStyle(Theme.link)
-                    .opacity(selected ? 1 : 0).accessibilityHidden(true)
-            }
-            .padding(.horizontal, 12).padding(.vertical, compact ? 10 : 12)
-            .frame(maxWidth: .infinity, minHeight: compact ? 68 : 72, alignment: .leading)
-        }
-        .buttonStyle(OnboardingChoiceStyle(selected: selected))
-        .accessibilityLabel(value.actionTitle + ". Select " + value.title + " as starting page. " + value.detail)
-        .accessibilityHint("Use Open " + value.title + " to continue.")
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-    }
-
-    private func customization(showPreview: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if showPreview {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Appearance preview").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-                    OnboardingWorkspacePreview(destination: destination)
-                        .frame(height: 180)
-                        .accessibilityHidden(true).allowsHitTesting(false)
-                }
-            }
-            if showPreview {
-                appearanceControl
-                spacingControl
-            } else {
-                HStack(alignment: .top, spacing: 16) {
-                    appearanceControl
-                    spacingControl
-                }
-            }
-            Text("Colours, sidebar and motion controls are in Settings.")
-                .font(Theme.ui(11)).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var appearanceControl: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Appearance").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-            choiceStrip(options: [("auto", "System", "monitor"), ("light", "Light", "sun"), ("dark", "Dark", "moon")], selection: appearance) { appearance = $0 }
-                .accessibilityLabel("Appearance")
         }
         .frame(maxWidth: .infinity)
+        .animation(reducedMotion ? nil : NativeMotion.marker, value: destination)
+        .animation(reducedMotion ? nil : .easeInOut(duration: 0.16), value: density)
     }
 
-    private var spacingControl: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Spacing").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-            choiceStrip(options: [("compact", "Compact", nil), ("standard", "Default", nil), ("spacious", "Roomy", nil)], selection: density) { density = $0 }
-                .accessibilityLabel("Page spacing")
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func choiceStrip(options: [(String, String, String?)], selection: String, change: @escaping (String) -> Void) -> some View {
-        HStack(spacing: 2) {
-            ForEach(options, id: \.0) { option in
-                Button { change(option.0) } label: {
-                    HStack(spacing: 6) {
-                        if let icon = option.2 { NativeIcon(icon, size: 13).accessibilityHidden(true) }
-                        Text(option.1).font(Theme.ui(11.5, weight: selection == option.0 ? .medium : .regular))
-                    }
-                    .foregroundStyle(selection == option.0 ? Theme.ink : Theme.dim)
-                    .frame(maxWidth: .infinity).frame(height: 30)
-                }
-                .buttonStyle(OnboardingSegmentStyle(selected: selection == option.0))
-                .accessibilityAddTraits(selection == option.0 ? [.isSelected] : [])
+    /// Pinned above the footer, so trying a look or a spacing never moves the
+    /// control under the pointer.
+    private var customization: some View {
+        HStack(alignment: .top, spacing: 40) {
+            VStack(alignment: .leading, spacing: 4) {
+                MicroLabel("Look")
+                Stops(options: [("dark", "Graphite"), ("light", "Paper"), ("auto", "Auto")], selection: appearance,
+                      icons: ["dark": "moon", "light": "sun", "auto": "monitor"]) { appearance = $0 }
+                    .accessibilityLabel("Appearance")
             }
+            VStack(alignment: .leading, spacing: 4) {
+                MicroLabel("Spacing")
+                Stops(options: [("compact", "Compact"), ("standard", "Default"), ("spacious", "Spacious")], selection: density) { density = $0 }
+                    .accessibilityLabel("Page spacing")
+            }
+            Spacer(minLength: 0)
         }
-        .padding(3)
-        .background(RoundedRectangle(cornerRadius: 9).fill(Theme.subtle))
-        .accessibilityElement(children: .contain)
+        .frame(maxWidth: 704, alignment: .leading)
+        .padding(.horizontal, 32).padding(.top, 10).padding(.bottom, 18)
+        .frame(maxWidth: .infinity)
     }
 
     private var footer: some View {
-        HStack(spacing: 20) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Change any of this in Settings.").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-                Text("No connections or downloads during setup.")
-                    .font(Theme.ui(11)).foregroundStyle(Theme.muted)
+        VStack(spacing: 0) {
+            Rule()
+            HStack(spacing: 16) {
+                Text("Nothing connects or downloads here. All of it can change in Settings.")
+                    .font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-            Button { onFinish(destination.rawValue) } label: {
-                HStack(spacing: 10) {
-                    Text("Open \(destination.title)")
-                    NativeIcon("arrow-right", size: 14).accessibilityHidden(true)
+                Spacer(minLength: 0)
+                KeyCap("return")
+                Button { onFinish(destination.rawValue) } label: {
+                    HStack(spacing: 10) {
+                        ZStack(alignment: .leading) {
+                            // The widest name reserves the width, so the button does not resize under the pointer.
+                            ForEach(OnboardingDestination.allCases) { Text("Open \($0.title)").hidden() }
+                            Text("Open \(destination.title)")
+                        }
+                        .font(Theme.ui(13, weight: .semibold))
+                        NativeIcon("arrow-right", size: 14, strokeWidth: 1.75).accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, 6)
                 }
-                .frame(minWidth: 125)
+                .buttonStyle(Press(.primary, height: 40)).keyboardShortcut(.defaultAction)
+                .accessibilityLabel("Open \(destination.title)")
             }
-            .buttonStyle(OnboardingActionStyle()).keyboardShortcut(.defaultAction)
+            .padding(.top, 16).padding(.bottom, 20)
         }
         .frame(maxWidth: 704)
-        .padding(.horizontal, 32).padding(.top, 16).padding(.bottom, 20)
+        .padding(.horizontal, 32)
         .frame(maxWidth: .infinity)
     }
 }
@@ -220,14 +172,8 @@ private enum OnboardingDestination: String, CaseIterable, Identifiable {
         case .transcribe: return "Transcribe audio"
         }
     }
-    var previewRows: [String] {
-        switch self {
-        case .home: return ["Recent work", "Usage overview"]
-        case .switcher: return ["Choose a coding tool", "Add a provider and model"]
-        case .stats: return ["Tokens and cost estimates", "Models and usage history"]
-        case .transcribe: return ["Optional local model", "Your audio, on your Mac"]
-        }
-    }
+    var spokenChoice: String { "\(actionTitle). Select \(title) as starting page. \(detail)" }
+    var spokenHint: String { "Use Open \(title) to continue." }
     var icon: String {
         switch self { case .home: return "house"; case .switcher: return "route"; case .stats: return "chart-line"; case .transcribe: return "mic" }
     }
@@ -241,123 +187,114 @@ private enum OnboardingDestination: String, CaseIterable, Identifiable {
     }
 }
 
-/// An inert illustration of the app's navigation, never a second app session.
-/// Real theme tokens and density values make the presentation choices visible.
-private struct OnboardingWorkspacePreview: View {
-    let destination: OnboardingDestination
-    @Environment(\.nativeInterfaceDensity) private var density
-    @Environment(\.nativeReducedMotion) private var reducedMotion
-    private var gap: CGFloat { density == .compact ? 6 : density == .spacious ? 12 : 9 }
-
+/// The heading's rule, graduated across its whole length.
+private struct OnboardingRuler: View {
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: gap / 2) {
-                UniApiMark(size: 23).padding(.bottom, 4)
-                ForEach(OnboardingDestination.allCases) { value in
-                    NativeIcon(value.icon, size: 15)
-                        .foregroundStyle(destination == value ? Theme.link : Theme.muted)
-                        .frame(width: 32, height: 24)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(destination == value ? Theme.sidebarAccent : .clear))
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.top, 12).frame(width: 54)
-            .background(Theme.sidebarBG)
-            Rectangle().fill(Theme.border).frame(width: 1)
-            VStack(alignment: .leading, spacing: gap) {
-                Text(destination.title).font(Theme.ui(14, weight: .semibold))
-                Text(destination.detail).font(Theme.ui(10.5)).foregroundStyle(Theme.dim)
-                    .fixedSize(horizontal: false, vertical: true)
-                ForEach(destination.previewRows, id: \.self) { title in
-                    HStack(spacing: 8) {
-                        RoundedRectangle(cornerRadius: 2).fill(Theme.accent.opacity(0.65)).frame(width: 3, height: 14)
-                        Text(title).font(Theme.ui(10.5)).foregroundStyle(Theme.dim)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.vertical, density == .compact ? 4 : density == .spacious ? 8 : 6)
-                    .padding(.horizontal, 10)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Theme.subtle))
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        ZStack(alignment: .topLeading) {
+            Rule(strong: true)
+            TickScale().fill(Theme.faint).frame(height: 6).frame(maxWidth: .infinity)
         }
-        .background(Theme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border, lineWidth: 1))
-        .animation(reducedMotion ? nil : .easeInOut(duration: 0.16), value: density)
+        .frame(maxWidth: .infinity, alignment: .topLeading).frame(height: 6, alignment: .top)
+        .accessibilityHidden(true)
     }
 }
 
-private struct OnboardingChoiceStyle: ButtonStyle {
+/// One task: what to do, where it opens. The row keeps its height whatever is
+/// selected; only the tick and the ink change.
+private struct OnboardingTaskLine: View {
+    let value: OnboardingDestination
     let selected: Bool
-    func makeBody(configuration: Configuration) -> some View {
-        OnboardingChoiceBody(configuration: configuration, selected: selected)
-    }
-}
-private struct OnboardingChoiceBody: View {
-    let configuration: ButtonStyleConfiguration
-    let selected: Bool
-    @Environment(\.nativeReducedMotion) private var reducedMotion
+    let showsDetail: Bool
+    let height: CGFloat
+    let marker: Namespace.ID
     @State private var hovering = false
-    var body: some View {
-        configuration.label
-            .foregroundStyle(Theme.ink)
-            .background(RoundedRectangle(cornerRadius: 9).fill(selected ? Theme.accent.opacity(0.08) : hovering ? Theme.subtle2 : .clear))
-            .contentShape(RoundedRectangle(cornerRadius: 9))
-            .scaleEffect(configuration.isPressed && !reducedMotion ? 0.99 : 1)
-            .animation(reducedMotion ? nil : NativeMotion.hover, value: hovering)
-            .animation(reducedMotion ? nil : NativeMotion.hover, value: selected)
-            .animation(reducedMotion ? nil : NativeMotion.press, value: configuration.isPressed)
-            .onHover { hovering = $0 }
-            .onDisappear { hovering = false }
-            .pointingHand()
-    }
-}
-private struct OnboardingSegmentStyle: ButtonStyle {
-    let selected: Bool
-    func makeBody(configuration: Configuration) -> some View {
-        OnboardingSegmentBody(configuration: configuration, selected: selected)
-    }
-}
-private struct OnboardingSegmentBody: View {
-    let configuration: ButtonStyleConfiguration
-    let selected: Bool
     @Environment(\.nativeReducedMotion) private var reducedMotion
-    @State private var hovering = false
+
     var body: some View {
-        configuration.label
-            .background(RoundedRectangle(cornerRadius: 6).fill(selected ? Theme.surface : configuration.isPressed || hovering ? Theme.subtle2 : .clear))
-            .contentShape(RoundedRectangle(cornerRadius: 6))
-            .animation(reducedMotion ? nil : NativeMotion.hover, value: hovering)
-            .animation(reducedMotion ? nil : NativeMotion.hover, value: selected)
-            .onHover { hovering = $0 }
-            .onDisappear { hovering = false }
-            .pointingHand()
+        HStack(alignment: .center, spacing: 14) {
+            NativeIcon(value.icon, size: 18, strokeWidth: 1.6)
+                .foregroundStyle(selected ? Theme.ink : Theme.muted)
+                .frame(width: 22, height: 22).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(value.actionTitle).font(Theme.display(17, weight: .medium))
+                    .foregroundStyle(selected || hovering ? Theme.ink : Theme.dim).lineLimit(1)
+                if showsDetail {
+                    Text(value.detail).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            MicroLabel(value.title, color: selected ? Theme.ink : Theme.muted)
+        }
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous)
+                .fill(selected ? Theme.pressed : hovering ? Theme.hover : .clear)
+                .padding(.horizontal, -10)
+        }
+        .overlay(alignment: .leading) {
+            if selected {
+                Theme.signal.frame(width: 2, height: 18).offset(x: -10)
+                    .matchedGeometryEffect(id: "selected", in: marker)
+            }
+        }
+        .overlay(alignment: .bottom) { Rule() }
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onDisappear { hovering = false }
+        .animation(reducedMotion ? nil : NativeMotion.hover, value: hovering)
+        .pointingHand()
     }
 }
-private struct OnboardingActionStyle: ButtonStyle {
-    var primary = true
-    func makeBody(configuration: Configuration) -> some View {
-        OnboardingActionBody(configuration: configuration, primary: primary)
+
+/// The choice drawn as an instrument: a four-position selector whose needle
+/// swings to the chosen page. It restates the ledger: its stops select the
+/// same tasks, it holds no data, opens nothing and is hidden from assistive
+/// technology, which already has the ledger.
+private struct OnboardingSelector: View {
+    let destination: OnboardingDestination
+    var size: CGFloat = 236
+    let choose: (OnboardingDestination) -> Void
+
+    private func fraction(_ value: OnboardingDestination) -> Double {
+        let index = OnboardingDestination.allCases.firstIndex(of: value) ?? 0
+        return (Double(index) * 2 + 1) / 8
+    }
+
+    var body: some View {
+        ZStack {
+            Dial(fraction: fraction(destination), color: .clear, size: size) {
+                VStack(spacing: 6) {
+                    MicroLabel("Opens")
+                    NativeNumberText(text: destination.title, font: Theme.display(24), color: Theme.ink)
+                        .lineLimit(1).minimumScaleFactor(0.6).frame(maxWidth: size - 64)
+                }
+            }
+            ForEach(OnboardingDestination.allCases) { value in
+                let angle = (-120 + 240 * fraction(value)) * Double.pi / 180
+                let radius = Double(size) / 2 + 20
+                OnboardingSelectorStop(icon: value.icon, selected: value == destination) { choose(value) }
+                    .offset(x: CGFloat(sin(angle) * radius), y: CGFloat(-cos(angle) * radius))
+            }
+        }
+        .frame(width: size + 76, height: size + 44)
+        .accessibilityHidden(true)
     }
 }
-private struct OnboardingActionBody: View {
-    let configuration: ButtonStyleConfiguration
-    let primary: Bool
+
+private struct OnboardingSelectorStop: View {
+    let icon: String
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
     @Environment(\.nativeReducedMotion) private var reducedMotion
-    @State private var hovering = false
     var body: some View {
-        configuration.label.font(Theme.ui(13, weight: .medium))
-            .foregroundStyle(primary ? Theme.onAccent : hovering ? Theme.ink : Theme.dim)
-            .padding(.horizontal, primary ? 16 : 8).frame(height: primary ? 40 : 32)
-            .background(RoundedRectangle(cornerRadius: 8).fill(primary ? Theme.accent : hovering ? Theme.subtle2 : .clear))
-            .overlay(RoundedRectangle(cornerRadius: 8).fill(Theme.onAccent.opacity(primary && hovering ? 0.08 : 0)))
-            .scaleEffect(configuration.isPressed && !reducedMotion ? 0.98 : 1)
-            .animation(reducedMotion ? nil : NativeMotion.hover, value: hovering)
-            .animation(reducedMotion ? nil : NativeMotion.press, value: configuration.isPressed)
-            .onHover { hovering = $0 }
-            .onDisappear { hovering = false }
-            .pointingHand()
+        Button(action: action) {
+            NativeIcon(icon, size: 16, strokeWidth: 1.6)
+                .foregroundStyle(selected ? Theme.ink : hovering ? Theme.dim : Theme.faint)
+                .frame(width: 28, height: 28).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointingHand().onHover { hovering = $0 }
+        .animation(reducedMotion ? nil : NativeMotion.hover, value: hovering)
+        .animation(reducedMotion ? nil : NativeMotion.hover, value: selected)
     }
 }

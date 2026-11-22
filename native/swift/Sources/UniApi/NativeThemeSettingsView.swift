@@ -2,8 +2,8 @@ import SwiftUI
 import AppKit
 import UniApiCore
 
-/// Embedded by Settings. Editing one variant never changes the other, even
-/// when the currently displayed system appearance uses that other variant.
+/// Embedded by Settings. Editing one look never changes the other, even
+/// when the currently displayed system appearance uses that other look.
 struct NativeThemeSettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var variant: NativeThemePreferences.Variant = .dark
@@ -12,50 +12,86 @@ struct NativeThemeSettingsView: View {
     @State private var paletteUndo: PaletteUndo?
     private var store: NativeThemeStore { .shared }
     private let common: [NativeThemePreferences.Token] = [.accent, .highlight, .background, .surface, .text]
+    /// The remaining roles in the order the strip groups them. Anything a
+    /// later version adds still appears, after these.
     private var advanced: [NativeThemePreferences.Token] {
-        NativeThemePreferences.Token.allCases.filter { !common.contains($0) }
+        let grouped: [NativeThemePreferences.Token] = [.popover, .field, .sidebar, .sidebarSelection, .secondaryText, .mutedText,
+                                                       .onAccent, .border, .input, .success, .warning, .failure]
+        return grouped + NativeThemePreferences.Token.allCases.filter { !common.contains($0) && !grouped.contains($0) }
+    }
+
+    /// The name people see for a stored variant.
+    static func lookName(_ variant: NativeThemePreferences.Variant) -> String { variant == .dark ? "Graphite" : "Paper" }
+    /// The name people see for a stored preset; the default palette is Meter.
+    static func presetName(_ preset: NativeThemePreferences.Preset) -> String { preset == .original ? "Meter" : preset.title }
+    /// The look on screen, said as its palette: a preset name or a count of edits.
+    static func summary(for scheme: ColorScheme) -> String {
+        let variant: NativeThemePreferences.Variant = scheme == .dark ? .dark : .light
+        let preferences = NativeThemeStore.shared.preferences
+        if let preset = NativeThemePreferences.Preset.allCases.first(where: { matches($0, preferences, variant) }) {
+            return presetName(preset) + " palette on " + lookName(variant)
+        }
+        let edits = NativeThemePreferences.Token.allCases.filter { preferences.colorOverride($0, variant) != nil }.count
+        return "\(edits) custom " + (edits == 1 ? "color" : "colors") + " on " + lookName(variant)
+    }
+    fileprivate static func matches(_ preset: NativeThemePreferences.Preset, _ preferences: NativeThemePreferences,
+                                    _ variant: NativeThemePreferences.Variant) -> Bool {
+        var palette = NativeThemePreferences()
+        palette.apply(preset, variant: variant)
+        return NativeThemePreferences.Token.allCases.allSatisfy {
+            preferences.colorOverride($0, variant) == palette.colorOverride($0, variant)
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionLabel("Custom colors")
-            Text("Changes save immediately on this Mac. Hex values apply when you press Return or leave the field.")
-                .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            HStack {
-                Text("Editing variant").font(Theme.ui(12))
-                Picker("Editing variant", selection: $variant) {
-                    Text("Light").tag(NativeThemePreferences.Variant.light)
-                    Text("Dark").tag(NativeThemePreferences.Variant.dark)
-                }.labelsHidden().pickerStyle(.segmented).frame(width: 150)
-                Spacer()
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(alignment: .center, spacing: 12) {
+                MicroLabel("Editing")
+                Stops(options: [(NativeThemePreferences.Variant.dark, "Graphite"), (.light, "Paper")], selection: variant,
+                      icons: [.dark: "moon", .light: "sun"]) { variant = $0 }
+                    .accessibilityLabel("Editing variant")
+                if (colorScheme == .dark) != (variant == .dark) {
+                    Text("The app is showing \(Self.lookName(colorScheme == .dark ? .dark : .light)); these colors appear when the look changes.")
+                        .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(2)
+                }
+                Spacer(minLength: 8)
                 if let undo = paletteUndo {
-                    Button("Undo \(undo.variant.rawValue) palette") { undoPalette(undo) }
+                    Button("Undo \(Self.lookName(undo.variant)) palette", nativeIcon: "undo-2") { undoPalette(undo) }
                         .help("Restore the previous palette, keeping later individual color edits.")
                 }
-                Button("Reset \(variant.rawValue)") { replacePalette { $0.reset(variant) } }
+                Button("Reset \(Self.lookName(variant))", nativeIcon: "rotate-ccw") { replacePalette { $0.reset(variant) } }
+                    .padding(.trailing, -8)
             }
-            Text("App appearance: \(colorScheme == .dark ? "Dark" : "Light") · Editing: \(variant == .dark ? "Dark" : "Light")" +
-                 ((colorScheme == .dark) == (variant == .dark) ? "" : " · This variant appears in the preview until the app switches appearance."))
-                .font(Theme.ui(11)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], alignment: .leading, spacing: 8) {
-                ForEach(NativeThemePreferences.Preset.allCases, id: \.rawValue) { preset in
-                    NativeThemePresetCard(preset: preset, variant: variant, preferences: store.preferences) {
-                        replacePalette { $0.apply(preset, variant: variant) }
+            .buttonStyle(Press(.quiet))
+            NativeThemeStrip(preferences: store.preferences, variant: variant)
+            VStack(alignment: .leading, spacing: 10) {
+                MicroLabel("Palettes")
+                ColumnFlow(minimum: 110, spacing: 24, rowSpacing: 16, maxColumns: 4) {
+                    ForEach(NativeThemePreferences.Preset.allCases, id: \.rawValue) { preset in
+                        NativeThemePresetChoice(preset: preset, variant: variant, preferences: store.preferences) {
+                            replacePalette { $0.apply(preset, variant: variant) }
+                        }
                     }
                 }
             }
-            NativeThemePreview(preferences: store.preferences, variant: variant)
-            NativeThemeContrastChecks(preferences: store.preferences, variant: variant, expanded: $showContrast)
-            colorRows(common)
-            DisclosureGroup("Advanced colors", isExpanded: $showAdvanced) {
-                colorRows(advanced).padding(.top, 10)
+            VStack(alignment: .leading, spacing: 0) {
+                LedgerHead {
+                    MicroLabel("Color")
+                    Spacer(minLength: 8)
+                    MicroLabel("Hex, applied on Return")
+                }
+                colorRows(common)
+                SettingsFold(title: "Every color", detail: "Text shades, sidebar, popover, fields, rules and status.", isOpen: $showAdvanced,
+                             open: "Show", close: "Hide", label: "Advanced colors", closingRule: false) {
+                    colorRows(advanced)
+                }
+                NativeThemeContrastChecks(preferences: store.preferences, variant: variant, expanded: $showContrast)
             }
-            .font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.ink)
         }.onAppear { variant = colorScheme == .dark ? .dark : .light }
     }
 
     private func colorRows(_ tokens: [NativeThemePreferences.Token]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 16)], alignment: .leading, spacing: 9) {
+        ColumnFlow(minimum: 280, spacing: 32, rowSpacing: 0, maxColumns: 2) {
             ForEach(tokens, id: \.rawValue) { token in
                 NativeThemeColorRow(token: token, variant: variant, store: store)
             }
@@ -83,72 +119,123 @@ struct NativeThemeSettingsView: View {
     }
 }
 
-private struct NativeThemePresetCard: View {
+/// The live palette as a calibration strip: every token is one swatch under a
+/// graduation, grouped by what it colors. It shows the look being edited, also
+/// when the app itself is in the other one.
+private struct NativeThemeStrip: View {
+    let preferences: NativeThemePreferences
+    let variant: NativeThemePreferences.Variant
+
+    private static let groups: [(name: String, tokens: [NativeThemePreferences.Token])] = [
+        ("Ground", [.background, .surface, .popover, .field, .sidebar, .sidebarSelection]),
+        ("Ink", [.text, .secondaryText, .mutedText]),
+        ("Signal", [.accent, .onAccent, .highlight]),
+        ("Rules", [.border, .input]),
+        ("Status", [.success, .warning, .failure]),
+    ]
+    /// The text a swatch is read against, where the pairing is fixed.
+    private static let samples: [NativeThemePreferences.Token: NativeThemePreferences.Token] = [
+        .background: .text, .surface: .secondaryText, .sidebar: .mutedText, .accent: .onAccent,
+    ]
+    private func color(_ token: NativeThemePreferences.Token) -> Color {
+        Color(hex: UInt32(preferences.hex(token, variant), radix: 16) ?? 0)
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let gap: CGFloat = 12
+            let unit = max(0, (geometry.size.width - gap * CGFloat(Self.groups.count - 1)) / 17)
+            HStack(alignment: .top, spacing: gap) {
+                ForEach(Self.groups, id: \.name) { group in
+                    VStack(alignment: .leading, spacing: 0) {
+                        TickScale(divisions: group.tokens.count, major: group.tokens.count, minorHeight: 3, majorHeight: 6)
+                            .fill(Theme.faint).frame(height: 6)
+                        HStack(spacing: 0) {
+                            ForEach(group.tokens, id: \.rawValue) { token in
+                                color(token)
+                                    .overlay {
+                                        if let sample = Self.samples[token] {
+                                            Text("Aa").font(Theme.ui(11.5, weight: .medium)).foregroundStyle(color(sample))
+                                        }
+                                    }
+                                    .help(token.title + "  #" + preferences.hex(token, variant))
+                            }
+                        }
+                        .frame(height: 40)
+                        .overlay(Rectangle().strokeBorder(Theme.rule, lineWidth: 1))
+                        .padding(.top, 2)
+                        MicroLabel(group.name).padding(.top, 7)
+                    }
+                    .frame(width: unit * CGFloat(group.tokens.count), alignment: .leading)
+                }
+            }
+        }
+        .frame(height: 68)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(NativeThemeSettingsView.lookName(variant)) palette")
+    }
+}
+
+private struct NativeThemePresetChoice: View {
     let preset: NativeThemePreferences.Preset
     let variant: NativeThemePreferences.Variant
     let preferences: NativeThemePreferences
     let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.nativeReducedMotion) private var reduceMotion
 
     private var palette: NativeThemePreferences {
         var result = NativeThemePreferences()
         result.apply(preset, variant: variant)
         return result
     }
-    private var selected: Bool {
-        NativeThemePreferences.Token.allCases.allSatisfy {
-            preferences.colorOverride($0, variant) == palette.colorOverride($0, variant)
-        }
-    }
+    private var selected: Bool { NativeThemeSettingsView.matches(preset, preferences, variant) }
     var body: some View {
         let colors = palette
+        let name = NativeThemeSettingsView.presetName(preset)
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 4) {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack(alignment: .topLeading) {
+                    (hovering || selected ? Theme.ruleStrong : Theme.rule).frame(height: 1)
+                    (selected ? Theme.signal : Theme.faint).frame(width: 2, height: 7)
+                }
+                .frame(height: 7, alignment: .top)
+                HStack(spacing: 0) {
                     ForEach([NativeThemePreferences.Token.background, .surface, .accent, .highlight, .text], id: \.rawValue) { token in
-                        Circle().fill(Color(hex: UInt32(colors.hex(token, variant), radix: 16) ?? 0))
-                            .frame(width: 14, height: 14)
-                            .overlay(Circle().strokeBorder(Theme.border, lineWidth: 1))
+                        Color(hex: UInt32(colors.hex(token, variant), radix: 16) ?? 0)
                     }
                 }
-                Text(preset.title).font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.ink)
+                .frame(height: 14)
+                .overlay(Rectangle().strokeBorder(Theme.rule, lineWidth: 1))
+                .padding(.top, 6)
+                ZStack(alignment: .leading) {
+                    Text(name).font(Theme.ui(12.5, weight: .semibold)).hidden()
+                    Text(name).font(Theme.ui(12.5, weight: selected ? .semibold : .regular))
+                        .foregroundStyle(selected || hovering ? Theme.ink : Theme.dim)
+                }
+                .padding(.top, 8)
             }
-            .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd)
-                .strokeBorder(selected ? Theme.accent : Theme.border, lineWidth: selected ? 2 : 1))
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(preset.title) palette")
-        .accessibilityHint("Applies to the \(variant.rawValue) variant")
+        .buttonStyle(.plain).pointingHand().onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+        .accessibilityLabel("\(name) palette")
+        .accessibilityHint("Applies to the \(NativeThemeSettingsView.lookName(variant)) look")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }
 
-/// The sidebar and status markers use distinct original colors even though
-/// they share their customization roles. Keep the preview and checks aligned
-/// with those fallbacks in Theme, including when only one variant is edited.
+/// The sidebar shares the text roles and the status marks share the status
+/// roles. Keep the strip and the checks aligned with those fallbacks in Theme,
+/// including when only one look is edited.
 private struct NativeThemeResolvedColors {
     let preferences: NativeThemePreferences
     let variant: NativeThemePreferences.Variant
 
     func hex(_ token: NativeThemePreferences.Token) -> String { preferences.hex(token, variant) }
-    func sidebarText() -> String {
-        preferences.colorOverride(.text, variant) ?? (variant == .dark ? "F1F3F7" : "18181B")
-    }
-    func sidebarMuted() -> String {
-        preferences.colorOverride(.mutedText, variant) ?? (variant == .dark ? "A3A3A3" : "71717B")
-    }
-    func statusDot(_ token: NativeThemePreferences.Token) -> String {
-        if let value = preferences.colorOverride(token, variant) { return value }
-        switch token {
-        case .success: return "00BC7D"
-        case .warning: return "FE9A00"
-        case .failure: return "FB2C36"
-        default: return hex(token)
-        }
-    }
-    func color(_ hex: String) -> Color { Color(hex: UInt32(hex, radix: 16) ?? 0) }
+    func sidebarText() -> String { hex(.text) }
+    func sidebarMuted() -> String { hex(.mutedText) }
 }
 
 private struct NativeThemeContrastChecks: View {
@@ -184,70 +271,40 @@ private struct NativeThemeContrastChecks: View {
     var body: some View {
         let results = checks
         let low = results.filter { $0.ratio < 4.5 }.count
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Aim for 4.5:1 for small text. These checks cover common opaque surfaces; translucent overlays and other combinations can differ.")
-                    .font(Theme.ui(11)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                ForEach(results) { check in
-                    HStack {
-                        Text(check.label)
-                        Spacer()
-                        Text(String(format: "%.1f:1%@", check.ratio, check.ratio < 4.5 ? "  Low" : ""))
-                            .foregroundStyle(check.ratio < 4.5 ? Theme.warnFg : Theme.dim)
-                    }.font(Theme.ui(11))
+        SettingsFold(title: low == 0 ? "Contrast checks" : "Contrast checks · \(low) low",
+                     detail: low == 0 ? "All \(results.count) text pairs reach 4.5:1." : "\(low) of \(results.count) text pairs fall below 4.5:1, the mark for small text.",
+                     isOpen: $expanded, open: "Show", close: "Hide", label: "Contrast checks", closingRule: false) {
+            VStack(alignment: .leading, spacing: 10) {
+                ColumnFlow(minimum: 280, spacing: 32, rowSpacing: 0, maxColumns: 2) {
+                    ForEach(results) { check in NativeThemeContrastRow(label: check.label, ratio: check.ratio) }
                 }
-            }.padding(.top, 8)
-        } label: {
-            Text(low == 0 ? "Contrast checks" : "Contrast checks · \(low) low")
-                .font(Theme.ui(12, weight: .medium)).foregroundStyle(low == 0 ? Theme.ink : Theme.warnFg)
+                Text("The centre mark is 4.5:1. Only opaque surfaces are measured; translucent overlays and other combinations can differ.")
+                    .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 12)
+            }
         }
     }
 }
 
-private struct NativeThemePreview: View {
-    let preferences: NativeThemePreferences
-    let variant: NativeThemePreferences.Variant
-    private func color(_ token: NativeThemePreferences.Token) -> Color {
-        let color = Color(hex: UInt32(preferences.hex(token, variant), radix: 16) ?? 0)
-        if variant == .dark && preferences.colorOverride(token, variant) == nil {
-            if token == .border { return color.opacity(0.06) }
-            if token == .field { return color.opacity(0.035) }
-            if token == .input { return color.opacity(0.08) }
-        }
-        return color
-    }
+/// One measured pair: its ratio on a scale whose centre mark is the 4.5:1 target.
+private struct NativeThemeContrastRow: View {
+    let label: String
+    let ratio: Double
     var body: some View {
-        let resolved = NativeThemeResolvedColors(preferences: preferences, variant: variant)
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 9) {
-                Text("UNIAPI").font(.system(size: 10, weight: .bold)).tracking(1)
-                Text("Overview").font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(resolved.color(resolved.sidebarText()))
-                    .padding(7).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(color(.sidebarSelection), in: RoundedRectangle(cornerRadius: 5))
-                Text("Settings").font(.system(size: 11)).foregroundStyle(resolved.color(resolved.sidebarMuted()))
-                Spacer(minLength: 0)
-            }.padding(12).frame(width: 120, alignment: .leading)
-                .foregroundStyle(resolved.color(resolved.sidebarText())).background(color(.sidebar))
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Your workspace").font(.system(size: 14, weight: .semibold)).foregroundStyle(color(.text))
-                Text("A small preview of your palette").font(.system(size: 11)).foregroundStyle(color(.secondaryText))
-                    .padding(5).background(color(.surface), in: RoundedRectangle(cornerRadius: 4))
-                HStack(spacing: 7) {
-                    Text("Primary action").font(.system(size: 11, weight: .medium)).foregroundStyle(color(.onAccent))
-                        .padding(.horizontal, 9).padding(.vertical, 5).background(color(.accent), in: RoundedRectangle(cornerRadius: 5))
-                    Text("Link").font(.system(size: 11)).foregroundStyle(color(.highlight))
-                    Circle().fill(resolved.color(resolved.statusDot(.success))).frame(width: 7, height: 7)
-                    Circle().fill(resolved.color(resolved.statusDot(.warning))).frame(width: 7, height: 7)
-                    Circle().fill(resolved.color(resolved.statusDot(.failure))).frame(width: 7, height: 7)
-                }
-                Text("Palette preview").font(.system(size: 10)).foregroundStyle(color(.mutedText))
-            }.padding(14).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .background(color(.background))
+        let low = ratio < 4.5
+        HStack(spacing: 12) {
+            Text(label).font(Theme.ui(12.5)).foregroundStyle(Theme.ink).lineLimit(1)
+            Spacer(minLength: 4)
+            Scale(fraction: min(1, ratio / 9), color: low ? Theme.warn : Theme.ink, height: 3, ticks: true)
+                .frame(width: 80)
+            Text(String(format: "%.1f:1", ratio)).font(Theme.mono(11)).monospacedDigit()
+                .foregroundStyle(low ? Theme.warnFg : Theme.dim).frame(width: 50, alignment: .trailing)
         }
-        .frame(height: 126).clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color(.border), lineWidth: 1))
-        .accessibilityElement(children: .combine)
+        .frame(minHeight: 32)
+        .overlay(alignment: .bottom) { Rule() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(String(format: "%.1f to 1%@", ratio, low ? ", low" : ""))
     }
 }
 
@@ -260,7 +317,9 @@ private struct NativeThemeColorRow: View {
     @State private var editVariant: NativeThemePreferences.Variant?
     @State private var editStartingValue: String?
     @FocusState private var editing: Bool
+    @Environment(\.nativeReducedMotion) private var reduceMotion
     private var value: String { store.preferences.hex(token, variant) }
+    private var custom: Bool { store.preferences.colorOverride(token, variant) != nil }
     private var picker: Binding<Color> {
         Binding(get: { Color(hex: UInt32(value, radix: 16) ?? 0) }, set: { color in
             guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
@@ -273,12 +332,26 @@ private struct NativeThemeColorRow: View {
         })
     }
     var body: some View {
-        HStack(spacing: 8) {
-            Text(token.title).font(Theme.ui(12)).foregroundStyle(Theme.ink)
+        HStack(spacing: 10) {
+            Button { NativeThemeColorPanel.shared.open(NSColor(picker.wrappedValue), owner: token.rawValue) { picker.wrappedValue = Color(nsColor: $0) } } label: {
+                RoundedRectangle(cornerRadius: 3, style: .continuous).fill(picker.wrappedValue)
+                    .frame(width: 30, height: 20)
+                    .overlay(RoundedRectangle(cornerRadius: 3, style: .continuous).strokeBorder(Theme.ruleStrong, lineWidth: 1))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).pointingHand()
+            .help("Choose \(token.title.lowercased()) in the color panel")
+            .accessibilityLabel("\(token.title) color")
+            Text(token.title).font(Theme.ui(13)).foregroundStyle(Theme.ink).lineLimit(1)
+            if invalid { Tag("Invalid", tone: Theme.failFg) }
             Spacer(minLength: 4)
-            ColorPicker(token.title, selection: picker, supportsOpacity: false).labelsHidden()
-                .accessibilityLabel("\(token.title) color")
-            TextField("Hex", text: $draft).font(Theme.mono(11)).frame(width: 75)
+            TextField("Hex", text: $draft).textFieldStyle(.plain)
+                .font(Theme.mono(11.5)).foregroundStyle(custom || editing ? Theme.ink : Theme.muted)
+                .multilineTextAlignment(.trailing)
+                .padding(.horizontal, 8).frame(width: 84, height: 26)
+                .background(RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous).fill(editing ? Theme.field : .clear))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous)
+                    .strokeBorder(invalid ? Theme.fail : editing ? Theme.signal : Theme.rule, lineWidth: 1))
                 .focused($editing).accessibilityLabel("\(token.title) hex color")
                 .onSubmit(commit)
                 .onChange(of: editing) { _, focused in
@@ -292,11 +365,15 @@ private struct NativeThemeColorRow: View {
                     }
                 }
                 .help(invalid ? "Use six hexadecimal digits, for example #346BF1." : "Six-digit RGB hex color")
-            if invalid { Text("Invalid").font(Theme.ui(10)).foregroundStyle(Theme.failFg) }
         }
+        .frame(minHeight: 40)
+        .overlay(alignment: .bottom) { Rule() }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: editing)
         .onAppear { draft = "#" + value }
         .onChange(of: value) { _, newValue in if !editing { draft = "#" + newValue; invalid = false } }
+        .onDisappear { NativeThemeColorPanel.shared.detach(owner: token.rawValue) }
         .onChange(of: variant) { _, _ in
+            NativeThemeColorPanel.shared.detach(owner: token.rawValue)
             if editing { commit() }
             editVariant = variant
             editStartingValue = value
@@ -323,4 +400,32 @@ private struct NativeThemeColorRow: View {
         }
         editStartingValue = normalized
     }
+}
+
+/// The system color panel, aimed at one swatch at a time. Picking another
+/// swatch or changing the edited look re-aims or releases it, so a panel left
+/// open can never write to a color the person is no longer looking at.
+@MainActor final class NativeThemeColorPanel: NSObject {
+    static let shared = NativeThemeColorPanel()
+    private var apply: ((NSColor) -> Void)?
+    private var owner: String?
+
+    func open(_ color: NSColor, owner: String, apply: @escaping (NSColor) -> Void) {
+        let panel = NSColorPanel.shared
+        self.apply = nil
+        self.owner = owner
+        panel.showsAlpha = false
+        panel.isContinuous = true
+        panel.color = color
+        panel.setTarget(self)
+        panel.setAction(#selector(changed(_:)))
+        self.apply = apply
+        panel.orderFront(nil)
+    }
+    func detach(owner: String) {
+        guard self.owner == owner else { return }
+        apply = nil
+        self.owner = nil
+    }
+    @objc private func changed(_ sender: NSColorPanel) { apply?(sender.color) }
 }
