@@ -295,8 +295,10 @@ public actor NativeAppUpdater {
                 await set(.waiting, NativeAppUpdatePolicy.busyMessage(jobs: work.jobs, code: work.code))
                 try await io.sleep(2)
             }
+            // Cancel stays possible while the staged package is checked again.
+            let kept = await retained(version)
             try Task.checkCancellation()
-            guard await retained(version) else {
+            guard kept else {
                 staged = nil; try? FileManager.default.removeItem(at: stage(version))
                 throw NativeFailure("The downloaded update changed after it was verified. Check for updates again.")
             }

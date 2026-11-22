@@ -243,6 +243,30 @@ final class NativeAppUpdateTests: XCTestCase {
         XCTAssertEqual(state["phase"].string, "ready")
         XCTAssertFalse(record.values.contains("hide")); XCTAssertFalse(record.values.contains { $0.hasPrefix("launch") })
     }
+    func testCancelDuringTheFinalCheckLaunchesNothing() async throws {
+        final class Holder: @unchecked Sendable { var updater: NativeAppUpdater?; var armed = false }
+        let (runtime, root) = try runtime(); defer { try? FileManager.default.removeItem(at: root) }
+        let record = Record(), holder = Holder()
+        var io = io(record)
+        // Cancel arrives while the signature of the waiting update is checked.
+        io.validate = { _ in
+            record.add("validate")
+            if holder.armed { holder.armed = false; await holder.updater?.cancelInstall() }
+            return NativeAppVersion("0.1.17")!
+        }
+        let updater = NativeAppUpdater(runtime: runtime, io: io)
+        holder.updater = updater
+        await updater.check()
+        record.setBusy(1); holder.armed = true
+        await updater.install { record.add("hide") }
+        for _ in 0..<200 where holder.armed { try await Task.sleep(nanoseconds: 5_000_000) }
+        for _ in 0..<20 { await Task.yield() }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let state = await updater.state()
+        XCTAssertFalse(holder.armed)
+        XCTAssertEqual(state["phase"].string, "ready"); XCTAssertEqual(state["staged"].string, "0.1.17")
+        XCTAssertFalse(record.values.contains("hide")); XCTAssertFalse(record.values.contains { $0.hasPrefix("launch") })
+    }
     func testStartReportsSavedFailureAndRemovesStaleStages() async throws {
         let (runtime, root) = try runtime(); defer { try? FileManager.default.removeItem(at: root) }
         let updates = runtime.paths.data.appendingPathComponent("updates")

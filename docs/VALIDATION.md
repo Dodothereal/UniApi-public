@@ -2,7 +2,7 @@
 
 ## In-app update and Keyboard Stats (candidate)
 
-The optimized native gate passed 1,363 tests with zero failures on macOS with
+The optimized native gate passed 1,364 tests with zero failures on macOS with
 Swift 6.4 and SDK 26.5, including 18 keyboard aggregation, layout, summary and
 persistence methods and the updater's version, checksum, staging, idle-wait,
 cancellation and failure-result methods, all against injected fixtures. The
