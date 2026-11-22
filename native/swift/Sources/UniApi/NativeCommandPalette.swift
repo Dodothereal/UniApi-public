@@ -107,7 +107,14 @@ struct NativeCommandPalette: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Jump to")
         }
-        .onAppear { focused = true }
+        // Cancel is a key equivalent, so Escape closes the palette wherever focus sits.
+        .background {
+            Button("Close", action: close).keyboardShortcut(.cancelAction)
+                .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+        }
+        // The field is not in the window yet when the overlay first appears;
+        // claiming focus one turn later is what makes typing land at once.
+        .onAppear { focused = true; DispatchQueue.main.async { focused = true } }
         .onChange(of: query) { _, _ in cursor = 0 }
         .onKeyPress(.downArrow) { move(1); return .handled }
         .onKeyPress(.upArrow) { move(-1); return .handled }

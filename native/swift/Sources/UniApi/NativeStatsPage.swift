@@ -328,7 +328,9 @@ private struct NativeStatsContents: View {
         (detail || payload["source"].string == "all") && (benchmark["spend"]["calls"].int > 0 || !benchmark["trend"].array.isEmpty)
     }
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: density.pageGap) {
+        // Eager on purpose: sections this unequal make a lazy stack re-estimate
+        // and re-place itself without end at some scroll offsets.
+        VStack(alignment: .leading, spacing: density.pageGap) {
             ForEach(Array(payload["warnings"].array.enumerated()), id: \.offset) { _, warning in
                 Notice(text: warning.string, tone: .warn).accessibilityLabel("Error: " + warning.string)
             }
