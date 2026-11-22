@@ -422,7 +422,7 @@ private struct SpeedPairLedger: View {
         }
     }
     private func ledger(wide: Bool) -> some View {
-        let nowWidth: CGFloat = wide ? 208 : 104, barWidth: CGFloat = wide ? 108 : 72
+        let nowWidth: CGFloat = wide ? 208 : 96, barWidth: CGFloat = wide ? 108 : 84
         return VStack(spacing: 0) {
             LedgerHead {
                 MicroLabel("Model").frame(idealWidth: wide ? 280 : 120, maxWidth: .infinity, alignment: .leading)

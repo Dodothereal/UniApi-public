@@ -577,9 +577,10 @@ private struct ResultsLedgerRow: View {
         let a = fraction(low), b = fraction(high)
         return min(a, b)...max(a, b)
     }
-    private var subtitle: String {
-        let provider = cell.value["provider_name"].string + (cell.browser ? " · Browser" : "")
-        return compact ? provider + " · " + others.map { $0.text(cell) + ($0.id == "decode" && $0.value(cell) != nil ? " tok/s" : "") }.joined(separator: " · ") : provider
+    private var provider: String { cell.value["provider_name"].string + (cell.browser ? " · Browser" : "") }
+    /// The columns a narrow ledger folds away, kept whole while the provider name gives way.
+    private var folded: String {
+        others.map { $0.text(cell) + ($0.id == "decode" && $0.value(cell) != nil ? " tok/s" : "") }.joined(separator: " · ")
     }
     var body: some View {
         LedgerRow(minHeight: 44) {
@@ -591,7 +592,13 @@ private struct ResultsLedgerRow: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(cell.short).font(Theme.mono(12, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
                             .help(cell.value["model"].string)
-                        Text(subtitle).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1)
+                        HStack(spacing: 0) {
+                            Text(provider).lineLimit(1)
+                            if compact, !folded.isEmpty {
+                                Text(" · " + folded).lineLimit(1).fixedSize().layoutPriority(1)
+                            }
+                        }
+                        .font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
                         if !cell.lastProblem.isEmpty {
                             Text(cell.lastProblem).font(Theme.ui(11.5)).foregroundStyle(Theme.warnFg).lineLimit(1).help("Last problem: " + cell.lastProblem)
                         }
