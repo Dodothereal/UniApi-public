@@ -166,6 +166,9 @@ struct NativeTranscribePage: View {
         VStack(alignment: .leading, spacing: 12) {
             if rows.isEmpty {
                 if status.isNull && error == nil { ShimmerText(text: "Loading transcripts") }
+                else if status["model"]["available"].bool && status["localRuntime"].bool && !installingModel {
+                    Button("Remove model") { modelAction("model.remove") }.buttonStyle(T3Button(.ghost)).disabled(status["model"]["inUse"].bool)
+                }
             }
             else {
                 NativeSection("Transcripts", count: String(rows.count), trailing: {
