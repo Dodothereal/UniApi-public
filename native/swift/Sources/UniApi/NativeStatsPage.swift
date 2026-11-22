@@ -343,7 +343,7 @@ private struct NativeStatsLedger: View {
         ForEach(Array(rows.enumerated()), id: \.element.1) { index, row in
             let (label, key) = row
             let denominator = key == "thinking" ? totals["output"].double : nativeStatsGrand(totals)
-            let color = nativeStatsColor(["input": "3b82f6", "output": "10b981", "thinking": "f59e0b", "cacheWrite": "a855f7", "cacheRead": "06b6d4"][key] ?? "06b6d4")
+            let color = Theme.series[["input": 0, "output": 1, "thinking": 2, "cacheWrite": 3, "cacheRead": 4][key] ?? 0]
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 2, height: 10).accessibilityHidden(true)

@@ -38,7 +38,6 @@ struct NativeTranscribePage: View {
     private var transcriptText: String { NativeTranscriptPresentation.text(detail, parts: parts) }
     var body: some View {
         NativePage(title: selected == nil ? "Transcribe" : (detail["title"].string.isEmpty ? (detail["source"].string.isEmpty ? "Transcription" : detail["source"].string) : detail["title"].string),
-                   maxWidth: 880,
                    readiness: pageError != nil ? .failed : status.isNull || selected != nil && detail.isNull ? .pending : .ready,
                    backTitle: "Transcripts", back: selected == nil ? nil : back, actions: {
             if selected == nil { T3IconButton(system: "refresh-cw", help: "Reload") { Task { await reload() } } }

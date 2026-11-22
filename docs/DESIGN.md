@@ -145,31 +145,30 @@ can hide container sizing problems.
 
 ## Welcome guide
 
-Setup is one screen: choose a task (Look around, Connect a model, Explore usage
-or Transcribe audio), with its Home, Switcher, Statistics or Transcribe destination
-shown below. Adjust appearance and spacing if desired, then open the selected
-page directly. Skip
-for now stays in the header. Do not insert an appearance wizard between the
-user's task choice and its destination. Motion follows the existing preference
-and macOS Reduce Motion; further customization remains in Settings.
+Setup is one screen titled **Where to start**. It lists Home, Switcher,
+Statistics and Transcribe by page name with one line saying what the page
+holds, and opens the selected page directly. Appearance and Spacing sit on the
+same screen as `T3Segmented` controls. Skip stays in the header. Do not insert
+an appearance wizard between the choice and its destination. Motion follows
+the existing preference and macOS Reduce Motion; further customization remains
+in Settings.
 
-Header, content and footer share one aligned column. Use a 24–26 point heading,
-short descriptions, consistent Lucide icon slots and a single checkmark for
-selection. Avoid nested icon wells, radio circles, outlined groups and repeated
-selection decoration. The primary action names its destination and remains
-40 points high in a fixed footer.
+Header, content and footer share one aligned column. The selected choice is
+drawn like the selected sidebar row: raised surface, hairline border and the
+accent bar on its leading edge. Do not add a checkmark, radio circle, icon well
+or outlined group. The primary action is ink, names its destination and stays
+in a fixed footer above a hairline.
 
-At sufficiently wide and tall sizes, a small labelled, inert appearance
-illustration sits beside the choices. It uses the real theme tokens and density values and changes
-with the choices. It is not a live page, does not contain user data and must not
-create an app session, connect a provider or download a model. Smaller viewports
-use a two-column task grid and omit the illustration. Appearance and Spacing
-then use equal-width columns with matching label baselines. Density changes
-only the preview and destination pages; keep the task hit targets stable so
-customization does not move the selection under the pointer. Do not put
-clickable-looking chevrons in the inert illustration. Content can scroll while
-the primary action stays available. Review the complete view at the exact viewport, disabling AppKit's
-automatic host sizing so it cannot conceal clipping by enlarging the window.
+At sufficiently wide and tall sizes an inert illustration of the shell sits
+beside the choices. It uses the real theme tokens and density values and
+changes with the choices. It is not a live page, does not contain user data
+and must not create an app session, connect a provider or download a model.
+Smaller viewports use a two-column grid and omit the illustration. Density
+changes only the illustration and destination pages; keep the choice hit
+targets stable so customization does not move the selection under the pointer.
+Content can scroll while the primary action stays available. Review the
+complete view at the exact viewport, disabling AppKit's automatic host sizing
+so it cannot conceal clipping by enlarging the window.
 
 The heading has accessibility heading semantics and requests focus on entry.
 Controls retain keyboard activation and selected traits. Hover and press effects

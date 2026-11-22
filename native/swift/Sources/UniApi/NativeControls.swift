@@ -377,9 +377,11 @@ struct NativeTabs<T: Hashable>: View {
     var options: [(value: T, label: String)]
     var selection: T
     var counts: [T: Int] = [:]
-    var height: CGFloat = Theme.barHeight
+    /// Nil follows the bar the tabs sit in (one row or wrapped under the name).
+    var height: CGFloat? = nil
     var onSelect: (T) -> Void
     @Namespace private var ns
+    @Environment(\.nativeTabHeight) private var barRow
 
     var body: some View {
         HStack(spacing: 2) {
@@ -395,7 +397,7 @@ struct NativeTabs<T: Hashable>: View {
                     }
                     .lineLimit(1).fixedSize()
                     .padding(.horizontal, 10)
-                    .frame(height: height)
+                    .frame(height: height ?? barRow)
                     .overlay(alignment: .bottom) {
                         if selected {
                             Rectangle().fill(Theme.accent).frame(height: 2).padding(.horizontal, 10)

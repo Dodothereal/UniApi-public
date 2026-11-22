@@ -143,7 +143,7 @@ struct NativePageBar: View {
                 }
                 .frame(height: Theme.barHeight)
                 if let tabs {
-                    ScrollView(.horizontal) { tabs.padding(.leading, -10) }.scrollIndicators(.hidden)
+                    ScrollView(.horizontal) { tabs.padding(.leading, -10).environment(\.nativeTabHeight, 38) }.scrollIndicators(.hidden)
                         .frame(height: 38)
                 }
             }
@@ -151,7 +151,6 @@ struct NativePageBar: View {
         .padding(.leading, density.pageMargin + inset).padding(.trailing, density.pageMargin)
         .frame(width: column.isFinite ? column : nil, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .center)
-        .environment(\.nativeTabHeight, Theme.barHeight)
         .overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
         .background(Theme.bg)
     }

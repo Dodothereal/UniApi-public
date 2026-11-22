@@ -40,7 +40,7 @@ struct NativeHomePage: View {
             }
             Card(padding: 0) {
                 NativeStack {
-                    workRow(.code, icon: "bot", value: domains["code"].isNull ? "" : homeCount(domains["code"]["activeThreads"].int, "live thread"),
+                    workRow(.code, icon: "bot", value: domains["code"].isNull ? "" : homeCount(domains["code"]["activeThreads"].int, "running thread"),
                             detail: domains["code"].isNull ? "" : domains["code"]["lastTitle"].string.isEmpty ? homeCount(domains["code"]["threads"].int, "thread") : domains["code"]["lastTitle"].string)
                     workRow(.arena, icon: "swords", value: domains["arena"].isNull ? "" : homeCount(domains["arena"]["matches"].int, "match", plural: "matches"),
                             detail: domains["arena"].isNull ? "" : domains["arena"]["running"].int > 0 ? "\(domains["arena"]["running"].int) running" : "")

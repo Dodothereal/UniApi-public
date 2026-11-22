@@ -11,8 +11,8 @@ If the app exits before completing or skipping setup, the guide opens again on t
 The guide offers Home, Switcher, Statistics and Transcribe as starting pages,
 without connecting or downloading anything. Appearance and spacing share this
 same screen. Larger viewports show an inert layout illustration; smaller ones
-use a two-column task grid. The Open action stays in a fixed footer at 40 points
-high and names the selected page. Skip for now stays in the header. Short
+use a two-column grid. The Open action stays in a fixed footer and names the
+selected page. Skip stays in the header. Short
 windows can scroll content while keeping the primary action available. The
 heading requests accessibility focus on entry.
 
