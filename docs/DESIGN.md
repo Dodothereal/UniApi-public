@@ -95,9 +95,7 @@ a narrow page; do not hand-roll `GeometryReader` breakpoints for that.
 | `Blank` | Empty or failed-read state |
 | `Notice(text:tone:)` | Inline message |
 
-`Compat.swift` keeps the earlier names (`Card`, `T3Button`, `T3Segmented`,
-`SettingRow` and so on) drawing with the kit until every page is rebuilt. New
-code uses the kit names. Icons come from the bundled Lucide renderer in
+Icons come from the bundled Lucide renderer in
 `NativeIcon.swift` at 1.6 to 1.75 stroke; check that a name exists in
 `NativeIconPaths.swift` before using it.
 

@@ -165,29 +165,6 @@ enum Theme {
     static func readout(_ size: CGFloat, weight: Font.Weight = .medium) -> Font {
         .system(size: size, weight: weight).width(.condensed).monospacedDigit()
     }
-
-    // ---- names retained while pages migrate (see Compat.swift) -------------
-    static var bg: Color { canvas }
-    static var surface: Color { well }
-    static var border: Color { rule }
-    static var input: Color { ruleStrong }
-    static var accent: Color { signal }
-    static var subtle: Color { hover }
-    static var subtle2: Color { pressed }
-    static var segTrack: Color { hover }
-    static var sidebarInk: Color { ink }
-    static var sidebarMuted: Color { muted }
-    static var sidebarBorder: Color { rule }
-    static let controlStroke = Color.clear
-    static let controlShadow = Color.black.opacity(0.25)
-    static let radiusSm: CGFloat = 4
-    static let radiusMd: CGFloat = 5
-    static let radius: CGFloat = 7
-    static let textXs: CGFloat = 12
-    static let textSm: CGFloat = 13
-    static let textBase: CGFloat = 15
-    static let textLg: CGFloat = 17
-    static let text2Xl: CGFloat = 24
 }
 
 extension View {

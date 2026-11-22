@@ -47,7 +47,7 @@ struct UniApiMark: View {
 /// Mark plus wordmark, the lockup used in the sidebar header and the top bar.
 struct UniApiWordmark: View {
     var markSize: CGFloat = 18
-    var textSize: CGFloat = Theme.textSm
+    var textSize: CGFloat = 13
     var color: Color = Theme.ink
 
     var body: some View {

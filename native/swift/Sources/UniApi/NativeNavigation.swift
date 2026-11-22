@@ -180,7 +180,7 @@ struct NativeShell: View {
                 } else { Color.clear }
             }
         }
-        .background(Theme.bg).foregroundStyle(Theme.ink)
+        .background(Theme.canvas).foregroundStyle(Theme.ink)
         .overlay(alignment: .topTrailing) { NativeNoticeHost(center: notices) }
         .overlay {
             if paletteOpen {

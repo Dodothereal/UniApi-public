@@ -71,7 +71,7 @@ struct NativePage<Content: View>: View {
             .nativeEntrance(.page)
         }
         .scrollContentBackground(.hidden)
-        .background(Theme.bg)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.ink)
         .font(Theme.ui(13))
         .buttonStyle(Press(.secondary))
@@ -87,21 +87,46 @@ struct NativePage<Content: View>: View {
     }
 }
 
-/// A titled group. Draws as a `Band`: the title on a rule, content on the canvas.
-struct NativeCard<Content: View>: View {
+/// Page title block: eyebrow, expanded title, actions, then the tick rule.
+struct PageHeader<Trailing: View>: View {
     var title: String
-    private let content: Content
+    var subtitle: String? = nil
+    var eyebrow: String = ""
+    @ViewBuilder var trailing: () -> Trailing
 
-    init(title: String = "", @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if !eyebrow.isEmpty { MicroLabel(eyebrow) }
+            Text(title).font(Theme.display()).tracking(-0.4).foregroundStyle(Theme.ink)
+                .lineLimit(1).accessibilityAddTraits(.isHeader)
+        }
     }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !title.isEmpty { SectionLabel(title) }
-            content
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .bottom, spacing: 20) {
+                    heading.fixedSize(horizontal: true, vertical: true)
+                    Spacer(minLength: 0)
+                    HStack(spacing: 8) { trailing() }.fixedSize(horizontal: true, vertical: false)
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    heading.frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 8) { trailing() }.frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            TickRule().padding(.top, 14)
+            if let subtitle {
+                Text(subtitle).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 620, alignment: .leading).padding(.top, 12)
+            }
+        }
+    }
+}
+
+extension PageHeader where Trailing == EmptyView {
+    init(title: String, subtitle: String? = nil) {
+        self.init(title: title, subtitle: subtitle, trailing: { EmptyView() })
     }
 }
 
@@ -130,7 +155,7 @@ struct NativeValueTile: View {
     var format: (Double) -> String
 
     init(label: String, value: Double?, unit: String = "", detail: String = "",
-         accent: Color = Theme.accent, delay: Double = 0,
+         accent: Color = Theme.signal, delay: Double = 0,
          format: @escaping (Double) -> String = NativeNumberFormat.decimal) {
         self.label = label
         self.value = value
@@ -145,7 +170,7 @@ struct NativeValueTile: View {
 
     var body: some View {
         Readout(label: label, value: reading, unit: unit, detail: detail, size: .medium,
-                tint: accent == Theme.accent ? nil : accent, delay: delay)
+                tint: accent == Theme.signal ? nil : accent, delay: delay)
     }
 }
 
@@ -212,7 +237,7 @@ struct StatTile: View {
     var value: Double?
     var format: (Double) -> String
     var detail: String
-    var accent: Color = Theme.accent
+    var accent: Color = Theme.signal
     var body: some View {
         NativeValueTile(label: label, value: value, detail: detail, accent: accent, format: format)
     }
