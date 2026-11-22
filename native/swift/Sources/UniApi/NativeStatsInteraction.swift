@@ -12,17 +12,14 @@ struct NativeStatsValueTile: View {
     private var reading: String { value.flatMap { $0.isFinite ? format($0) : nil } ?? "-" }
 
     var body: some View {
-        Card(padding: 14) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    StatusDot(color: accent, size: 5)
-                    Text(label).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
-                }
+        Group {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(reading).font(Theme.mono(22, weight: .semibold)).monospacedDigit().lineLimit(1)
+                    Text(reading).font(Theme.display(30)).lineLimit(1)
                         .nativeStatsNumberTransition(value)
                     if !unit.isEmpty {
-                        Text(unit).font(Theme.mono(12)).foregroundStyle(Theme.muted).lineLimit(1)
+                        Text(unit).font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.muted).lineLimit(1)
                     }
                 }
                 if !detail.isEmpty {
