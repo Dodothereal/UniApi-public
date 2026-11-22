@@ -31,13 +31,10 @@ struct NativeTelegramSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SectionLabel("Telegram notifications")
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(status).font(Theme.ui(13, weight: .medium)).accessibilityLabel("Telegram status: " + status)
-                    Text(statusDescription).font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                }
+        NativeSection("Telegram", detail: statusDescription) {
+            HStack(alignment: .center, spacing: 12) {
+                NativeStatus(text: status, tone: loadFailed ? .fail : status == "Ready" ? .ok : .idle)
+                    .accessibilityLabel("Telegram status: " + status)
                 Spacer()
                 if loadFailed {
                     Button("Retry loading") { load(force: true) }.buttonStyle(T3Button(.outline))
@@ -49,30 +46,25 @@ struct NativeTelegramSettingsView: View {
                 }
             }
             if loaded && !loadFailed && draft != saved {
-                Text("Unsaved changes — the saved delivery state above remains active. The draft is kept while Settings stays open; save it to retain it.")
-                    .font(Theme.ui(12)).foregroundStyle(Theme.warnFg)
+                Text("Unsaved changes. The saved delivery state stays active until you save.")
+                    .font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.warnFg)
                     .accessibilityLabel("Unsaved Telegram changes. The saved delivery state remains active.")
             }
             if expanded && !loadFailed {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("1. Create a bot with BotFather in Telegram, then paste its token here.")
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Bot token").font(Theme.ui(12, weight: .medium))
+                VStack(alignment: .leading, spacing: 18) {
+                    step(1, "Create a bot with BotFather in Telegram and paste its token.") {
                         HStack(spacing: 8) {
                             Group {
                                 if showToken { TextField("Bot token", text: $draft.token) }
                                 else { SecureField("Bot token", text: $draft.token) }
-                            }.textFieldStyle(.roundedBorder).accessibilityLabel("Telegram bot token")
+                            }.nativeField(mono: true).accessibilityLabel("Telegram bot token")
                             Button(showToken ? "Hide" : "Reveal") { showToken.toggle() }
                                 .buttonStyle(T3Button(.ghost)).accessibilityLabel(showToken ? "Hide bot token" : "Reveal bot token")
                         }
                     }
-                    Text("2. Open your bot in Telegram and send it /start. For a group, add the bot and send a message there.")
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("3. Find and choose the chat for notifications.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                        HStack {
+                    step(2, "Open the bot in Telegram and send /start. For a group, add the bot and send a message there.") { EmptyView() }
+                    step(3, "Choose the chat that receives notifications.") {
+                        HStack(spacing: 8) {
                             Button(lookupMessage.isEmpty ? "Find my chats" : "Find my chats again") { findChats() }
                                 .buttonStyle(T3Button(.outline)).disabled(lookupTask != nil || draft.token.isEmpty)
                             if lookupTask != nil {
@@ -81,7 +73,7 @@ struct NativeTelegramSettingsView: View {
                             }
                         }
                         if !lookupMessage.isEmpty {
-                            Text(lookupMessage).font(Theme.ui(11)).foregroundStyle(Theme.muted)
+                            Text(lookupMessage).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         if !chats.isEmpty {
@@ -93,38 +85,38 @@ struct NativeTelegramSettingsView: View {
                                 ForEach(chats) { chat in Text(chat.label + " · " + chat.id).tag(chat.id) }
                             }.frame(maxWidth: 360, alignment: .leading)
                         }
-                        DisclosureGroup("Enter chat ID manually") {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("If another service uses your bot or lookup is unavailable, enter a chat ID you already know.")
-                                    .font(Theme.ui(11)).foregroundStyle(Theme.muted)
-                                TextField("Chat ID", text: $draft.chat).textFieldStyle(.roundedBorder).accessibilityLabel("Telegram chat ID")
-                            }.padding(.top, 8)
-                        }.font(Theme.ui(12))
+                        NativeDisclosure("Enter chat ID manually") {
+                            TextField("Chat ID", text: $draft.chat).nativeField(mono: true).frame(maxWidth: 240).accessibilityLabel("Telegram chat ID")
+                        }
+                        if draft.token != saved.token && !draft.chat.isEmpty && draft.chat == saved.chat {
+                            Text("The bot token changed. Check that the saved destination is correct for this bot before saving.")
+                                .font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.warnFg)
+                        }
                     }
-                    if draft.token != saved.token && !draft.chat.isEmpty && draft.chat == saved.chat {
-                        Text("The bot token changed. Check that the saved destination is correct for this bot before saving.")
-                            .font(Theme.ui(11)).foregroundStyle(Theme.warnFg)
+                    step(4, "Enable delivery. Saving does not send a message.") {
+                        HStack(spacing: 10) {
+                            T3Switch(isOn: $draft.enabled).accessibilityLabel("Enable Telegram delivery")
+                            Text(draft.enabled ? "Enabled" : "Off").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                        }
                     }
-                    SettingRow(title: "4. Enable delivery", desc: "Choose a chat, then enable and save. No test message is sent.") {
-                        T3Switch(isOn: $draft.enabled).accessibilityLabel("Enable Telegram delivery")
-                    }
-                    Text("Credentials are stored privately by UniApi. Saving does not send a message.")
-                        .font(Theme.ui(11)).foregroundStyle(Theme.muted)
                     HStack(spacing: 8) {
                         Button("Save") { save(draft) }.buttonStyle(T3Button(.primary))
-                        Button("Disconnect") { confirmDisconnect = true }.buttonStyle(T3Button(.ghost))
-                            .disabled(saved == .init() && draft == .init())
                         if draft != saved {
                             Button("Discard changes") { draft = saved; showToken = false; message = "" }.buttonStyle(T3Button(.ghost))
                         }
-                    }
+                        Spacer()
+                        Button("Disconnect") { confirmDisconnect = true }.buttonStyle(T3Button(.destructive))
+                            .disabled(saved == .init() && draft == .init())
+                    }.padding(.leading, 34)
                 }.disabled(runtime.paths.readOnly)
+                    .padding(16).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
                 if runtime.paths.readOnly {
-                    Text("Notification settings are read-only in this session.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                    Text("Notification settings are read-only in this session.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
                 }
             }
             if !message.isEmpty {
-                Text(message).font(Theme.ui(12)).foregroundStyle(loadFailed ? Theme.failFg : Theme.muted)
+                Text(message).font(Theme.ui(Theme.textXs)).foregroundStyle(loadFailed ? Theme.failFg : Theme.muted)
                     .accessibilityLabel("Telegram configuration: " + message)
             }
         }
@@ -138,6 +130,19 @@ struct NativeTelegramSettingsView: View {
         .onDisappear { cancelLookup() }
         .onChange(of: draft.token) { _, _ in
             cancelLookup(); chats = []; lookupMessage = ""
+        }
+    }
+
+    /// A numbered step: the numeral hangs in the margin, the instruction and
+    /// its control share one left edge.
+    private func step<Control: View>(_ number: Int, _ text: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(String(number)).font(Theme.num(Theme.textXs, weight: .semibold)).foregroundStyle(Theme.muted)
+                .frame(width: 22, height: 22).background(Theme.subtle, in: Circle())
+            VStack(alignment: .leading, spacing: 9) {
+                Text(text).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                control()
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -175,10 +180,10 @@ struct NativeTelegramSettingsView: View {
 
     private var statusDescription: String {
         if loadFailed { return "Saved settings could not be read." }
-        if !loaded { return "Reading saved settings." }
-        if saved.enabled { return validSavedCredentials ? "Enabled with saved credentials. Delivery has not been tested." : "Saved credentials are incomplete or invalid. Update and save them." }
-        if saved.token.isEmpty && saved.chat.isEmpty { return "Optional delivery is not set up." }
-        return "Saved credentials are present; delivery is disabled."
+        if !loaded { return "" }
+        if saved.enabled { return validSavedCredentials ? "Delivery has not been tested." : "Saved credentials are incomplete or invalid." }
+        if saved.token.isEmpty && saved.chat.isEmpty { return "A ping when long work finishes." }
+        return "Credentials saved; delivery is off."
     }
 
     private func load(force: Bool = false) {

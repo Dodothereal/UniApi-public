@@ -18,15 +18,27 @@ extension EnvironmentValues {
 /// Recovered native timings. These are applied at the changing component,
 /// never as a transaction on the application's root or its data store.
 enum NativeMotion {
-    static let press = Animation.easeOut(duration: 0.12)
-    static let hover = Animation.easeOut(duration: 0.13)
-    static let toggle = Animation.spring(duration: 0.22)
-    static let segmented = Animation.spring(duration: 0.3)
+    // Curves. Enter on `out`, leave on `exit`, travel on `inOut`; springs are
+    // for things that slide between two places and can be interrupted.
+    static func out(_ duration: Double) -> Animation { .timingCurve(0.22, 1, 0.36, 1, duration: duration) }
+    static func outExpo(_ duration: Double) -> Animation { .timingCurve(0.16, 1, 0.3, 1, duration: duration) }
+    static func exit(_ duration: Double) -> Animation { .timingCurve(0.64, 0, 0.78, 0, duration: duration) }
+    static func inOut(_ duration: Double) -> Animation { .timingCurve(0.65, 0, 0.35, 1, duration: duration) }
+    /// Delay between neighbours that enter together.
+    static let stagger: Double = 0.032
+
+    static let press = out(0.12)
+    static let hover = out(0.14)
+    static let toggle = Animation.spring(duration: 0.24, bounce: 0.12)
+    static let segmented = Animation.spring(duration: 0.3, bounce: 0.1)
+    static let selection = Animation.spring(duration: 0.32, bounce: 0.12)
     static let number = Animation.spring(NativeNumberHost.transitionSpring)
-    static let bar = Animation.spring(duration: 0.6)
+    static let bar = outExpo(0.62)
     static let barUpdate = Animation.spring(duration: 0.5)
-    static let sidebar = Animation.spring(duration: 0.34, bounce: 0.08)
-    static let isolation = Animation.easeOut(duration: 0.25)
+    static let sidebar = Animation.spring(duration: 0.34, bounce: 0.06)
+    static let isolation = out(0.25)
+    static let reveal = out(0.2)
+    static let dismiss = exit(0.14)
     static let cycle: Double = 2.2
 
     static func firstDelay(_ seconds: Double) -> Double {
@@ -168,14 +180,14 @@ enum NativeEntrance {
 
     var animation: Animation {
         switch self {
-        case .page: return .easeOut(duration: 0.16)
-        case .row: return .spring(duration: 0.5)
+        case .page: return NativeMotion.outExpo(0.28)
+        case .row: return NativeMotion.outExpo(0.42)
         case .grow, .growVertical: return NativeMotion.bar
-        case .rule: return .spring(duration: 0.65)
-        case .fade: return .easeOut(duration: 0.25)
+        case .rule: return NativeMotion.outExpo(0.6)
+        case .fade: return NativeMotion.out(0.24)
         }
     }
-    var settlement: Double { self == .page ? 0.22 : self == .rule ? 0.75 : 0.7 }
+    var settlement: Double { self == .page ? 0.32 : self == .rule ? 0.7 : 0.68 }
 }
 
 private struct NativeEntranceModifier: ViewModifier {
@@ -190,8 +202,8 @@ private struct NativeEntranceModifier: ViewModifier {
     func body(content: Content) -> some View {
         let final = revealed || settled || !allowed
         content
-            .opacity(final || kind == .grow || kind == .growVertical || kind == .rule ? 1 : kind == .page ? 0.96 : 0)
-            .offset(y: final ? 0 : (kind == .page ? 2 : (kind == .row ? 9 : 0)))
+            .opacity(final || kind == .grow || kind == .growVertical || kind == .rule ? 1 : 0)
+            .offset(y: final ? 0 : (kind == .page ? 6 : (kind == .row ? 8 : 0)))
             .scaleEffect(x: !final && (kind == .grow || kind == .rule) ? 0 : 1,
                          y: !final && kind == .growVertical ? 0 : 1,
                          anchor: kind == .growVertical ? .bottom : .leading)

@@ -27,8 +27,11 @@ import UniApiPresentation
 }
 
 /// Pointer movement must not invalidate the shell's selected chart hierarchy.
+/// The selected plate is one view shared by every row of a namespace, so it
+/// slides to the next row instead of blinking from one to the other.
 private struct NativeSidebarHover<Content: View>: View {
     let selected: Bool
+    let namespace: Namespace.ID
     let action: () -> Void
     @ViewBuilder var content: () -> Content
     @State private var hovered = false
@@ -36,19 +39,31 @@ private struct NativeSidebarHover<Content: View>: View {
     var body: some View {
         Button(action: action) {
             content()
-                .background(selected ? Theme.sidebarAccent : hovered ? Theme.subtle : .clear)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
+                .background {
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
+                            .fill(hovered && !selected ? Theme.subtle : .clear)
+                        if selected {
+                            RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
+                                .fill(Theme.sidebarAccent)
+                                .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(Theme.sidebarBorder, lineWidth: 1))
+                                .overlay(alignment: .leading) {
+                                    Capsule().fill(Theme.accent).frame(width: 2.5, height: 14).offset(x: -1)
+                                }
+                                .matchedGeometryEffect(id: "plate", in: namespace)
+                        }
+                    }
+                }
                 .contentShape(Rectangle())
-        }.buttonStyle(.plain).pointingHand()
+        }.buttonStyle(NativePressStyle(scale: 0.985)).pointingHand()
             .onHover { hovered = $0 }
             .animation(reduceMotion ? nil : NativeMotion.hover, value: hovered)
-            .animation(reduceMotion ? nil : NativeMotion.hover, value: selected)
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
 extension View {
-    func nativeSidebarRow(selected: Bool, action: @escaping () -> Void) -> some View {
-        NativeSidebarHover(selected: selected, action: action) { self }
+    func nativeSidebarRow(selected: Bool, namespace: Namespace.ID, action: @escaping () -> Void) -> some View {
+        NativeSidebarHover(selected: selected, namespace: namespace, action: action) { self }
     }
 }

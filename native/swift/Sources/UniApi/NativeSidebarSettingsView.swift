@@ -16,49 +16,49 @@ struct NativeSidebarSettingsView: View {
     @State private var hovered: SidebarDrag?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SectionLabel("Sidebar")
-            SettingRow(title: "Show sidebar", desc: "Command-B also toggles the sidebar.") {
-                T3Switch(isOn: $sidebarOpen).accessibilityLabel("Show sidebar")
+        NativeSection("Sidebar", trailing: {
+            Button("Restore defaults") {
+                sidebarWidth = NativeSidebarLayout.defaultWidth
+                sidebarOrder = ""
+                sidebarHidden = ""
+                sidebarBadges = NativeNavigationPreferences.defaultSidebarBadges
+            }.buttonStyle(T3Button(.ghost, size: 11)).padding(.leading, -8)
+                .help("Restore sidebar width, order, visibility and badges")
+        }) {
+            SettingRow(title: "Expanded", desc: "Collapsed shows icons only. Command-B switches.") {
+                T3Switch(isOn: $sidebarOpen).accessibilityLabel("Expand sidebar")
             }
-            SettingRow(title: "Width", desc: "Adjust the sidebar from 180 to 320 points.") {
-                HStack(spacing: 8) {
-                    Slider(value: $sidebarWidth, in: 180...320).frame(width: 140).accessibilityLabel("Sidebar width")
-                    Text("\(Int(NativeSidebarLayout.width(sidebarWidth))) pt").font(Theme.mono(11)).frame(width: 48, alignment: .trailing)
+            SettingRow(title: "Width") {
+                HStack(spacing: 10) {
+                    Slider(value: $sidebarWidth, in: 180...320).frame(width: 150).accessibilityLabel("Sidebar width")
+                    Text("\(Int(NativeSidebarLayout.width(sidebarWidth))) pt").font(Theme.mono(11)).foregroundStyle(Theme.muted).frame(width: 44, alignment: .trailing)
                 }
             }
-            SettingRow(title: "Show badges", desc: "Show counts and battery percentage beside pages.") {
+            SettingRow(title: "Badges", desc: "Counts and battery percentage beside pages.") {
                 T3Switch(isOn: $sidebarBadges).accessibilityLabel("Show sidebar badges")
             }
-            DisclosureGroup("Edit sidebar") {
-              VStack(alignment: .leading, spacing: 8) {
-                Text("Drag onto a row: moving up places it before that row; moving down places it after. Use Move for keyboard access. Pages stay within their section.")
-                    .font(Theme.ui(12)).foregroundStyle(Theme.muted)
+            NativeDisclosure("Pages and order") {
+              VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 7) {
                     anchoredRow(.home)
                     ForEach(NativeSidebarLayout.orderedSections(sidebarOrder), id: \.self) { section in
                         sectionView(section)
                     }
-                    Divider().padding(.vertical, 3)
+                    Theme.sidebarBorder.frame(height: 1).padding(.vertical, 3)
                     anchoredRow(.jobs)
                     anchoredRow(.settings)
                 }
-                .padding(12).frame(maxWidth: 500, alignment: .leading)
-                .background(Theme.sidebarBG, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                Text("Home stays at the top; Jobs and Settings stay at the bottom.")
-                    .font(Theme.ui(11)).foregroundStyle(Theme.muted)
+                .padding(10).frame(maxWidth: 460, alignment: .leading)
+                .background(Theme.sidebarBG, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+                Text("Drag a handle, or use Move. Pages stay within their section.")
+                    .font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
                 if let dragged, let hovered, !validMove(dragged, hovered) {
                     Text("Cannot move here. Pages stay within their section; sections move onto section headings. Fixed pages cannot move.")
-                        .font(Theme.ui(11)).foregroundStyle(Theme.failFg)
+                        .font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.failFg)
                 }
-              }.padding(.top, 10)
-            }.font(Theme.ui(13, weight: .medium))
-            Button("Restore sidebar layout defaults") {
-                sidebarWidth = NativeSidebarLayout.defaultWidth
-                sidebarOrder = ""
-                sidebarHidden = ""
-                sidebarBadges = NativeNavigationPreferences.defaultSidebarBadges
-            }.buttonStyle(T3Button(.ghost))
+              }
+            }
         }
     }
 
@@ -67,7 +67,7 @@ struct NativeSidebarSettingsView: View {
             NativeIcon(page.symbol, size: 14).frame(width: 18)
             Text(page.title).font(Theme.ui(12, weight: .medium))
             Spacer()
-            Text("Fixed").font(Theme.ui(11)).foregroundStyle(Theme.muted)
+            NativeIcon("lock", size: 12).foregroundStyle(Theme.faint).help("Always shown here")
         }.frame(height: 29).padding(.horizontal, 8)
             .contentShape(Rectangle())
             .overlay(alignment: .top) { dropMarker(.fixed(page)) }
@@ -81,7 +81,7 @@ struct NativeSidebarSettingsView: View {
         return VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 7) {
                 dragHandle(.section(section), label: "Drag \(section) section")
-                Text(section.uppercased()).font(Theme.ui(10.5, weight: .medium)).tracking(0.7).foregroundStyle(Theme.muted)
+                Text(section.uppercased()).font(Theme.ui(10.5, weight: .semibold)).tracking(0.9).foregroundStyle(Theme.faint)
                 Spacer()
                 moveMenu("Move \(section) section", canMoveUp: sections.first != section, canMoveDown: sections.last != section,
                          up: { moveSection(section, by: -1) }, down: { moveSection(section, by: 1) })
@@ -109,7 +109,7 @@ struct NativeSidebarSettingsView: View {
     }
 
     private func dragHandle(_ item: SidebarDrag, label: String) -> some View {
-        NativeIcon("grip-vertical", size: 13).foregroundStyle(Theme.muted)
+        NativeIcon("grip-vertical", size: 13).foregroundStyle(Theme.faint)
             .frame(width: 18, height: 26).contentShape(Rectangle())
             .help(label).accessibilityHidden(true)
             .onDrag {

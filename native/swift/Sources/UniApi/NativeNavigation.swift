@@ -96,6 +96,7 @@ enum NativeInstalledPages {
 /// Sidebar layout resets do not change appearance, sidebar open state, density or motion.
 enum NativeSidebarLayout {
     static let defaultWidth = 216.0
+    static let railWidth = 72.0
     static func width(_ value: Double) -> Double { value.isFinite ? min(320, max(180, value)) : defaultWidth }
     static func pages(_ stored: String) -> [NativeDestination] {
         var result: [NativeDestination] = []
@@ -135,6 +136,11 @@ struct NativeShell: View {
     @State private var reads = NativePageReadScope()
     @State private var workOwner = NativePageWorkOwner()
     @State private var subscribed = false
+    @State private var paletteOpen = false
+    /// The selection plate follows the destination with its own animation;
+    /// the page swap itself is never animated.
+    @State private var plate = NativeShell.initialDestination
+    @Namespace private var navigation
     @StateObject private var notices = NativeNoticeCenter()
     @StateObject private var pageModels: NativePageModels
     init(runtime: NativeRuntime) { self.runtime = runtime; _pageModels = StateObject(wrappedValue: NativePageModels(runtime: runtime)) }
@@ -160,29 +166,37 @@ struct NativeShell: View {
     private struct ShellWork: Equatable { var activation: NativePageActivation; var subscribed: Bool }
     var body: some View {
         HStack(spacing: 0) {
-            sidebar
-                .frame(width: NativeSidebarLayout.width(sidebarWidth))
-                .frame(width: sidebarOpen ? NativeSidebarLayout.width(sidebarWidth) : 0, alignment: .leading)
-                .clipped().opacity(sidebarOpen ? 1 : 0)
-            if sidebarOpen { Theme.sidebarBorder.frame(width: 1) }
-            VStack(alignment: .leading, spacing: 0) {
-                if !sidebarOpen {
-                    HStack(spacing: 7) {
-                        UniApiWordmark(markSize: 18, textSize: 13)
-                        Button(action: toggleSidebar) { NativeIcon("panel-left", size: 15) }
-                            .buttonStyle(.plain).help("Toggle sidebar (Command-B)")
-                        Spacer()
-                    }.padding(.horizontal, 16).frame(height: 40)
-                }
+            ZStack(alignment: .topLeading) {
+                if sidebarOpen { sidebar.frame(width: NativeSidebarLayout.width(sidebarWidth)).transition(.opacity) }
+                else { rail.frame(width: NativeSidebarLayout.railWidth).transition(.opacity) }
+            }
+            .frame(width: sidebarOpen ? NativeSidebarLayout.width(sidebarWidth) : NativeSidebarLayout.railWidth, alignment: .leading)
+            .frame(maxHeight: .infinity)
+            .background(Theme.sidebarBG)
+            .clipped()
+            Theme.sidebarBorder.frame(width: 1)
+            Group {
                 if session.presentation.retainsPage { NativeInstalledPages.page(destination, runtime: runtime, models: pageModels, resultsRun: resultsRun, navigate: navigate)
                     .id(destination.rawValue + ":" + String(pageReload) + ":" + String(session.presentation.generation))
                     .environment(\.nativePageVisit, visit)
                     .environment(\.nativePageActivation, session.pageActivation)
                     .environment(\.nativeMotionVisible, session.presented && session.pageActive)
                     .allowsHitTesting(session.presented && session.pageActive)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else { Color.clear }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        // The page bar and the sidebar run to the top edge of the window; the
+        // window buttons sit over the sidebar's title strip.
+        .ignoresSafeArea(.container, edges: .top)
+        .overlay {
+            if paletteOpen {
+                NativeCommandPalette(commands: paletteCommands) { paletteOpen = false }
+                    .transition(.opacity)
             }
+        }
+        .animation(reduceMotion ? nil : (paletteOpen ? NativeMotion.reveal : NativeMotion.dismiss), value: paletteOpen)
+        .onChange(of: destination) { _, next in
+            withAnimation(reduceMotion ? nil : NativeMotion.selection) { plate = next }
         }
         .background(Theme.bg).foregroundStyle(Theme.ink)
         .overlay(alignment: .topTrailing) { NativeNoticeHost(center: notices) }
@@ -227,6 +241,7 @@ struct NativeShell: View {
         .frame(minWidth: 0, idealWidth: 1150, maxWidth: .infinity, minHeight: 0, idealHeight: 840, maxHeight: .infinity, alignment: .topLeading)
         .background {
             Button("Toggle sidebar", action: toggleSidebar).keyboardShortcut("b", modifiers: .command).hidden().accessibilityHidden(true)
+            Button("Jump to") { paletteOpen.toggle() }.keyboardShortcut("k", modifiers: .command).hidden().accessibilityHidden(true)
         }
         .task {
             // Register before initial reads so a badge edge cannot land in the gap.
@@ -269,67 +284,146 @@ struct NativeShell: View {
             }
         }
     }
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                UniApiWordmark(markSize: 18, textSize: 13); Spacer()
-                Button(action: toggleSidebar) { NativeIcon("panel-left", size: 15) }
-                    .buttonStyle(.plain).foregroundStyle(Theme.muted).help("Toggle sidebar (Command-B)")
-            }.frame(height: 40).padding(.horizontal, 16)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    navigationRow(.home)
-                    ForEach(NativeSidebarLayout.orderedSections(sidebarOrder), id: \.self) { section in
-                        let pages = NativeSidebarLayout.pages(sidebarOrder).filter {
-                            $0.section == section
-                                && NativeInstalledPages.destinations.contains($0)
-                                && NativeShellPolicy.admits($0.rawValue, batterySupported: batterySupported)
-                                && NativeNavigationPreferences.isSidebarVisible($0.rawValue, hiddenPages: sidebarHidden)
-                        }
-                        if !pages.isEmpty {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(section.uppercased()).font(Theme.ui(10.5, weight: .medium)).tracking(0.84).foregroundStyle(Theme.muted).padding(.horizontal, 8).padding(.top, 2).padding(.bottom, 4)
-                                ForEach(pages) { navigationRow($0) }
-                            }
-                        }
-                    }
-                }.padding(.horizontal, 8).padding(.vertical, 8)
+    private var visibleSections: [(name: String, pages: [NativeDestination])] {
+        let ordered = NativeSidebarLayout.pages(sidebarOrder)
+        return NativeSidebarLayout.orderedSections(sidebarOrder).compactMap { section in
+            let pages = ordered.filter {
+                $0.section == section
+                    && NativeInstalledPages.destinations.contains($0)
+                    && NativeShellPolicy.admits($0.rawValue, batterySupported: batterySupported)
+                    && NativeNavigationPreferences.isSidebarVisible($0.rawValue, hiddenPages: sidebarHidden)
             }
-            VStack(spacing: 1) { navigationRow(.jobs); navigationRow(.settings) }.padding(.horizontal, 8).padding(.vertical, 8)
-            Divider().padding(.horizontal, 10)
-            footer.padding(.horizontal, 14).padding(.bottom, 14)
-        }.background(Theme.sidebarBG)
-    }
-    private var footer: some View {
-        let shim = NativeShellPolicy.shim(routeStatus)
-        return VStack(alignment: .leading, spacing: 7) {
-            NativeUpdateSidebarButton(model: session.updates).padding(.bottom, 3)
-            HStack(spacing: 7) {
-                NativeStatusDot(color: shim.state == .up ? Theme.okFg : shim.state == .down ? Theme.failFg : shim.state == .legacy ? Theme.warnFg : Theme.muted)
-                Text(shim.text).font(Theme.ui(11)).foregroundStyle(shim.state == .down ? Theme.failFg : Theme.muted)
-            }
-            Text("Claude Code: " + NativeShellPolicy.route(routeStatus).name).font(Theme.ui(11)).foregroundStyle(Theme.dim).lineLimit(1).truncationMode(.middle)
-            if let error = session.error { Text("Startup failed: " + error).font(Theme.ui(10)).foregroundStyle(Theme.failFg).textSelection(.enabled) }
+            return pages.isEmpty ? nil : (section, pages)
         }
     }
-    private func navigationRow(_ page: NativeDestination) -> some View {
-            HStack(spacing: 9) {
-                if page == .fans {
-                    NativeSpinningFan(rpm: fansSpinning ? 1250 : 0, size: 15).nativeMotionVisibility(initiallyVisible: false).frame(width: 15, height: 15)
-                } else { NativeIcon(page.symbol, size: 15, strokeWidth: 1.75) }
-                Text(page.title).font(Theme.ui(13, weight: destination == page ? .medium : .regular))
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // The window buttons own the left of this strip.
+            HStack {
                 Spacer()
-                if sidebarBadges {
-                    if page == .jobs && activeJobs > 0 { Text(String(activeJobs)).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
-                    if [.code, .arena].contains(page), badges[page.rawValue].int > 0 { Text(badges[page.rawValue].string).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
-                    if page == .battery, !badges["battery"].isNull { Text(badges["battery"].string + "%").font(Theme.mono(10)).foregroundStyle(Theme.muted) }
-                    if page == .energy, !badges["energy"].isNull, !badges["energy"].string.isEmpty { Text(badges["energy"].string).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
+                T3IconButton(system: "panel-left", help: "Collapse sidebar (Command-B)", action: toggleSidebar)
+            }.padding(.trailing, 8).frame(height: NativeShellMetrics.titleStrip)
+            NativeJumpButton { paletteOpen = true }.padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    navigationRow(.home)
+                    ForEach(visibleSections, id: \.name) { section in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(section.name.uppercased()).font(Theme.ui(10.5, weight: .semibold)).tracking(0.9)
+                                .foregroundStyle(Theme.faint).padding(.horizontal, 9).padding(.bottom, 5)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(section.pages) { navigationRow($0) }
+                        }
+                    }
+                }.padding(.horizontal, 10).padding(.bottom, 10)
+            }
+            VStack(spacing: 1) { navigationRow(.jobs); navigationRow(.settings) }.padding(.horizontal, 10).padding(.bottom, 10)
+            Theme.sidebarBorder.frame(height: 1)
+            footer
+        }
+    }
+    private var rail: some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: NativeShellMetrics.titleStrip)
+            VStack(spacing: 2) {
+                railButton("panel-left", help: "Expand sidebar (Command-B)", action: toggleSidebar)
+                railButton("search", help: "Jump to (Command-K)") { paletteOpen = true }
+            }.padding(.top, 6).padding(.bottom, 10)
+            ScrollView {
+                VStack(spacing: 10) {
+                    railRow(.home)
+                    ForEach(visibleSections, id: \.name) { section in
+                        VStack(spacing: 2) { ForEach(section.pages) { railRow($0) } }
+                            .padding(.top, 10)
+                            .overlay(alignment: .top) { Theme.sidebarBorder.frame(width: 20, height: 1) }
+                    }
+                }.frame(maxWidth: .infinity).padding(.bottom, 10)
+            }.scrollIndicators(.hidden)
+            VStack(spacing: 2) {
+                railRow(.jobs); railRow(.settings)
+                let shim = NativeShellPolicy.shim(routeStatus)
+                if shim.state == .down || session.error != nil {
+                    NativeIcon("triangle-alert", size: 15).foregroundStyle(Theme.failFg).frame(width: 36, height: 30)
+                        .help(session.error.map { "Startup failed: " + $0 } ?? shim.text)
                 }
-            }.padding(.horizontal, 8).frame(height: 32)
-                .foregroundStyle(destination == page ? Theme.sidebarInk : Theme.sidebarMuted)
-            .nativeSidebarRow(selected: destination == page) {
+            }.padding(.bottom, 12)
+        }
+    }
+    private func railButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        NativeIcon(symbol, size: 16).frame(width: 36, height: 32)
+            .foregroundStyle(Theme.sidebarMuted)
+            .nativeSidebarRow(selected: false, namespace: navigation, action: action)
+            .help(help).accessibilityLabel(help)
+    }
+    private func railRow(_ page: NativeDestination) -> some View {
+        Group {
+            if page == .fans {
+                NativeSpinningFan(rpm: fansSpinning ? 1250 : 0, size: 16).nativeMotionVisibility(initiallyVisible: false).frame(width: 16, height: 16)
+            } else { NativeIcon(page.symbol, size: 16) }
+        }
+        .frame(width: 36, height: 32)
+        .foregroundStyle(plate == page ? Theme.sidebarInk : Theme.sidebarMuted)
+        .overlay(alignment: .topTrailing) {
+            if sidebarBadges, !badge(page).isEmpty { Circle().fill(Theme.accent).frame(width: 5, height: 5).offset(x: -5, y: 5) }
+        }
+        .nativeSidebarRow(selected: plate == page, namespace: navigation) {
+            if page == .results { resultsRun = nil }; navigate(page)
+        }
+        .help(badge(page).isEmpty ? page.title : page.title + " · " + badge(page))
+        .accessibilityLabel(page.title)
+    }
+    /// The route new Claude Code sessions take: the one fact every page depends on.
+    private var footer: some View {
+        let shim = NativeShellPolicy.shim(routeStatus)
+        let route = NativeShellPolicy.route(routeStatus)
+        return VStack(alignment: .leading, spacing: 8) {
+            NativeUpdateSidebarButton(model: session.updates)
+            NativeRouteButton(name: route.name, model: route.model,
+                              warning: shim.state == .down ? shim.text : shim.state == .legacy ? shim.text : "",
+                              failing: shim.state == .down) { navigate(.switcher) }
+            if let error = session.error {
+                Text("Startup failed: " + error).font(Theme.ui(11)).foregroundStyle(Theme.failFg).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 9)
+            }
+        }.padding(10)
+    }
+    private func badge(_ page: NativeDestination) -> String {
+        if page == .jobs { return activeJobs > 0 ? String(activeJobs) : "" }
+        if [.code, .arena].contains(page) { return badges[page.rawValue].int > 0 ? badges[page.rawValue].string : "" }
+        if page == .battery { return badges["battery"].isNull ? "" : badges["battery"].string + "%" }
+        if page == .energy { return badges["energy"].isNull ? "" : badges["energy"].string }
+        return ""
+    }
+    private func navigationRow(_ page: NativeDestination) -> some View {
+        HStack(spacing: 9) {
+            if page == .fans {
+                NativeSpinningFan(rpm: fansSpinning ? 1250 : 0, size: 15).nativeMotionVisibility(initiallyVisible: false).frame(width: 15, height: 15)
+            } else { NativeIcon(page.symbol, size: 15) }
+            Text(page.title).font(Theme.ui(Theme.textSm, weight: plate == page ? .medium : .regular)).lineLimit(1)
+            Spacer(minLength: 4)
+            if sidebarBadges, !badge(page).isEmpty {
+                Text(badge(page)).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+        }.padding(.horizontal, 9).frame(height: 30)
+            .foregroundStyle(plate == page ? Theme.sidebarInk : Theme.sidebarMuted)
+            .nativeSidebarRow(selected: plate == page, namespace: navigation) {
                 if page == .results { resultsRun = nil }; navigate(page)
             }
+    }
+    private var paletteCommands: [NativeCommand] {
+        let pages = [NativeDestination.home] + visibleSections.flatMap(\.pages) + [.jobs, .settings]
+        var commands = pages.map { page in
+            NativeCommand(id: "page." + page.rawValue, title: page.title, group: page.section.isEmpty ? "Go to" : page.section, symbol: page.symbol,
+                          current: page == destination) { if page == .results { resultsRun = nil }; navigate(page) }
+        }
+        commands.append(NativeCommand(id: "reload", title: "Reload this page", group: "Window", symbol: "refresh-cw", hint: "\u{2318}R") {
+            NotificationCenter.default.post(name: .nativePageReload, object: nil)
+        })
+        commands.append(NativeCommand(id: "sidebar", title: sidebarOpen ? "Collapse sidebar" : "Expand sidebar", group: "Window", symbol: "panel-left", hint: "\u{2318}B", action: toggleSidebar))
+        for (value, title, symbol) in [("light", "Light appearance", "sun"), ("dark", "Dark appearance", "moon"), ("auto", "Match macOS appearance", "monitor")] where value != appearance {
+            commands.append(NativeCommand(id: "appearance." + value, title: title, group: "Window", symbol: symbol) { appearance = value })
+        }
+        return commands
     }
     private func navigate(_ page: NativeDestination) {
         guard NativeShellPolicy.admits(page.rawValue, batterySupported: batterySupported) else { return }
@@ -339,7 +433,7 @@ struct NativeShell: View {
         UserDefaults.standard.set(page.rawValue, forKey: "uniapi-native-page")
     }
     private func toggleSidebar() {
-        withAnimation(reduceMotion ? nil : .spring(duration: 0.34, bounce: 0.08)) { sidebarOpen.toggle() }
+        withAnimation(reduceMotion ? nil : NativeMotion.sidebar) { sidebarOpen.toggle() }
         UserDefaults.standard.set(sidebarOpen, forKey: "uniapi-sidebar")
     }
     private func refreshBadges() async {
@@ -374,6 +468,71 @@ struct NativeShell: View {
         } catch {
             if reads.accepts(ticket) { routeStatus = ["error": .string(error.localizedDescription)] }
         }
+    }
+}
+
+enum NativeShellMetrics {
+    /// Height of the strip the window buttons sit in.
+    static let titleStrip: CGFloat = 30
+}
+
+/// Opens the command palette. Reads as a field because typing is what follows.
+private struct NativeJumpButton: View {
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.nativeReducedMotion) private var reduceMotion
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                NativeIcon("search", size: 13).foregroundStyle(Theme.faint)
+                Text("Jump to").font(Theme.ui(Theme.textXs + 0.5)).foregroundStyle(hovering ? Theme.dim : Theme.muted)
+                Spacer(minLength: 4)
+                NativeKbd("\u{2318}K")
+            }
+            .padding(.leading, 9).padding(.trailing, 6).frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).fill(hovering ? Theme.sidebarAccent : Theme.subtle))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(hovering ? Theme.input : .clear, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(NativePressStyle(scale: 0.985)).pointingHand().onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+        .accessibilityLabel("Jump to a page or command").help("Jump to a page or command (Command-K)")
+    }
+}
+
+/// Sidebar footer: where new Claude Code sessions go, and the way to change it.
+private struct NativeRouteButton: View {
+    let name: String
+    let model: String
+    let warning: String
+    let failing: Bool
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.nativeReducedMotion) private var reduceMotion
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                NativeIcon(warning.isEmpty ? "route" : "triangle-alert", size: 15)
+                    .foregroundStyle(warning.isEmpty ? Theme.sidebarMuted : failing ? Theme.failFg : Theme.warnFg)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.sidebarInk)
+                        .lineLimit(1).truncationMode(.middle)
+                    Text(warning.isEmpty ? model : warning).font(warning.isEmpty ? Theme.mono(10.5) : Theme.ui(11))
+                        .foregroundStyle(warning.isEmpty ? Theme.sidebarMuted : failing ? Theme.failFg : Theme.warnFg)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+                NativeIcon("arrow-up-right", size: 12).foregroundStyle(Theme.sidebarMuted)
+                    .opacity(hovering ? 1 : 0).offset(x: hovering ? 0 : -3, y: hovering ? 0 : 3)
+            }
+            .padding(.horizontal, 9).padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).fill(hovering ? Theme.subtle : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(NativePressStyle(scale: 0.985)).pointingHand().onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+        .accessibilityLabel("Claude Code route: " + name + (warning.isEmpty ? "" : ". " + warning))
+        .help("Claude Code route. Opens Switcher.")
     }
 }
 

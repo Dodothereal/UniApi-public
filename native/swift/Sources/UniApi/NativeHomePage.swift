@@ -6,7 +6,6 @@ struct NativeHomePage: View {
     let runtime: NativeRuntime
     let navigate: (NativeDestination) -> Void
     @EnvironmentObject private var session: NativeAppSession
-    @Environment(\.nativeInterfaceDensity) private var density
     @State private var snapshot: JSONValue = .null
     @State private var domains: JSONValue = .null
     @State private var error: String?
@@ -21,79 +20,58 @@ struct NativeHomePage: View {
         return .ready
     }
     var body: some View {
-        GeometryReader { geometry in
-        let contentWidth = min(820, geometry.size.width) - 2 * density.pageMargin
-        // Keep the destination title and both header icons inside each card.
-        let summaryCardWidth = 140 + 40 * density.cardScale
-        NativePage(title: "Home", readiness: pageReadiness, showsHeader: false) {
-            VStack(spacing: 12) {
-                UniApiMark(size: 54)
-                (Text("Uni").fontWeight(.bold) + Text("Api").fontWeight(.light)).font(Theme.ui(34)).tracking(-0.34)
-                Text("Benchmark every provider you hold a key for, judge them blind, point Claude Code at whichever one wins, and do the work here.")
-                    .font(Theme.ui(14)).foregroundStyle(Theme.muted).multilineTextAlignment(.center).lineSpacing(3).frame(maxWidth: 430)
-            }.frame(maxWidth: .infinity).padding(.top, 22).padding(.bottom, 6)
+        NativePage(title: "Home", readiness: pageReadiness) {
             if let error { NativeError(message: error) }
             ForEach(domains.object.keys.sorted().filter { !domains[$0]["error"].isNull }, id: \.self) { domain in NativeError(message: domain.capitalized + ": " + domains[domain]["error"].string) }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: contentWidth < 600 ? 1 : 2), spacing: 14) {
-                NativeHomeCard(title: "Claude Code", symbol: "route", action: { navigate(.switcher) }) {
-                    NativeNumberText(text: route.name, font: Theme.ui(21, weight: .semibold))
-                    Text(route.model).font(Theme.mono(12)).foregroundStyle(Theme.muted).lineLimit(1).padding(.top, 3)
-                    HStack(spacing: 6) {
-                        Text("effort " + route.effort).font(Theme.mono(11)).padding(.horizontal, 7).padding(.vertical, 3).background(Theme.subtle, in: RoundedRectangle(cornerRadius: 5))
-                        HStack(spacing: 5) {
-                            NativeStatusDot(color: switcher["shim"]["ok"].bool ? Theme.okFg : Theme.muted, size: 5)
-                            Text(switcher["shim"].isNull ? "Checking shim" : switcher["shim"]["ok"].bool ? "Swift shim available" : switcher["shim"]["legacyPresent"].bool ? "Legacy listener preserved" : "Swift shim unavailable").font(Theme.ui(11))
-                        }.padding(.horizontal, 7).padding(.vertical, 3).background(Theme.subtle, in: RoundedRectangle(cornerRadius: 5))
-                    }.foregroundStyle(Theme.muted).padding(.top, 4)
-                }
-                NativeHomeCard(title: "Benchmark", symbol: "play", action: { navigate(bench["running"].bool ? .speed : .results) }) {
-                    if !bench["error"].isNull {
-                        Text("Benchmark unavailable").font(Theme.ui(21, weight: .semibold))
-                    } else if bench["running"].bool {
-                        NativeNumberText(text: "Run in progress", font: Theme.ui(21, weight: .semibold))
-                        CapsuleBar(fraction: bench["progress"].double, color: Theme.ok)
-                        HStack { NativeStatusDot(color: Theme.okFg, pulse: true); Text("Measuring now").font(Theme.ui(11)).foregroundStyle(Theme.muted) }
-                    } else if !bench["lastRun"].isNull {
-                        let run = bench["lastRun"]
-                        NativeNumberText(text: homeCount(run["pairs"].array.count, "pair") + " measured", font: Theme.ui(21, weight: .semibold))
-                        Text(stamp(run["started"].string) + " · " + run["tier"].string).font(Theme.mono(12)).foregroundStyle(Theme.muted).padding(.top, 3)
-                        HStack(spacing: 6) {
-                            Text(run["err"].int == 0 ? "All " + homeCount(run["ok"].int, "test") + " passed" : "\(run["err"].int) of \(run["ok"].int + run["err"].int) failed")
-                                .font(Theme.ui(11)).foregroundStyle(run["err"].int == 0 ? Theme.okFg : Theme.warnFg)
-                            Text("\(bench["planned"].int) selected").font(Theme.mono(10)).foregroundStyle(Theme.muted)
-                                .padding(.horizontal, 6).padding(.vertical, 2).background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                        }.padding(.top, 4)
-                    } else {
-                        Text(bench.isNull ? "Reading run history…" : "Nothing measured yet").font(Theme.ui(21, weight: .semibold))
-                        Text("Choose providers and models, then start a run.").font(Theme.ui(11)).foregroundStyle(Theme.muted)
-                        if !bench.isNull { Text(homeCount(bench["planned"].int, "selected pair")).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
-                    }
-                }
+            NativeReadoutStrip(minCell: 300) {
+                routeCell
+                benchmarkCell
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: contentWidth < 2 * summaryCardWidth + 12 ? 1 : contentWidth < 4 * summaryCardWidth + 36 ? 2 : 4), spacing: 12) {
-                summaryCard(.code, value: domains["code"].isNull ? "Reading…" : homeCount(domains["code"]["activeThreads"].int, "live thread"), detail: domains["code"].isNull ? "Reading saved threads…" : domains["code"]["pendingPermissions"].int > 0 ? homeCount(domains["code"]["pendingPermissions"].int, "permission") + " waiting" : domains["code"]["lastTitle"].string.isEmpty ? homeCount(domains["code"]["threads"].int, "thread") : domains["code"]["lastTitle"].string)
-                summaryCard(.arena, value: domains["arena"].isNull ? "Reading…" : "\(domains["arena"]["pendingVotes"].int) to judge", detail: domains["arena"].isNull ? "Reading saved matches…" : domains["arena"]["running"].int > 0 ? homeCount(domains["arena"]["running"].int, "match", plural: "matches") + " running" : homeCount(domains["arena"]["matches"].int, "match", plural: "matches"))
-                summaryCard(.transcribe, value: domains["transcribe"].isNull ? "Reading…" : homeCount(domains["transcribe"]["count"].int, "transcript"), detail: domains["transcribe"]["running"].int > 0 ? "\(domains["transcribe"]["running"].int) in progress" : domains["transcribe"]["lastTitle"].string.isEmpty ? "Links and files to text" : domains["transcribe"]["lastTitle"].string)
-                summaryCard(.stats, value: domains["stats"]["loaded"].bool ? NativeNumberFormat.compact(domains["stats"]["grand"].double) + " tokens" : "Reading…", detail: domains["stats"]["loaded"].bool ? (domains["stats"]["provenance"] == "cache" ? "Saved usage · " : "") + homeCount(domains["stats"]["responses"].int, "response") + " · " + homeCount(domains["stats"]["models"].int, "model") : "Usage refresh runs in the background")
-            }
-            if !bench["runs"].array.isEmpty {
-                VStack(spacing: 11) {
-                    SectionLabel(text: "Recent runs") { Button("See all results") { navigate(.results) }.buttonStyle(T3Button(.ghost)) }
+            if !waiting.isEmpty {
+                NativeSection("Waiting on you") {
                     Card(padding: 0) {
-                        ForEach(Array(bench["runs"].array.enumerated()), id: \.element["id"]) { index, run in
-                            if index > 0 { Rectangle().fill(Theme.border).frame(height: 1) }
-                            NativeHomeRunRow(run: run, timestamp: stamp(run["started"].string)) { openRun(run["id"].string) }
+                        NativeStack {
+                            ForEach(waiting, id: \.title) { item in
+                                NativeLinkRow(icon: item.icon, title: item.title, verb: item.verb, tone: Theme.accent) { navigate(item.page) }
+                            }
                         }
                     }
                 }
             }
-            SectionLabel(text: "Activity") { Button("All jobs") { navigate(.jobs) }.buttonStyle(T3Button(.ghost)) }
-            if snapshot.isNull {
-                if error == nil { ShimmerText(text: "Reading recent jobs…").frame(maxWidth: .infinity).padding(.vertical, 28) }
-            } else if snapshot["jobs"].array.isEmpty { NativeEmptyState(title: "No recent jobs", detail: "Background work appears here once started.") }
-            else { ForEach(snapshot["jobs"].array.prefix(4), id: \.self["id"]) { job in
-                NativeJobRow(row: job.object, cancel: { Task { do { _ = try await runtime.jobs.cancel(job["id"].string); await reload(force: true) } catch { self.error = error.localizedDescription } } })
-            } }
+            Card(padding: 0) {
+                NativeStack {
+                    workRow(.code, icon: "bot", value: domains["code"].isNull ? "" : homeCount(domains["code"]["activeThreads"].int, "live thread"),
+                            detail: domains["code"].isNull ? "" : domains["code"]["lastTitle"].string.isEmpty ? homeCount(domains["code"]["threads"].int, "thread") : domains["code"]["lastTitle"].string)
+                    workRow(.arena, icon: "swords", value: domains["arena"].isNull ? "" : homeCount(domains["arena"]["matches"].int, "match", plural: "matches"),
+                            detail: domains["arena"].isNull ? "" : domains["arena"]["running"].int > 0 ? "\(domains["arena"]["running"].int) running" : "")
+                    workRow(.transcribe, icon: "mic", value: domains["transcribe"].isNull ? "" : homeCount(domains["transcribe"]["count"].int, "transcript"),
+                            detail: domains["transcribe"]["running"].int > 0 ? "\(domains["transcribe"]["running"].int) in progress" : domains["transcribe"]["lastTitle"].string)
+                    workRow(.stats, icon: "chart-line", value: domains["stats"]["loaded"].bool ? NativeNumberFormat.compact(domains["stats"]["grand"].double) + " tokens" : "",
+                            detail: domains["stats"]["loaded"].bool ? homeCount(domains["stats"]["responses"].int, "response") + " from " + homeCount(domains["stats"]["models"].int, "model") + (domains["stats"]["provenance"] == "cache" ? ", saved copy" : "") : "")
+                }
+            }
+            if !bench["runs"].array.isEmpty {
+                NativeSection("Recent runs", trailing: { Button("All results") { navigate(.results) }.buttonStyle(T3Button(.ghost)) }) {
+                    Card(padding: 0) {
+                        NativeStack {
+                            ForEach(bench["runs"].array, id: \.self["id"]) { run in
+                                NativeHomeRunRow(run: run, timestamp: stamp(run["started"].string)) { openRun(run["id"].string) }
+                            }
+                        }
+                    }
+                }
+            }
+            if !snapshot["jobs"].array.isEmpty {
+                NativeSection("Jobs", trailing: { Button("All jobs") { navigate(.jobs) }.buttonStyle(T3Button(.ghost)) }) {
+                    Card(padding: 0) {
+                        NativeStack {
+                            ForEach(snapshot["jobs"].array.prefix(4), id: \.self["id"]) { job in
+                                NativeJobRow(row: job.object, cancel: { Task { do { _ = try await runtime.jobs.cancel(job["id"].string); await reload(force: true) } catch { self.error = error.localizedDescription } } })
+                            }
+                        }
+                    }
+                }
+            }
         }.nativePageTask {
             // Subscribe before fanout so a completed usage refresh cannot land
             // between the initial cached read and event subscription.
@@ -122,14 +100,65 @@ struct NativeHomePage: View {
                 guard reads.accepts(periodic) else { return }
                 await reload(force: true)
             }
-        }
         }.nativePageActivity(reads: reads)
     }
-    private func summaryCard(_ page: NativeDestination, value: String, detail: String) -> some View {
-        NativeHomeCard(title: page.title, symbol: page == .code ? "bot" : page == .arena ? "swords" : page == .transcribe ? "mic" : "chart-line", minHeight: 118, action: { navigate(page) }) {
-            NativeNumberText(text: domains[page.rawValue]["error"].isNull || page == .stats && domains["stats"]["loaded"].bool ? value : "Unavailable", font: Theme.ui(17, weight: .semibold))
-            Text(domains[page.rawValue]["error"].isNull ? detail : domains[page.rawValue]["error"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(2)
+
+    /// Things only the user can move forward. Nothing here when nothing waits.
+    private var waiting: [(icon: String, title: String, verb: String, page: NativeDestination)] {
+        var items: [(icon: String, title: String, verb: String, page: NativeDestination)] = []
+        let permissions = domains["code"]["pendingPermissions"].int, votes = domains["arena"]["pendingVotes"].int
+        if permissions > 0 { items.append(("key-round", homeCount(permissions, "permission request") + " in Code", "Review", .code)) }
+        if votes > 0 { items.append(("swords", homeCount(votes, "match", plural: "matches") + " to judge", "Judge", .arena)) }
+        return items
+    }
+    private var routeCell: some View {
+        let shim = switcher["shim"]
+        return NativeHomeCell(label: "Claude Code route", icon: "route", verb: "Switch route", action: { navigate(.switcher) }) {
+            NativeNumberText(text: route.name, font: Theme.ui(Theme.textDisplay - 4, weight: .semibold)).tracking(Theme.tracking(24))
+            Text(route.model).font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle).padding(.top, 6)
+            HStack(spacing: 10) {
+                MonoChip(text: "effort " + route.effort)
+                if !shim.isNull, !shim["ok"].bool {
+                    NativeStatus(text: shim["legacyPresent"].bool ? "Legacy listener kept" : "Shim not running", tone: .warn)
+                }
+            }.padding(.top, 12)
         }
+    }
+    private var benchmarkCell: some View {
+        let run = bench["lastRun"], running = bench["running"].bool
+        return NativeHomeCell(label: "Benchmark", icon: "gauge", verb: running ? "Watch run" : run.isNull ? "Set up a run" : "Open results",
+                              action: { navigate(running || run.isNull ? .speed : .results) }) {
+            if !bench["error"].isNull {
+                Text("Unavailable").font(Theme.ui(Theme.textDisplay - 4, weight: .semibold)).tracking(Theme.tracking(24))
+            } else if running {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    NativeNumberText(text: String(Int((bench["progress"].double * 100).rounded())), font: Theme.num(Theme.textDisplay - 4)).tracking(Theme.tracking(24))
+                    Text("% measured").font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
+                }
+                NativeTickMeter(fraction: bench["progress"].double, color: Theme.accent).padding(.top, 12)
+            } else if !run.isNull {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    NativeNumberText(text: String(run["pairs"].array.count), font: Theme.num(Theme.textDisplay - 4)).tracking(Theme.tracking(24))
+                    Text(run["pairs"].array.count == 1 ? "pair measured" : "pairs measured").font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
+                }
+                Text(stamp(run["started"].string) + "  " + run["tier"].string).font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1).padding(.top, 6)
+                HStack(spacing: 10) {
+                    NativeStatus(text: run["err"].int == 0 ? homeCount(run["ok"].int, "test") + " passed" : "\(run["err"].int) of \(run["ok"].int + run["err"].int) failed",
+                                 tone: run["err"].int == 0 ? .ok : .warn)
+                    if bench["planned"].int > 0 { MonoChip(text: "\(bench["planned"].int) selected") }
+                }.padding(.top, 12)
+            } else {
+                Text(bench.isNull ? " " : "No runs yet").font(Theme.ui(Theme.textDisplay - 4, weight: .semibold)).tracking(Theme.tracking(24))
+                if !bench.isNull {
+                    Text(bench["planned"].int > 0 ? homeCount(bench["planned"].int, "pair") + " selected" : "No models selected").font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.muted).padding(.top, 6)
+                }
+            }
+        }
+    }
+    private func workRow(_ page: NativeDestination, icon: String, value: String, detail: String) -> some View {
+        let failed = !domains[page.rawValue]["error"].isNull && !(page == .stats && domains["stats"]["loaded"].bool)
+        return NativeLinkRow(icon: icon, title: page.title, value: failed ? "Unavailable" : value,
+                             detail: failed ? domains[page.rawValue]["error"].string : detail) { navigate(page) }
     }
     private func reload(force: Bool = false) async {
         guard let subscription, reads.accepts(subscription), let ticket = reads.begin("snapshot") else { return }
@@ -157,9 +186,10 @@ struct NativeHomePage: View {
     private func stamp(_ value: String) -> String { let date = BenchmarkMath.timestamp(value); return date.isFinite && date > 0 ? NativeListTimeFormat.stamp(Date(timeIntervalSince1970: date)) : value }
 }
 
-private struct NativeHomeCard<Content: View>: View {
-    let title: String, symbol: String
-    var minHeight: CGFloat = 152
+/// One of the two facts Home leads with. The whole cell is the control; the
+/// last line names where it goes.
+private struct NativeHomeCell<Content: View>: View {
+    let label: String, icon: String, verb: String
     let action: () -> Void
     @ViewBuilder var content: () -> Content
     @State private var hovering = false
@@ -167,13 +197,25 @@ private struct NativeHomeCard<Content: View>: View {
     @Environment(\.nativeInterfaceDensity) private var density
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 9) { NativeIcon(symbol, size: 13); Text(title).font(Theme.ui(14, weight: .medium)); Spacer(minLength: 0); NativeIcon("arrow-up-right", size: 12).opacity(hovering ? 1 : 0).offset(x: hovering ? 0 : -4) }.foregroundStyle(hovering ? Theme.dim : Theme.muted)
-                VStack(alignment: .leading, spacing: minHeight == 118 ? 6 : 8) { content() }.frame(maxWidth: .infinity, alignment: .leading)
-            }.padding(20 * density.cardScale).frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: .infinity, alignment: .topLeading)
-                .background(hovering ? Theme.popover : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radius))
-                .overlay { RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(hovering ? Theme.input : Theme.border, lineWidth: 1) }
-        }.buttonStyle(.plain).pointingHand().onHover { hovering = $0 }.animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: hovering)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 7) {
+                    NativeIcon(icon, size: 14).foregroundStyle(Theme.faint)
+                    Text(label).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
+                }.padding(.bottom, 14)
+                content()
+                Spacer(minLength: 18)
+                HStack(spacing: 5) {
+                    Text(verb).font(Theme.ui(Theme.textXs, weight: .medium))
+                    NativeIcon("arrow-right", size: 12).offset(x: hovering ? 3 : 0)
+                }.foregroundStyle(hovering ? Theme.ink : Theme.muted)
+            }
+            .padding(20 * density.cardScale)
+            .frame(maxWidth: .infinity, minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
+            .background(hovering ? Theme.subtle : .clear)
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain).pointingHand().onHover { hovering = $0 }
+            .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+            .accessibilityElement(children: .combine).accessibilityHint(verb)
     }
 }
 
@@ -182,22 +224,20 @@ private struct NativeHomeRunRow: View {
     let timestamp: String
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.nativeReducedMotion) private var reduceMotion
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 7) {
-                        Text(timestamp).font(Theme.mono(12))
-                        Text(run["tier"].string).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).padding(.horizontal, 6).padding(.vertical, 2).background(Theme.subtle, in: RoundedRectangle(cornerRadius: 5))
-                    }
-                    Text(homeCount(run["pairs"].array.count, "pair") + " · took " + duration).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1).help(run["id"].string)
-                }
+                Text(timestamp).font(Theme.ui(Theme.textSm, weight: .medium)).monospacedDigit().lineLimit(1).frame(width: 118, alignment: .leading)
+                MonoChip(text: run["tier"].string).frame(width: 84, alignment: .leading)
+                Text(homeCount(run["pairs"].array.count, "pair") + " in " + duration).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1).help(run["id"].string)
                 Spacer(minLength: 8)
-                Text("\(run["ok"].int) passed").font(Theme.mono(11)).foregroundStyle(Theme.okFg).frame(width: 78, alignment: .trailing)
-                Text("\(run["err"].int) failed").font(Theme.mono(11)).foregroundStyle(run["err"].int == 0 ? Theme.muted : Theme.warnFg).frame(width: 78, alignment: .trailing)
-                HStack(spacing: 4) { Text("View"); NativeIcon("arrow-up-right", size: 12) }.font(Theme.ui(12)).foregroundStyle(hovering ? Theme.ink : Theme.muted).frame(width: 54, alignment: .trailing)
-            }.padding(.horizontal, 14).padding(.vertical, 10).background(hovering ? Theme.subtle : .clear).contentShape(Rectangle())
+                Text("\(run["ok"].int) passed").font(Theme.mono(11)).foregroundStyle(Theme.okFg).frame(width: 76, alignment: .trailing)
+                Text("\(run["err"].int) failed").font(Theme.mono(11)).foregroundStyle(run["err"].int == 0 ? Theme.faint : Theme.warnFg).frame(width: 70, alignment: .trailing)
+                NativeIcon("arrow-right", size: 13).foregroundStyle(Theme.muted).opacity(hovering ? 1 : 0).offset(x: hovering ? 0 : -4).frame(width: 16)
+            }.padding(.horizontal, 16).frame(height: 44).nativeRowHover(hovering).contentShape(Rectangle())
         }.buttonStyle(.plain).pointingHand().onHover { hovering = $0 }
+            .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
     }
     private var duration: String {
         let started = BenchmarkMath.timestamp(run["started"].string), finished = BenchmarkMath.timestamp(run["finished"].string)

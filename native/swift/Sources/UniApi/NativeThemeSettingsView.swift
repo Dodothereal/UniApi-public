@@ -18,15 +18,12 @@ struct NativeThemeSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SectionLabel("Custom colors")
-            Text("Changes save immediately on this Mac. Hex values apply when you press Return or leave the field.")
-                .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            HStack {
-                Text("Editing variant").font(Theme.ui(12))
-                Picker("Editing variant", selection: $variant) {
-                    Text("Light").tag(NativeThemePreferences.Variant.light)
-                    Text("Dark").tag(NativeThemePreferences.Variant.dark)
-                }.labelsHidden().pickerStyle(.segmented).frame(width: 150)
+            HStack(spacing: 8) {
+                T3Segmented(options: [(NativeThemePreferences.Variant.light, "Light"), (.dark, "Dark")], selection: variant) { variant = $0 }
+                    .accessibilityLabel("Editing variant")
+                if (colorScheme == .dark) != (variant == .dark) {
+                    Text("Shown in the preview until the app switches appearance.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1)
+                }
                 Spacer()
                 if let undo = paletteUndo {
                     Button("Undo \(undo.variant.rawValue) palette") { undoPalette(undo) }
@@ -34,9 +31,6 @@ struct NativeThemeSettingsView: View {
                 }
                 Button("Reset \(variant.rawValue)") { replacePalette { $0.reset(variant) } }
             }
-            Text("App appearance: \(colorScheme == .dark ? "Dark" : "Light") · Editing: \(variant == .dark ? "Dark" : "Light")" +
-                 ((colorScheme == .dark) == (variant == .dark) ? "" : " · This variant appears in the preview until the app switches appearance."))
-                .font(Theme.ui(11)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], alignment: .leading, spacing: 8) {
                 ForEach(NativeThemePreferences.Preset.allCases, id: \.rawValue) { preset in
                     NativeThemePresetCard(preset: preset, variant: variant, preferences: store.preferences) {
@@ -47,10 +41,9 @@ struct NativeThemeSettingsView: View {
             NativeThemePreview(preferences: store.preferences, variant: variant)
             NativeThemeContrastChecks(preferences: store.preferences, variant: variant, expanded: $showContrast)
             colorRows(common)
-            DisclosureGroup("Advanced colors", isExpanded: $showAdvanced) {
-                colorRows(advanced).padding(.top, 10)
+            NativeDisclosure("Advanced colors", isExpanded: $showAdvanced) {
+                colorRows(advanced)
             }
-            .font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.ink)
         }.onAppear { variant = colorScheme == .dark ? .dark : .light }
     }
 
@@ -113,9 +106,9 @@ private struct NativeThemePresetCard: View {
                 Text(preset.title).font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.ink)
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd)
-                .strokeBorder(selected ? Theme.accent : Theme.border, lineWidth: selected ? 2 : 1))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
+                .strokeBorder(selected ? Theme.accent : Theme.border, lineWidth: selected ? 1.5 : 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -134,17 +127,17 @@ private struct NativeThemeResolvedColors {
 
     func hex(_ token: NativeThemePreferences.Token) -> String { preferences.hex(token, variant) }
     func sidebarText() -> String {
-        preferences.colorOverride(.text, variant) ?? (variant == .dark ? "F1F3F7" : "18181B")
+        preferences.colorOverride(.text, variant) ?? (variant == .dark ? "F5F3F0" : "1F1D19")
     }
     func sidebarMuted() -> String {
-        preferences.colorOverride(.mutedText, variant) ?? (variant == .dark ? "A3A3A3" : "71717B")
+        preferences.colorOverride(.mutedText, variant) ?? (variant == .dark ? "9B9893" : "63605B")
     }
     func statusDot(_ token: NativeThemePreferences.Token) -> String {
         if let value = preferences.colorOverride(token, variant) { return value }
         switch token {
-        case .success: return "00BC7D"
-        case .warning: return "FE9A00"
-        case .failure: return "FB2C36"
+        case .success: return variant == .dark ? "3BB974" : "009956"
+        case .warning: return variant == .dark ? "F5AE39" : "ED990E"
+        case .failure: return variant == .dark ? "F76560" : "BA1D27"
         default: return hex(token)
         }
     }
@@ -184,22 +177,19 @@ private struct NativeThemeContrastChecks: View {
     var body: some View {
         let results = checks
         let low = results.filter { $0.ratio < 4.5 }.count
-        DisclosureGroup(isExpanded: $expanded) {
+        NativeDisclosure(low == 0 ? "Contrast checks" : "Contrast checks", detail: low == 0 ? "" : "\(low) low", tone: low == 0 ? Theme.ink : Theme.warnFg, isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Aim for 4.5:1 for small text. These checks cover common opaque surfaces; translucent overlays and other combinations can differ.")
-                    .font(Theme.ui(11)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    .font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true).padding(.bottom, 4)
                 ForEach(results) { check in
                     HStack {
                         Text(check.label)
                         Spacer()
-                        Text(String(format: "%.1f:1%@", check.ratio, check.ratio < 4.5 ? "  Low" : ""))
+                        Text(String(format: "%.1f:1%@", check.ratio, check.ratio < 4.5 ? "  Low" : "")).monospacedDigit()
                             .foregroundStyle(check.ratio < 4.5 ? Theme.warnFg : Theme.dim)
-                    }.font(Theme.ui(11))
+                    }.font(Theme.ui(Theme.textXs))
                 }
-            }.padding(.top, 8)
-        } label: {
-            Text(low == 0 ? "Contrast checks" : "Contrast checks · \(low) low")
-                .font(Theme.ui(12, weight: .medium)).foregroundStyle(low == 0 ? Theme.ink : Theme.warnFg)
+            }.frame(maxWidth: 420)
         }
     }
 }
@@ -208,46 +198,44 @@ private struct NativeThemePreview: View {
     let preferences: NativeThemePreferences
     let variant: NativeThemePreferences.Variant
     private func color(_ token: NativeThemePreferences.Token) -> Color {
-        let color = Color(hex: UInt32(preferences.hex(token, variant), radix: 16) ?? 0)
-        if variant == .dark && preferences.colorOverride(token, variant) == nil {
-            if token == .border { return color.opacity(0.06) }
-            if token == .field { return color.opacity(0.035) }
-            if token == .input { return color.opacity(0.08) }
-        }
-        return color
+        Color(hex: UInt32(preferences.hex(token, variant), radix: 16) ?? 0)
     }
     var body: some View {
         let resolved = NativeThemeResolvedColors(preferences: preferences, variant: variant)
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 9) {
-                Text("UNIAPI").font(.system(size: 10, weight: .bold)).tracking(1)
-                Text("Overview").font(.system(size: 11, weight: .medium))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Home").font(.system(size: 11, weight: .medium))
                     .foregroundStyle(resolved.color(resolved.sidebarText()))
-                    .padding(7).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(color(.sidebarSelection), in: RoundedRectangle(cornerRadius: 5))
-                Text("Settings").font(.system(size: 11)).foregroundStyle(resolved.color(resolved.sidebarMuted()))
+                    .padding(.horizontal, 8).frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+                    .background(color(.sidebarSelection), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(alignment: .leading) { Capsule().fill(color(.accent)).frame(width: 2.5, height: 12).offset(x: -1) }
+                Text("Results").font(.system(size: 11)).foregroundStyle(resolved.color(resolved.sidebarMuted()))
+                    .padding(.horizontal, 8).frame(minHeight: 24)
                 Spacer(minLength: 0)
-            }.padding(12).frame(width: 120, alignment: .leading)
-                .foregroundStyle(resolved.color(resolved.sidebarText())).background(color(.sidebar))
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Your workspace").font(.system(size: 14, weight: .semibold)).foregroundStyle(color(.text))
-                Text("A small preview of your palette").font(.system(size: 11)).foregroundStyle(color(.secondaryText))
-                    .padding(5).background(color(.surface), in: RoundedRectangle(cornerRadius: 4))
-                HStack(spacing: 7) {
-                    Text("Primary action").font(.system(size: 11, weight: .medium)).foregroundStyle(color(.onAccent))
-                        .padding(.horizontal, 9).padding(.vertical, 5).background(color(.accent), in: RoundedRectangle(cornerRadius: 5))
+            }.padding(10).frame(width: 118, alignment: .leading).background(color(.sidebar))
+            color(.border).frame(width: 1)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("1,284").font(.system(size: 20, weight: .semibold)).monospacedDigit().foregroundStyle(color(.text))
+                Text("Secondary text on a surface").font(.system(size: 11)).foregroundStyle(color(.secondaryText))
+                    .padding(.horizontal, 7).padding(.vertical, 5).background(color(.surface), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(color(.border), lineWidth: 1))
+                HStack(spacing: 8) {
+                    Text("Action").font(.system(size: 11, weight: .medium)).foregroundStyle(color(.background))
+                        .padding(.horizontal, 9).padding(.vertical, 5).background(color(.text), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    Text("On accent").font(.system(size: 11, weight: .medium)).foregroundStyle(color(.onAccent))
+                        .padding(.horizontal, 9).padding(.vertical, 5).background(color(.accent), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     Text("Link").font(.system(size: 11)).foregroundStyle(color(.highlight))
+                    Text("Muted").font(.system(size: 11)).foregroundStyle(color(.mutedText))
                     Circle().fill(resolved.color(resolved.statusDot(.success))).frame(width: 7, height: 7)
                     Circle().fill(resolved.color(resolved.statusDot(.warning))).frame(width: 7, height: 7)
                     Circle().fill(resolved.color(resolved.statusDot(.failure))).frame(width: 7, height: 7)
                 }
-                Text("Palette preview").font(.system(size: 10)).foregroundStyle(color(.mutedText))
             }.padding(14).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .background(color(.background))
         }
-        .frame(height: 126).clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color(.border), lineWidth: 1))
-        .accessibilityElement(children: .combine)
+        .frame(height: 122).clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).stroke(color(.border), lineWidth: 1))
+        .accessibilityElement(children: .ignore).accessibilityLabel("Palette preview")
     }
 }
 
@@ -274,11 +262,12 @@ private struct NativeThemeColorRow: View {
     }
     var body: some View {
         HStack(spacing: 8) {
-            Text(token.title).font(Theme.ui(12)).foregroundStyle(Theme.ink)
+            Text(token.title).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.ink)
             Spacer(minLength: 4)
             ColorPicker(token.title, selection: picker, supportsOpacity: false).labelsHidden()
                 .accessibilityLabel("\(token.title) color")
-            TextField("Hex", text: $draft).font(Theme.mono(11)).frame(width: 75)
+            TextField("Hex", text: $draft).textFieldStyle(.plain).font(Theme.mono(11)).padding(.horizontal, 8).frame(width: 78, height: 26)
+                .nativeFieldChrome(focused: editing, radius: Theme.radiusSm)
                 .focused($editing).accessibilityLabel("\(token.title) hex color")
                 .onSubmit(commit)
                 .onChange(of: editing) { _, focused in

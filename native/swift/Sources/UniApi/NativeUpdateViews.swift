@@ -67,7 +67,7 @@ struct NativeUpdateSettings: View {
             }
         }
         if phase != "unavailable" {
-            SettingRow(title: "Check for updates automatically", desc: "On by default. Looks for a newer GitHub release every few hours and downloads it in the background, so installing is one click. Nothing is installed until you choose to update.") {
+            SettingRow(title: "Check for updates automatically", desc: "Downloads a newer GitHub release in the background. Nothing installs until you choose to update.") {
                 T3Switch(isOn: $automatic).accessibilityLabel("Check for updates automatically")
             }
         }
@@ -84,14 +84,14 @@ struct NativeUpdateSidebarButton: View {
             let phase = model.phase
             Button { if phase == "ready" { session.installUpdate() } } label: {
                 HStack(spacing: 7) {
-                    NativeIcon("download", size: 12, strokeWidth: 2)
+                    NativeIcon("download", size: 13)
                     Text(phase == "ready" ? "Update to " + model.latest : phase == "waiting" ? "Updating when idle" : "Installing update")
                         .font(Theme.ui(11.5, weight: .medium)).lineLimit(1)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 9).frame(height: 28).frame(maxWidth: .infinity)
-                .foregroundStyle(Theme.onAccent)
-                .background(Theme.accent.opacity(phase == "ready" ? 1 : 0.6), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .foregroundStyle(Theme.onInk)
+                .background(Theme.ink.opacity(phase == "ready" ? 1 : 0.55), in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain).disabled(phase != "ready")
