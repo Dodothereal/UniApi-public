@@ -505,7 +505,7 @@ struct NativeSwitcherPage: View {
     private var catalogWorkers: [(key: String, row: JSONValue)] { state.catalogDraft.visibleWorkers(state.codex["models"].array).filter { matches($0, workerQuery) }.map { (NativeSwitcherCatalogDraft.workerID($0), $0) } }
     private var selectedRow: JSONValue? { availableModels.first { $0.key == state.selection.key }?.row }
     private var selectionEffort: String { NativeSwitcherSelectionDraft.supportedEffort(selectedRow, state.selection.effort) }
-    private func readiness(_ label: String, _ value: JSONValue) -> some View { NativeStatusText(text: label, color: value == true ? Theme.okFg : Theme.muted) }
+    private func readiness(_ label: String, _ value: JSONValue) -> some View { NativeStatusText(text: value == true ? label : label + (value.isNull ? ": unknown" : ": not verified"), color: value == true ? Theme.okFg : Theme.muted) }
 }
 
 /// Measure wrapped labels at their actual column width, then give every choice
