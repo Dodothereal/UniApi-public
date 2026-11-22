@@ -88,199 +88,257 @@ struct NativeSwitcherPage: View {
     @State private var showCodexModels = false
     @State private var emptyCodexSource = "subscription"
     @State private var providerToolsID: String?
+    @State private var bridgeOpen = false
+    @Namespace private var routeMarker
+    @Environment(\.nativeReducedMotion) private var reduceMotion
     private var tab: String { NativeSwitcherDisplayPolicies.engine(savedEngine) }
     init(runtime: NativeRuntime) { self.runtime = runtime; _state = StateObject(wrappedValue: NativeSwitcherModel(runtime: runtime)) }
+
     var body: some View {
-        NativePage(title: tab == "claude" ? "Claude Code" : "Codex", subtitle: tab == "claude" ? "What new Claude Code sessions talk to. Sessions already open keep their old route." : "Providers and models for Codex desktop and new CLI sessions.", readiness: state.readiness, actions: {
-            HStack(spacing: 8) {
-                if tab == "claude" { NativeStatusDot(color: state.claude["shim"]["ok"] == true ? Theme.okFg : Theme.muted) }
-                Button { Task { await state.reload() } } label: { HStack(spacing: 6) { NativeIcon("rotate-cw", size: 12); Text("Reload") } }.disabled(state.busy)
-                if tab == "codex" { Button { run("codexAction", ["action": "open"]) } label: { HStack(spacing: 6) { NativeIcon("external-link", size: 12); Text("Open Codex") } }.disabled(state.controlsBusy) }
+        NativePage(title: "Switcher", eyebrow: "Session routing", readiness: state.readiness, actions: {
+            IconPress(icon: "rotate-cw", help: "Reload") { Task { await state.reload() } }.disabled(state.busy)
+            if tab == "codex" {
+                Button("Open Codex", nativeIcon: "external-link") { run("codexAction", ["action": "open"]) }.disabled(state.controlsBusy)
             }
+            Button("Add provider", nativeIcon: "plus") { addProvider = true }
+                .buttonStyle(Press(.primary)).disabled(tab == "claude" ? state.busy : state.controlsBusy)
         }) {
-            T3Segmented(options: [("claude", "Claude Code"), ("codex", "Codex")], selection: tab) { savedEngine = $0 }
-            if !state.error.isEmpty { NativeError(message: state.error) }
-            if !state.message.isEmpty { Text(state.message).font(Theme.ui(12)).foregroundStyle(Theme.muted).textSelection(.enabled) }
-            if state.claude.isNull || state.codex.isNull { ShimmerText(text: "Reading native configuration…") }
-            else if tab == "claude" { claude }
-            else { codex }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    Stops(options: [("claude", "Claude Code"), ("codex", "Codex")], selection: tab) { savedEngine = $0 }
+                    Spacer(minLength: 0)
+                    // What the last action did, said once beside the control row so nothing below moves.
+                    if !state.message.isEmpty, state.error.isEmpty {
+                        Text(state.message).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
+                    }
+                }
+                if !state.error.isEmpty { Notice(text: state.error, tone: .fail).accessibilityLabel("Error: " + state.error) }
+            }
+            if tab == "claude" { claude } else { codex }
         }
         .nativePageTask { await state.begin(runtime) }.nativePageActivity(suspended: { state.stop() })
         .sheet(isPresented: $addProvider) { NativeSwitcherProviderForm { values in await state.act("provider", values) } }
     }
     private func run(_ operation: String, _ values: JSONObject = [:]) { Task { _ = await state.act(operation, values) } }
-    private var claude: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            NativeCard {
-                HStack(spacing: 14) {
-                    NativeIcon(state.claude["snapshot"]["baseUrl"].string.isEmpty ? "sparkle" : "git-branch", size: 17)
-                        .foregroundStyle(Theme.accent).frame(width: 40, height: 40)
-                        .background(Theme.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(state.claude["currentName"].string).font(Theme.ui(18, weight: .semibold))
-                        Text(state.claude["snapshot"]["model"].string.isEmpty ? "No gateway · Claude Code picks its own models" : state.claude["snapshot"]["model"].string).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                    }
-                    Spacer(minLength: 8)
-                    if !state.claude["snapshot"]["baseUrl"].string.isEmpty {
-                        Button("Restore subscription") { run("restore") }.disabled(state.busy)
-                    }
+
+    // ------------------------------------------------------------------
+    // Claude Code
+    // ------------------------------------------------------------------
+
+    private var claudeSnapshot: JSONValue { state.claude["snapshot"] }
+    private var claudeGateway: Bool { !claudeSnapshot["baseUrl"].string.isEmpty }
+    @ViewBuilder private var claude: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            NativeSwitcherStatement(eyebrow: "New Claude Code sessions route to",
+                                    name: state.claude.isNull ? "Reading the route" : state.claude["currentName"].string,
+                                    settled: !state.claude.isNull)
+            NativeSwitcherFact(label: "Model") {
+                if claudeSnapshot["model"].string.isEmpty {
+                    Text(state.claude.isNull ? "" : claudeGateway ? "Not set" : "Claude Code picks its own").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                } else {
+                    Text(claudeSnapshot["model"].string).font(Theme.mono(12)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                 }
             }
-            VStack(alignment: .leading, spacing: 20) {
-                SettingRow(title: "Model", desc: "Gateways need an explicit model ID; the subscription uses its own default.") {
-                    Text(state.claude["snapshot"]["model"].string.isEmpty ? "not set" : state.claude["snapshot"]["model"].string).font(Theme.mono(12)).foregroundStyle(Theme.muted).lineLimit(1).frame(maxWidth: 240, alignment: .trailing)
-                }
-                SettingRow(title: "Thinking effort", desc: "Applies to new Claude sessions.") {
-                    T3Segmented(options: [("", "Default")] + state.claude["efforts"].array.map { ($0.string, $0.string.capitalized) }, selection: state.claude["snapshot"]["effort"].string, enabled: !state.busy) { run("effort", ["effort": $0.isEmpty ? .null : .string($0)]) }
-                }
-                SettingRow(title: "Base URL", desc: "An empty base URL uses the real Anthropic API.") {
-                    Text(state.claude["snapshot"]["baseUrl"].string.isEmpty ? "api.anthropic.com" : state.claude["snapshot"]["baseUrl"].string).font(Theme.mono(12)).foregroundStyle(Theme.muted).lineLimit(1).frame(maxWidth: 240, alignment: .trailing)
+            NativeSwitcherFact(label: "Effort") {
+                Stops(options: [("", "Default")] + state.claude["efforts"].array.map { ($0.string, $0.string.capitalized) },
+                      selection: claudeSnapshot["effort"].string, enabled: !state.busy && !state.claude.isNull) {
+                    run("effort", ["effort": $0.isEmpty ? .null : .string($0)])
                 }
             }
-            Rectangle().fill(Theme.border).frame(height: 1)
-            VStack(alignment: .leading, spacing: 12) {
-                SectionLabel(text: "Providers") {
-                    Button { addProvider = true } label: { HStack(spacing: 6) { NativeIcon("plus", size: 12); Text("Add provider") } }.disabled(state.busy)
-                }
-                Text("API providers can also serve Claude Code. Use switches to it; Enable auto-detects the wire format of one that is benchmark-only.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                Card(padding: 0) {
-                    NativeSwitcherListRow(active: state.claude["snapshot"]["baseUrl"].string.isEmpty) {
-                        HStack(spacing: 11) {
-                            NativeIcon("sparkle", size: 15).foregroundStyle(Theme.muted).frame(width: 30)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Anthropic subscription").font(Theme.ui(14, weight: .medium))
-                                Text("No gateway · Claude Code picks its own models").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                            }
-                            Spacer()
-                            if state.claude["snapshot"]["baseUrl"].string.isEmpty { activeBadge }
-                        }
-                    }
-                    ForEach(state.claude["providers"].array, id: \.self["id"]) { provider in
-                        Rectangle().fill(Theme.border).frame(height: 1)
-                        providerRow(provider)
-                    }
-                }
-                if state.claude["providers"].array.contains(where: { !$0["format"].isNull }) {
-                    Text("Text probes check replies only. Responses and coding tools have separate verification.").font(Theme.ui(11)).foregroundStyle(Theme.muted)
-                }
+            NativeSwitcherFact(label: "Base URL") {
+                Text(state.claude.isNull ? "" : claudeGateway ? claudeSnapshot["baseUrl"].string : "api.anthropic.com")
+                    .font(Theme.mono(12)).foregroundStyle(Theme.dim).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
             }
-            Rectangle().fill(Theme.border).frame(height: 1)
-            SettingRow(title: "Translation shim", desc: state.claude["shim"]["ok"] == true ? "Swift listener is available." : state.claude["shim"]["legacyPresent"] == true ? "The existing legacy listener was preserved." : "Swift listener is unavailable.") {
-                HStack(spacing: 8) {
-                    StatusDot(color: state.claude["shim"]["ok"] == true ? Theme.okFg : Theme.muted, size: 7)
-                    if state.claude["shim"]["owned"] == true { Button("Stop owned shim") { run("stopShim") }.disabled(state.busy) }
-                    else if state.claude["shim"]["ok"] != true { Button("Start native shim") { run("startShim") }.disabled(state.busy) }
-                }
+            NativeSwitcherFact(label: "Shim") { shimLine }
+        }
+        Band(title: "Providers", spacing: 0) {
+            Text("Click a row to route new sessions through it").font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1)
+        } content: {
+            LedgerHead {
+                MicroLabel("Provider").frame(maxWidth: .infinity, alignment: .leading)
+                MicroLabel("Wire").frame(width: 84, alignment: .leading)
+                MicroLabel("Model").frame(width: 200, alignment: .leading)
+                Color.clear.frame(width: 68, height: 1)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                NativeSwitcherRouteRow(active: !state.claude.isNull && !claudeGateway, marker: routeMarker, label: "Use Anthropic subscription",
+                                       action: claudeGateway && !state.busy ? { run("restore") } : nil) {
+                    routeIdentity(name: "Anthropic subscription", detail: "No gateway · Claude Code picks its own models", wire: "")
+                } trailing: {
+                    Color.clear.frame(width: 280, height: 1)
+                } below: { EmptyView() }
+                ForEach(state.claude["providers"].array, id: \.self["id"]) { provider in providerRow(provider) }
+            }
+            .animation(reduceMotion ? nil : NativeMotion.marker, value: state.claude["current"])
+        }
+    }
+    private var shimLine: some View {
+        let shim = state.claude["shim"], up = shim["ok"] == true, legacy = shim["legacyPresent"] == true
+        return HStack(spacing: 10) {
+            if state.claude.isNull { Text("Checking").font(Theme.ui(12.5)).foregroundStyle(Theme.muted) }
+            else {
+                Tag(up ? "Up" : legacy ? "Legacy listener kept" : "Down", tone: up ? Theme.okFg : legacy ? Theme.warnFg : Theme.failFg, dot: true)
+                    .help(up ? "Swift listener is available." : legacy ? "The existing legacy listener was preserved." : "Swift listener is unavailable.")
+                if up, shim["owned"] == true { Text("started here").font(Theme.ui(11.5)).foregroundStyle(Theme.muted) }
+            }
+            Spacer(minLength: 8)
+            if shim["owned"] == true {
+                Button("Stop shim") { run("stopShim") }.buttonStyle(Press(.quiet)).disabled(state.busy).accessibilityLabel("Stop owned shim")
+            } else if !state.claude.isNull, !up {
+                Button("Start shim", nativeIcon: "play") { run("startShim") }.disabled(state.busy).accessibilityLabel("Start native shim")
             }
         }
     }
-    private var activeBadge: some View {
-        HStack(spacing: 5) { NativeIcon("check", size: 12); Text("Active") }.font(Theme.ui(11.5, weight: .medium)).foregroundStyle(Theme.okFg).frame(width: 78, alignment: .trailing)
+    /// `wire` is the detected format, empty for the subscription, nil when undetected.
+    private func routeIdentity(name: String, detail: String, wire: String?, caution: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(detail).font(Theme.ui(11.5)).foregroundStyle(caution ? Theme.warnFg : Theme.muted).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if let wire, !wire.isEmpty { Tag(wire) }
+                else { Text(wire == nil ? "not detected" : "native").font(Theme.mono(10.5)).foregroundStyle(Theme.faint) }
+            }
+            .frame(width: 84, alignment: .leading)
+        }
     }
     private func providerRow(_ provider: JSONValue) -> some View {
-        let id = provider["id"].string, chosen = chosenModel(provider)
-        return NativeSwitcherListRow(active: state.claude["current"] == provider["id"]) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 11) {
-                    providerIdentity(provider).fixedSize(horizontal: true, vertical: false)
-                    Spacer(minLength: 8)
-                    providerRowActions(provider, id: id, chosen: chosen)
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    providerIdentity(provider)
-                    HStack { Spacer(minLength: 0); providerRowActions(provider, id: id, chosen: chosen) }
+        let id = provider["id"].string, chosen = chosenModel(provider), wired = !provider["format"].isNull
+        let direct = !provider["claudeUrl"].string.hasPrefix("http://127.0.0.1:")
+        let stranded = wired && !direct && !state.claude.isNull && state.claude["shim"]["ok"] != true
+        let detail = wired ? switcherCount(provider["models"].array.count, "model") + " · " + (direct ? "direct" : stranded ? "needs the shim" : "via shim") : "Benchmark only"
+        return NativeSwitcherRouteRow(active: state.claude["current"] == provider["id"], marker: routeMarker, label: "Use " + provider["name"].string,
+                                      action: wired && !state.busy ? { run("applyAndProbe", ["id": provider["id"], "model": .string(chosen)]) } : nil) {
+            routeIdentity(name: provider["name"].string, detail: detail, wire: wired ? provider["format"].string : nil, caution: stranded)
+        } trailing: {
+            Group {
+                if wired {
+                    NativeSwitcherRouteModelControl(models: provider["models"].array.map(\.string), chosen: Binding(get: { chosenModel(provider) }, set: { models[id] = $0 }))
+                        .help(chosen).disabled(state.busy)
+                } else {
+                    Button("Enable") { run("provider", ["operation": "adopt", "id": provider["id"]]) }.disabled(state.busy)
+                        .help("Detect the wire format so Claude Code can use this provider")
                 }
             }
+            .frame(width: 200, alignment: .leading)
+            IconPress(icon: "rotate-cw", help: "Refresh models", size: 13) { run("provider", ["operation": "refresh", "id": provider["id"]]) }
+                .accessibilityLabel("Refresh models for " + provider["name"].string).disabled(state.busy)
+            IconPress(icon: "ellipsis", help: "Provider tools", active: providerToolsID == id) { providerToolsID = id }
+                .accessibilityLabel("Tools for " + provider["name"].string)
+                .popover(isPresented: Binding(get: { providerToolsID == id }, set: { if !$0 { providerToolsID = nil } })) { providerTools(provider, chosen: chosen) }
+        } below: {
             if state.claudeProbe["provider"] == provider["id"] {
                 let verdict = state.claudeProbe, working = verdict["ok"] == true && verdict["empty"] != true
-                HStack(alignment: .top) { StatusDot(color: working ? Theme.okFg : Theme.failFg, size: 6); Text(verdict["model"].string + " · " + (working ? "Answered" : "Route check failed") + " · " + String(format: "%.1f s", verdict["ms"].double / 1000)).font(Theme.mono(11)); Spacer() }
-                Text(verdict["message"].string).font(Theme.ui(12)).foregroundStyle(working ? Theme.muted : Theme.failFg).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Tag(working ? "Answered" : "Route check failed", tone: working ? Theme.okFg : Theme.failFg, dot: true)
+                        Text(verdict["model"].string + " · " + String(format: "%.1f s", verdict["ms"].double / 1000))
+                            .font(Theme.mono(11)).foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                    if !verdict["message"].string.isEmpty {
+                        Text(verdict["message"].string).font(Theme.ui(11.5)).foregroundStyle(working ? Theme.muted : Theme.failFg)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.bottom, 12)
+                .help("A text probe checks replies only. Responses and coding tools have separate verification.")
             }
         }
-    }
-    private func providerIdentity(_ provider: JSONValue) -> some View {
-        HStack(spacing: 11) {
-            NativeIcon(provider["directUrl"].isNull ? "git-branch" : "external-link", size: 15).foregroundStyle(state.claude["current"] == provider["id"] ? Theme.accent : Theme.muted).frame(width: 30)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 7) {
-                        Text(provider["name"].string).font(Theme.ui(14, weight: .medium))
-                        if !provider["format"].isNull { Text(provider["format"].string).font(Theme.mono(11)).foregroundStyle(provider["format"] == "anthropic" ? Theme.okFg : Theme.warnFg) }
-                    }
-                    Text(provider["format"].isNull ? "Benchmark-only · not wired for Claude Code yet" : "\(provider["models"].array.count) models · " + (provider["directUrl"].isNull ? "via shim" : "direct")).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                }
-        }
-    }
-    private func providerRowActions(_ provider: JSONValue, id: String, chosen: String) -> some View {
-                HStack(spacing: 8) {
-                    if !provider["format"].isNull {
-                        NativeSwitcherRouteModelControl(models: provider["models"].array.map(\.string), chosen: Binding(get: { chosenModel(provider) }, set: { models[id] = $0 })).frame(width: 190).help(chosen).disabled(state.busy)
-                    } else { Color.clear.frame(width: 190, height: 1) }
-                    Group {
-                        if provider["format"].isNull { Button("Enable") { run("provider", ["operation": "adopt", "id": provider["id"]]) } }
-                        else { Button("Use") { run("applyAndProbe", ["id": provider["id"], "model": .string(chosen)]) }.buttonStyle(T3Button(.primary)) }
-                    }.frame(width: 78, alignment: .trailing).disabled(state.busy)
-                    Button { run("provider", ["operation": "refresh", "id": provider["id"]]) } label: { NativeIcon("rotate-cw", size: 13) }.buttonStyle(T3Button(.ghost)).help("Refresh models").accessibilityLabel("Refresh models for " + provider["name"].string).frame(width: 28).disabled(state.busy)
-                    Button { providerToolsID = id } label: { NativeIcon("ellipsis", size: 13) }
-                        .buttonStyle(T3Button(.ghost)).help("Provider tools").accessibilityLabel("Tools for " + provider["name"].string)
-                        .popover(isPresented: Binding(get: { providerToolsID == id }, set: { if !$0 { providerToolsID = nil } })) { providerTools(provider, chosen: chosen) }
-                }
     }
     private func providerTools(_ provider: JSONValue, chosen: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(provider["name"].string).font(Theme.ui(14, weight: .medium))
-            Text(provider["baseUrl"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                if !provider["format"].isNull {
-                    Button("Save model") { run("modelAndProbe", ["id": provider["id"], "model": .string(chosen)]) }.buttonStyle(T3Button(.ghost)).disabled(chosen.isEmpty || state.busy)
-                    Button("Text probe") { run("probe", ["id": provider["id"], "model": .string(chosen)]) }.buttonStyle(T3Button(.ghost)).disabled(state.busy)
-                }
-                Button { Task { await state.copy(provider["id"]) } } label: { NativeIcon("key-round", size: 12) }.buttonStyle(T3Button(.ghost)).help("Copy key").accessibilityLabel("Copy key for " + provider["name"].string).disabled(provider["hasKey"] != true)
-                Button { run("provider", ["operation": "remove", "id": provider["id"]]) } label: { NativeIcon("trash-2", size: 12) }.buttonStyle(T3Button(.ghost)).foregroundStyle(Theme.failFg).help("Remove provider").accessibilityLabel("Remove " + provider["name"].string).disabled(state.busy)
+        let wired = !provider["format"].isNull
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(provider["name"].string).font(Theme.display(17)).foregroundStyle(Theme.ink).lineLimit(1)
+            Text(provider["baseUrl"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true).padding(.top, 5).padding(.bottom, 12)
+            Rule(strong: true)
+            if wired {
+                NativeSwitcherToolRow(icon: "save", title: "Save model without switching", detail: chosen) {
+                    providerToolsID = nil; run("modelAndProbe", ["id": provider["id"], "model": .string(chosen)])
+                }.disabled(chosen.isEmpty || state.busy).accessibilityLabel("Save model")
+                NativeSwitcherToolRow(icon: "activity", title: "Send a text probe") {
+                    providerToolsID = nil; run("probe", ["id": provider["id"], "model": .string(chosen)])
+                }.disabled(state.busy).accessibilityLabel("Text probe")
+                    .help("A text probe checks replies only. Responses and coding tools have separate verification.")
             }
-        }.padding(16).frame(width: 370).background(Theme.bg).foregroundStyle(Theme.ink)
+            NativeSwitcherToolRow(icon: "key-round", title: "Copy API key") {
+                providerToolsID = nil; Task { await state.copy(provider["id"]) }
+            }.disabled(provider["hasKey"] != true).accessibilityLabel("Copy key for " + provider["name"].string)
+            NativeSwitcherToolRow(icon: "trash-2", title: "Remove provider", danger: true, ruled: false) {
+                providerToolsID = nil; run("provider", ["operation": "remove", "id": provider["id"]])
+            }.disabled(state.busy).accessibilityLabel("Remove " + provider["name"].string)
+        }
+        .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 10).frame(width: 340)
+        .background(Theme.popover).foregroundStyle(Theme.ink)
     }
-    private var codex: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            NativeCard {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Default in config").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                        Text(state.codex["current"]["model"].string.isEmpty ? "Native model default" : state.codex["current"]["model"].string).font(Theme.ui(18, weight: .semibold)).textSelection(.enabled)
-                        Text([state.codex["current"]["source"].string, state.codex["current"]["effort"].string.isEmpty ? "default effort" : state.codex["current"]["effort"].string].filter { !$0.isEmpty }.joined(separator: " · ")).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                    }
-                    Spacer()
-                    Text(state.codex["installed"] == true ? "Codex installed" : "Codex not found").font(Theme.ui(11)).foregroundStyle(Theme.muted).padding(.horizontal, 7).padding(.vertical, 4).background(Theme.subtle, in: RoundedRectangle(cornerRadius: 5))
-                }
-                Text("Already-open tasks can keep their previous model. Reload Codex after a change when requested.").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
+
+    // ------------------------------------------------------------------
+    // Codex
+    // ------------------------------------------------------------------
+
+    @ViewBuilder private var codex: some View {
+        let current = state.codex["current"]
+        VStack(alignment: .leading, spacing: 0) {
+            NativeSwitcherStatement(eyebrow: "New Codex sessions default to",
+                                    name: state.codex.isNull ? "Reading the config" : current["model"].string.isEmpty ? "Codex's own default" : current["model"].string,
+                                    settled: !state.codex.isNull, selectable: !current["model"].string.isEmpty)
+            NativeSwitcherFact(label: "Source") {
+                Text(sourceName(current["source"].string)).font(Theme.ui(12.5)).foregroundStyle(Theme.ink)
             }
-            ForEach(Array(state.codex["warnings"].array.enumerated()), id: \.offset) { _, warning in HStack(alignment: .top, spacing: 8) { NativeIcon("triangle-alert", size: 13); Text(warning.string) }.font(Theme.ui(12)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true) }
-            nativeRoutingSection
-            catalogSection
-            Rectangle().fill(Theme.border).frame(height: 1)
-            defaultSection
-            Rectangle().fill(Theme.border).frame(height: 1)
-            bridgeSection
+            NativeSwitcherFact(label: "Effort") {
+                Text(state.codex.isNull ? "" : current["effort"].string.isEmpty ? "Default" : current["effort"].string.capitalized).font(Theme.ui(12.5)).foregroundStyle(Theme.ink)
+            }
+            NativeSwitcherFact(label: "Codex") {
+                if !state.codex.isNull {
+                    Tag(state.codex["installed"] == true ? "Installed" : "Not found", tone: state.codex["installed"] == true ? Theme.okFg : nil, dot: true)
+                        .help("Tasks that are already open can keep their previous model. Reload Codex after a change when it asks.")
+                }
+            }
+            NativeSwitcherFact(label: "Routing") {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { routingStatus; Spacer(minLength: 8); routingActions }
+                    VStack(alignment: .leading, spacing: 8) { routingStatus; routingActions }.padding(.vertical, 8)
+                }
+            }
+        }
+        if !state.codex["warnings"].array.isEmpty || nativeEditingIssue != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(state.codex["warnings"].array.enumerated()), id: \.offset) { _, warning in Notice(text: warning.string, tone: .warn) }
+                if let issue = nativeEditingIssue, !state.codex.isNull, !state.codex["warnings"].array.contains(.string(issue)) { Notice(text: issue, tone: .warn) }
+            }
+        }
+        defaultSection
+        catalogSection
+        bridgeSection
+    }
+    private func sourceName(_ source: String) -> String {
+        switch source {
+        case "subscription": return "ChatGPT subscription"
+        case "web": return "ChatGPT Web"
+        case "provider": return "API provider"
+        default: return source
         }
     }
-    private var nativeRoutingSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionLabel("UniApi native API routing")
-            NativeCard {
-                Text("Use API providers and ChatGPT subscription models with UniApi's background service. Codex Web GPT is optional.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                HStack(spacing: 18) {
-                    readiness("Connected", state.codex["native"]["connected"])
-                    readiness("Service ready", state.codex["native"]["running"])
-                }
-                if let issue = nativeEditingIssue { Text(issue).font(Theme.ui(12)).foregroundStyle(Theme.warnFg) }
-                NativeScrollRail {
-                    Button("Connect native API routing") { run("codexAction", ["action": "nativeConnect"]) }.buttonStyle(T3Button(.primary))
-                        .disabled(state.controlsBusy || state.codex["native"]["canConnect"] != true)
-                    Button("Restore direct Codex") { run("codexAction", ["action": "restore"]) }
-                        .disabled(state.controlsBusy || state.codex["restoreAvailable"] != true)
-                }
-                Text("Connecting hands off an idle Web route and keeps the selected default, providers and workers. Reload Codex when requested.").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-            }
+    private var routingStatus: some View {
+        HStack(spacing: 6) {
+            statusTag(state.codex["native"]["connected"], yes: "Connected", no: "Not connected")
+            statusTag(state.codex["native"]["running"], yes: "Service ready", no: "Service down")
         }
+        .help("UniApi's background service routes API providers and ChatGPT subscription models. Connecting hands off an idle Web route and keeps the selected default, providers and workers.")
+    }
+    private var routingActions: some View {
+        HStack(spacing: 8) {
+            Button("Restore direct Codex") { run("codexAction", ["action": "restore"]) }.buttonStyle(Press(.quiet))
+                .disabled(state.controlsBusy || state.codex["restoreAvailable"] != true)
+            Button("Connect", nativeIcon: "plug") { run("codexAction", ["action": "nativeConnect"]) }
+                .disabled(state.controlsBusy || state.codex["native"]["canConnect"] != true)
+                .accessibilityLabel("Connect native API routing")
+        }
+    }
+    private func statusTag(_ value: JSONValue, yes: String = "Available", no: String = "Not verified") -> some View {
+        Tag(value.isNull ? "Unknown" : value.bool ? yes : no, tone: value == true ? Theme.okFg : nil, dot: true)
     }
     private var nativeEditingIssue: String? {
         if !state.codex["native"]["error"].isNull { return state.codex["native"]["error"].string }
@@ -307,51 +365,198 @@ struct NativeSwitcherPage: View {
         }
         return NativeSwitcherDisplayPolicies.selectionIssue(codexEditingStatus, model: row)
     }
-    private var catalogSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SectionLabel("Models in Codex")
-            Text("Keep native and API models in one picker, with Web models when the optional bridge is connected. One native row is reserved; select at most four preferred workers. Existing chats retain their current roster until reloaded.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-            VStack(alignment: .leading, spacing: 8) {
-                let providers = state.catalogDraft.visibleProviders(state.codex["catalog"]["providers"].array)
-                HStack {
-                    Text("API providers").font(Theme.ui(14, weight: .medium))
-                    Spacer()
-                    Button { addProvider = true } label: { HStack(spacing: 6) { NativeIcon("plus", size: 12); Text("Add provider") } }
-                        .disabled(state.controlsBusy)
-                }
-                if providers.isEmpty {
-                    Text("Add a provider to set up its API models for Codex.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                }
-                ForEach(providers, id: \.self["id"]) { provider in
-                    HStack(alignment: .top, spacing: 8) {
-                        NativeSwitcherCheckRow(title: provider["name"].string, detail: provider["id"].string, checked: state.catalogDraft.providerIDs.contains(provider["id"].string)) { state.catalogDraft.toggleProvider(provider, models: state.codex["models"].array) }
-                            .disabled(state.controlsBusy || !state.catalogDraft.providerIDs.contains(provider["id"].string) && provider["available"] != true)
-                        Button("Check route") { run("verifyProvider", ["id": provider["id"]]) }.disabled(state.controlsBusy || !state.codex["catalog"]["providers"].array.contains { $0["id"] == provider["id"] }).padding(.top, 7)
-                    }
-                    if !provider["reason"].isNull { Text(provider["reason"].string).font(Theme.ui(11)).foregroundStyle(Theme.warnFg).padding(.leading, 38) }
-                }
+
+    // The default: source, model, effort, then one explicit save.
+    private var defaultSection: some View {
+        Band("Change the default", spacing: 0) {
+            OptionRow(title: "Source") {
+                Stops(options: [("subscription", "ChatGPT subscription"), ("web", "ChatGPT Web"), ("provider", "API providers")],
+                      selection: codexSource, enabled: !state.controlsBusy) { chooseSource($0) }
             }
-            VStack(alignment: .leading, spacing: 10) {
-                HStack { Text("Preferred worker models").font(Theme.ui(14, weight: .medium)); Spacer(); Text("\(state.catalogDraft.workers.count) / 4").font(Theme.mono(12)).foregroundStyle(Theme.muted) }
-                customModelControls
-                T3Field(placeholder: "Search preferred workers", text: $workerQuery)
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 4) {
-                        ForEach(catalogWorkers, id: \.key) { item in
-                            let row = item.row
-                            let worker = NativeSwitcherCatalogDraft.workerID(row), checked = state.catalogDraft.workers.contains(worker)
-                            NativeSwitcherCheckRow(title: modelLabel(row) + (row["workerReserved"] == true ? " · Reserved" : ""), detail: row["id"].string, checked: checked) { state.catalogDraft.toggleWorker(row) }
-                                .disabled(state.controlsBusy || !checked && (row["workerReserved"] == true || row["available"] != true || state.catalogDraft.workers.count >= 4))
-                            if row["available"] != true || row["workerReserved"] == true { Text(row["workerReserved"] == true ? "Included in the reserved native slot." : row["reason"].string).font(Theme.ui(11)).foregroundStyle(Theme.muted).padding(.leading, 38) }
+            OptionRow(title: codexSource == "web" ? "Web model and mode" : "Model", detail: selectedRow.map(modelLabel) ?? "") {
+                Button { showCodexModels = true } label: {
+                    NativeSwitcherTrigger(text: selectedRow.map { $0["name"].string.isEmpty ? $0["id"].string : $0["name"].string } ?? "Choose model")
+                        .frame(maxWidth: 260)
+                }
+                .buttonStyle(.plain).disabled(state.controlsBusy)
+                .popover(isPresented: $showCodexModels) { codexModels }
+            }
+            if let row = selectedRow {
+                if !row["efforts"].array.isEmpty {
+                    OptionRow(title: "Reasoning effort", detail: codexSource == "web" ? "Web mode names come from ChatGPT and are separate from native Codex effort." : "") {
+                        Pick(title: "Reasoning effort", selection: Binding(get: { selectionEffort }, set: { state.selection.effort = $0 }),
+                             options: [(value: "", label: "Default")] + row["efforts"].array.map { (value: $0.string, label: $0.string) }, width: 150)
+                            .disabled(state.controlsBusy)
+                    }
+                }
+                HStack(alignment: .center, spacing: 12) {
+                    if let issue = codexSelectionIssue(row) {
+                        Text(issue).font(Theme.ui(11.5)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    Button("Set as Codex default", nativeIcon: "check") {
+                        run("codexSelect", ["source": row["source"], "providerId": row["providerId"], "model": row["id"], "effort": selectionEffort.isEmpty ? .null : .string(selectionEffort)])
+                    }
+                    .disabled(state.controlsBusy || codexSelectionIssue(row) != nil || NativeSwitcherModelKey(row).matches(state.codex["current"]) && selectionEffort == state.codex["current"]["effort"].string)
+                }
+                .padding(.top, 14)
+            }
+        }
+    }
+    private var codexSource: String { selectedRow?["source"].string ?? emptyCodexSource }
+    private func chooseSource(_ source: String) {
+        emptyCodexSource = source
+        state.selection.choose(availableModels.first { $0.row["source"] == .string(source) && $0.key.matches(state.codex["current"]) }?.row ?? availableModels.first { $0.row["source"] == .string(source) && $0.row["available"] == true }?.row ?? availableModels.first { $0.row["source"] == .string(source) }?.row)
+    }
+    private var codexModels: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Choose model").font(Theme.display(17)).foregroundStyle(Theme.ink)
+            Entry(placeholder: "Search model or provider", text: $codexQuery, icon: "search", autoFocus: true)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    let sourceModels = availableModels.filter { $0.row["source"] == .string(codexSource) }
+                    let matching = sourceModels.filter { matches($0.row, codexQuery) }
+                    if sourceModels.isEmpty {
+                        Blank(icon: "archive", title: codexSource == "web" ? "No ChatGPT Web models detected" : "No models listed",
+                              detail: codexSource == "web" ? "Open setup, complete browser sign-in, then reload this page." : "Reload after configuring a compatible source.")
+                    } else if matching.isEmpty {
+                        Blank(icon: "search", title: "No matching models", detail: "Try a different model or provider name.")
+                    }
+                    ForEach(matching, id: \.key) { item in
+                        let available = item.row["available"] == true
+                        NativeSwitcherChoiceRow(selected: state.selection.key == item.key, enabled: !state.controlsBusy && available) {
+                            state.selection.choose(item.row); showCodexModels = false
+                        } content: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.label).font(Theme.ui(12.5)).foregroundStyle(available ? Theme.ink : Theme.muted)
+                                Text(item.row["id"].string).font(Theme.mono(10.5)).foregroundStyle(Theme.muted)
+                                if !available {
+                                    Text(item.row["reason"].string.isEmpty ? "Unavailable" : item.row["reason"].string)
+                                        .font(Theme.ui(11.5)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(.vertical, 7)
                         }
                     }
-                }.frame(maxHeight: 288)
+                }
+                .padding(.horizontal, 8)
             }
-            if state.catalogDraft.workers.count >= 4 { Text("All four preferred worker slots are full. You can still add a model; remove a worker to select it.").font(Theme.ui(11)).foregroundStyle(Theme.muted) }
-            if let issue = codexCatalogIssue { Text(issue).font(Theme.ui(11)).foregroundStyle(Theme.warnFg) }
-            HStack(spacing: 12) {
-                Button("Save catalog and workers") { run("catalog", state.catalogDraft.body) }.buttonStyle(T3Button(.primary)).disabled(state.controlsBusy || !state.catalogDraft.dirty || state.catalogDraft.workers.count > 4 || codexCatalogIssue != nil)
-                Text(state.catalogDraft.dirty ? "Unsaved catalog changes" : "Catalog matches saved settings").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
+            .frame(height: 300).padding(.horizontal, -8)
+        }
+        .padding(20).frame(width: 460).background(Theme.popover).foregroundStyle(Theme.ink)
+    }
+
+    // The catalog: which providers and which worker models Codex lists.
+    private var catalogSection: some View {
+        Band(title: "Models in Codex", spacing: 20) {
+            HStack(spacing: 10) {
+                Text(state.catalogDraft.dirty ? "Unsaved changes" : "Saved").font(Theme.ui(11.5))
+                    .foregroundStyle(state.catalogDraft.dirty ? Theme.warnFg : Theme.muted)
+                    .accessibilityLabel(state.catalogDraft.dirty ? "Unsaved catalog changes" : "Catalog matches saved settings")
+                Button("Save catalog and workers", nativeIcon: "save") { run("catalog", state.catalogDraft.body) }
+                    .disabled(state.controlsBusy || !state.catalogDraft.dirty || state.catalogDraft.workers.count > 4 || codexCatalogIssue != nil)
+            }
+        } content: {
+            if let issue = codexCatalogIssue { Notice(text: issue, tone: .warn) }
+            catalogProviders
+            catalogWorkersList
+        }
+    }
+    private var catalogProviders: some View {
+        let providers = state.catalogDraft.visibleProviders(state.codex["catalog"]["providers"].array)
+        return VStack(alignment: .leading, spacing: 0) {
+            LedgerHead {
+                MicroLabel("API providers").frame(maxWidth: .infinity, alignment: .leading)
+                MicroLabel(switcherCount(state.catalogDraft.providerIDs.count, "listed", plural: "listed"))
+            }
+            if providers.isEmpty {
+                Blank(icon: "plug", title: "No API providers yet", detail: "Add a provider to set up its API models for Codex.",
+                      actionTitle: "Add provider", primary: false) { addProvider = true }
+            }
+            ForEach(providers, id: \.self["id"]) { provider in
+                let listed = state.catalogDraft.providerIDs.contains(provider["id"].string)
+                HStack(alignment: .center, spacing: 12) {
+                    NativeSwitcherChoiceRow(selected: false, checked: listed, enabled: !state.controlsBusy && (listed || provider["available"] == true), ruled: false) {
+                        state.catalogDraft.toggleProvider(provider, models: state.codex["models"].array)
+                    } content: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 8) {
+                                Text(provider["name"].string).font(Theme.ui(12.5, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                                Text(provider["id"].string).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1)
+                            }
+                            if !provider["reason"].isNull {
+                                Text(provider["reason"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .accessibilityLabel(provider["name"].string)
+                    Button("Check route") { run("verifyProvider", ["id": provider["id"]]) }.buttonStyle(Press(.quiet))
+                        .disabled(state.controlsBusy || !state.codex["catalog"]["providers"].array.contains { $0["id"] == provider["id"] })
+                }
+                .overlay(alignment: .bottom) { Rule() }
+            }
+        }
+    }
+    private var catalogWorkersList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LedgerHead {
+                MicroLabel("Preferred workers")
+                NativeSwitcherSlots(used: state.catalogDraft.workers.count, of: 4)
+                Spacer(minLength: 0)
+                MicroLabel("\(state.catalogDraft.workers.count) of 4")
+                    .accessibilityLabel("\(state.catalogDraft.workers.count) of 4 preferred workers selected")
+            }
+            .help("One native row is reserved. Select at most four preferred workers; chats that are already open keep their roster until reloaded.")
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    Entry(placeholder: "Search preferred workers", text: $workerQuery, icon: "search").frame(maxWidth: 300)
+                    Spacer(minLength: 0)
+                    customModelControls.frame(maxWidth: 420, alignment: .trailing)
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    Entry(placeholder: "Search preferred workers", text: $workerQuery, icon: "search")
+                    customModelControls
+                }
+            }
+            .padding(.vertical, 12)
+            Rule()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(catalogWorkers, id: \.key) { item in
+                        let row = item.row
+                        let worker = NativeSwitcherCatalogDraft.workerID(row), checked = state.catalogDraft.workers.contains(worker)
+                        NativeSwitcherChoiceRow(selected: false, checked: checked,
+                                                enabled: !(state.controlsBusy || !checked && (row["workerReserved"] == true || row["available"] != true || state.catalogDraft.workers.count >= 4))) {
+                            state.catalogDraft.toggleWorker(row)
+                        } content: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 8) {
+                                    Text(modelLabel(row)).font(Theme.ui(12.5, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                                    if row["workerReserved"] == true { Tag("Reserved") }
+                                    Spacer(minLength: 8)
+                                    Text(row["id"].string).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                                }
+                                if row["available"] != true || row["workerReserved"] == true {
+                                    Text(row["workerReserved"] == true ? "Included in the reserved native slot." : row["reason"].string)
+                                        .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(.vertical, 7)
+                        }
+                        .accessibilityLabel(modelLabel(row) + (row["workerReserved"] == true ? " · Reserved" : ""))
+                    }
+                    if catalogWorkers.isEmpty {
+                        Text(workerQuery.isEmpty ? "No models to choose from yet." : "No models match this search.")
+                            .font(Theme.ui(12.5)).foregroundStyle(Theme.muted).padding(.vertical, 16)
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
+            .frame(maxHeight: 288).padding(.horizontal, -8)
+            if state.catalogDraft.workers.count >= 4 {
+                Text("All four preferred worker slots are full. You can still add a model; remove a worker to select it.")
+                    .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).padding(.top, 10)
             }
         }
     }
@@ -360,49 +565,18 @@ struct NativeSwitcherPage: View {
     }
     private var customModelProvider: JSONValue? { customModelProviders.first { $0["id"].string == customModelProviderID } ?? customModelProviders.first }
     private var customModelControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    customModelProviderMenu.frame(width: 190)
-                    customModelField.frame(minWidth: 180)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    customModelProviderMenu
-                    customModelField
-                }
-            }
-            HStack(alignment: .top, spacing: 10) {
-                customModelAddButton.fixedSize()
-                Text(customModelProviders.isEmpty ? "Select an available API provider above to add a custom model." : "Add a model omitted by the provider's model list using its exact ID. Save catalog and workers to apply your choices.")
-                    .font(Theme.ui(11)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            }
+        HStack(spacing: 8) {
+            Pick(title: "Custom model provider",
+                 selection: Binding(get: { customModelProvider?["id"].string ?? "" }, set: { customModelProviderID = $0 }),
+                 options: customModelProviders.map { (value: $0["id"].string, label: $0["name"].string.isEmpty ? $0["id"].string : $0["name"].string) })
+                .disabled(state.controlsBusy || customModelProvider == nil)
+                .help(customModelProvider?["id"].string ?? "Select an available API provider above.")
+            Entry(placeholder: "Exact custom model ID", text: $customModelID, mono: true, onSubmit: { addCustomModel() })
+                .accessibilityLabel("Exact custom model ID").disabled(state.controlsBusy || customModelProvider == nil)
+            Button("Add model", nativeIcon: "plus") { addCustomModel() }
+                .disabled(state.controlsBusy || customModelProvider == nil || customModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-    }
-    private var customModelProviderMenu: some View {
-        let provider = customModelProvider
-        return Menu {
-            ForEach(customModelProviders, id: \.self["id"]) { provider in
-                Button(provider["name"].string.isEmpty ? provider["id"].string : provider["name"].string) { customModelProviderID = provider["id"].string }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Text(provider.map { $0["name"].string.isEmpty ? $0["id"].string : $0["name"].string } ?? "Choose API provider").lineLimit(1)
-                Spacer(minLength: 0)
-                NativeIcon("chevron-down", size: 12).foregroundStyle(Theme.muted)
-            }.font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim).padding(.horizontal, 11).frame(height: 30)
-                .background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                .overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1) }
-        }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).disabled(state.controlsBusy || provider == nil)
-            .accessibilityLabel("Custom model provider").help(provider?["id"].string ?? "Select an available API provider above.")
-    }
-    private var customModelField: some View {
-        T3Field(placeholder: "Exact custom model ID", text: $customModelID, mono: true)
-            .accessibilityLabel("Exact custom model ID").disabled(state.controlsBusy || customModelProvider == nil)
-            .onSubmit { addCustomModel() }
-    }
-    private var customModelAddButton: some View {
-        Button { addCustomModel() } label: { HStack(spacing: 6) { NativeIcon("plus", size: 12); Text("Add model") } }
-            .buttonStyle(T3Button(.outline)).disabled(state.controlsBusy || customModelProvider == nil || customModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .help(customModelProviders.isEmpty ? "Select an available API provider above to add a custom model." : "Add a model the provider's list omits, by its exact ID. Save catalog and workers to apply your choices.")
     }
     private func addCustomModel() {
         let model = customModelID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -427,167 +601,304 @@ struct NativeSwitcherPage: View {
             }
         }
     }
-    private var defaultSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SectionLabel("Model source")
-            NativeSwitcherSourceRow(spacing: 8) {
-                sourceButton("subscription", title: "ChatGPT subscription", detail: "Native Codex models")
-                sourceButton("web", title: "ChatGPT Web", detail: "Browser session")
-                sourceButton("provider", title: "API providers", detail: "Compatible routes")
-            }
-            SettingRow(title: codexSource == "web" ? "Web model and mode" : "Model", desc: "Choose a model, then save to change the default.") {
-                Button { showCodexModels = true } label: { HStack(spacing: 8) { Text(selectedRow.map { $0["name"].string.isEmpty ? $0["id"].string : $0["name"].string } ?? "Choose model").lineLimit(1); NativeIcon("chevron-down", size: 12) } }.frame(maxWidth: 280).disabled(state.controlsBusy)
-                    .popover(isPresented: $showCodexModels) { codexModels }
-            }
-            if let row = selectedRow {
-                Text(modelLabel(row)).font(Theme.mono(11.5)).foregroundStyle(Theme.muted).textSelection(.enabled)
-                if !row["efforts"].array.isEmpty {
-                    SettingRow(title: "Reasoning effort", desc: codexSource == "web" ? "Web modes are separate from native Codex effort." : "Applies to the selected model.") {
-                        Menu {
-                            Button("Default") { state.selection.effort = "" }
-                            ForEach(row["efforts"].array.map(\.string), id: \.self) { effort in Button(effort) { state.selection.effort = effort } }
-                        } label: {
-                            HStack(spacing: 6) { Text(selectionEffort.isEmpty ? "Default" : selectionEffort).lineLimit(1); Spacer(minLength: 0); NativeIcon("chevron-down", size: 12).foregroundStyle(Theme.muted) }
-                                .font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim).padding(.horizontal, 11).frame(width: 150, height: 30)
-                                .background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                                .overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1) }
-                        }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().disabled(state.controlsBusy)
-                    }
-                }
-                if codexSource == "web" { Text("Web mode names come from ChatGPT. They are separate from native Codex reasoning effort.").font(Theme.ui(11.5)).foregroundStyle(Theme.muted) }
-                if let issue = codexSelectionIssue(row) { Text(issue).font(Theme.ui(12)).foregroundStyle(Theme.warnFg) }
-                Button { run("codexSelect", ["source": row["source"], "providerId": row["providerId"], "model": row["id"], "effort": selectionEffort.isEmpty ? .null : .string(selectionEffort)]) } label: { HStack(spacing: 6) { NativeIcon("check", size: 12); Text("Set as Codex default") } }.buttonStyle(T3Button(.primary)).disabled(state.controlsBusy || codexSelectionIssue(row) != nil || NativeSwitcherModelKey(row).matches(state.codex["current"]) && selectionEffort == state.codex["current"]["effort"].string)
-            }
-        }
-    }
-    private var codexSource: String { selectedRow?["source"].string ?? emptyCodexSource }
-    private func sourceButton(_ source: String, title: String, detail: String) -> some View {
-        Button {
-            emptyCodexSource = source
-            state.selection.choose(availableModels.first { $0.row["source"] == .string(source) && $0.key.matches(state.codex["current"]) }?.row ?? availableModels.first { $0.row["source"] == .string(source) && $0.row["available"] == true }?.row ?? availableModels.first { $0.row["source"] == .string(source) }?.row)
-        } label: {
-            VStack(alignment: .leading, spacing: 5) { Text(title).font(Theme.ui(12.5, weight: .medium)); Text(detail).font(Theme.ui(11.5)).foregroundStyle(Theme.muted) }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(.horizontal, 12).padding(.vertical, 10)
-                .background(codexSource == source ? Theme.accent.opacity(0.09) : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                .overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(codexSource == source ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1) }
-        }.buttonStyle(.plain).pointingHand().disabled(state.controlsBusy).accessibilityAddTraits(codexSource == source ? [.isSelected] : [])
-    }
-    private var codexModels: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Choose model").font(Theme.ui(16, weight: .semibold))
-            T3Field(placeholder: "Search model or provider", text: $codexQuery)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    let sourceModels = availableModels.filter { $0.row["source"] == .string(codexSource) }
-                    let matching = sourceModels.filter { matches($0.row, codexQuery) }
-                    if sourceModels.isEmpty {
-                        NativeEmptyState(title: codexSource == "web" ? "No ChatGPT Web models detected" : "No models listed", detail: codexSource == "web" ? "Open setup, complete browser sign-in, then reload this page." : "Reload after configuring a compatible source.")
-                    } else if matching.isEmpty {
-                        NativeEmptyState(title: "No matching models", detail: "Try a different model or provider name.")
-                    }
-                    ForEach(matching, id: \.key) { item in
-                        Button { state.selection.choose(item.row); showCodexModels = false } label: {
-                            HStack(alignment: .top, spacing: 10) {
-                                NativeIcon(state.selection.key == item.key ? "circle-dot" : "circle", size: 14).foregroundStyle(state.selection.key == item.key ? Theme.okFg : Theme.muted)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.label).font(Theme.ui(12.5)).foregroundStyle(item.row["available"] == true ? Theme.ink : Theme.muted)
-                                    Text(item.row["id"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted)
-                                    if item.row["available"] != true { Text(item.row["reason"].string.isEmpty ? "Unavailable" : item.row["reason"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true) }
-                                }
-                                Spacer(minLength: 0)
-                            }.padding(10).background(state.selection.key == item.key ? Theme.subtle : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                        }.buttonStyle(NativeModelChoiceButtonStyle()).pointingHand(!state.controlsBusy && item.row["available"] == true).disabled(state.controlsBusy || item.row["available"] != true).accessibilityAddTraits(state.selection.key == item.key ? [.isSelected] : [])
-                    }
-                }
-            }.frame(height: 300)
-        }.padding(16).frame(width: 460).background(Theme.bg).foregroundStyle(Theme.ink)
+
+    // The optional browser bridge: rarely touched, so it stays folded.
+    private var bridgeChecks: [(label: String, value: JSONValue)] {
+        let bridge = state.codex["bridge"]
+        return [("Installed", bridge["installed"]), ("Configured", bridge["configured"]), ("Runtime", bridge["running"]),
+                ("Sign-in checked", bridge["signInChecked"]), ("Full coding tools", bridge["toolsVerified"])]
     }
     private var bridgeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionLabel("ChatGPT Web bridge")
-            NativeCard {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
-                    readiness("Installed", state.codex["bridge"]["installed"]); readiness("Configured", state.codex["bridge"]["configured"]); readiness("Runtime", state.codex["bridge"]["running"]); readiness("Sign-in checked", state.codex["bridge"]["signInChecked"]); readiness("Full coding tools", state.codex["bridge"]["toolsVerified"])
-                }
-                if state.codex["bridge"]["healthDeferred"] == true { Text("Web runtime checks are deferred while native routing is connected. Use Check connection for an explicit check.").font(Theme.ui(11.5)).foregroundStyle(Theme.muted) }
-                NativeScrollRail {
-                    ForEach(["setup", "doctor", "start", "stop", "connect", "restore"], id: \.self) { action in
-                        Button { run("codexAction", ["action": .string(action)]) } label: {
-                            HStack(spacing: 6) { NativeIcon(action == "setup" ? "globe" : action == "doctor" ? "search-check" : action == "start" ? "play" : action == "stop" ? "square" : action == "connect" ? "plug" : "unplug", size: 12); Text(action == "setup" ? "Open Web GPT" : action == "doctor" ? "Check connection" : action == "start" ? "Start bridge" : action == "stop" ? "Stop bridge" : action == "connect" ? "Connect" : "Restore direct Codex") }
-                        }.disabled(state.controlsBusy || action == "restore" && state.codex["restoreAvailable"] != true || action == "stop" && state.codex["bridge"]["canStop"] != true || action == "connect" && (state.codex["native"]["connected"] == true || !state.codex["native"]["error"].isNull || !state.codex["native"]["phase"].isNull))
+        let ready = bridgeChecks.filter { $0.value == true }.count
+        return Band(title: "ChatGPT Web bridge", spacing: 16) {
+            HStack(spacing: 8) {
+                Tag("Optional · \(ready) of \(bridgeChecks.count) ready", tone: ready == bridgeChecks.count ? Theme.okFg : nil)
+                Button { withAnimation(reduceMotion ? nil : NativeMotion.toggle) { bridgeOpen.toggle() } } label: {
+                    HStack(spacing: 5) {
+                        Text(bridgeOpen ? "Hide" : "Show")
+                        NativeIcon("chevron-right", size: 11, strokeWidth: 1.75).rotationEffect(.degrees(bridgeOpen ? 90 : 0))
                     }
                 }
-                Text("Browser text access is separate from full local coding tools. Verification runs one explicit ephemeral tool check and stores evidence for the current bridge configuration.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                if NativeSwitcherDisplayPolicies.checksRunning(state.jobs) { Text("A Codex verification is queued or running. Follow it in Jobs before starting another check.").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
-                Button("Verify coding tools") { run("verifyCodexTools") }.disabled(state.controlsBusy || state.codex["installed"] != true || !state.codex["configError"].isNull || state.codex["bridge"]["mode"] != "full" || state.codex["bridge"]["busy"] != false || state.codex["bridge"]["signInChecked"] != true)
+                .buttonStyle(Press(.quiet)).accessibilityLabel("ChatGPT Web bridge").accessibilityValue(bridgeOpen ? "Expanded" : "Collapsed")
+            }
+        } content: {
+            if bridgeOpen {
+                ColumnFlow(minimum: 130, spacing: 24, rowSpacing: 16, maxColumns: 5) {
+                    ForEach(bridgeChecks, id: \.label) { check in
+                        VStack(alignment: .leading, spacing: 7) {
+                            MicroLabel(check.label)
+                            statusTag(check.value)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                if state.codex["bridge"]["healthDeferred"] == true {
+                    Text("Web runtime checks are deferred while native routing is connected. Use Check connection for an explicit check.")
+                        .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
+                if NativeSwitcherDisplayPolicies.checksRunning(state.jobs) {
+                    Notice(text: "A Codex verification is queued or running. Follow it in Jobs before starting another check.")
+                }
+                NativeSwitcherWrap(spacing: 8) {
+                    ForEach(["setup", "doctor", "start", "stop", "connect"], id: \.self) { action in
+                        Button(bridgeActionTitle(action), nativeIcon: bridgeActionIcon(action)) { run("codexAction", ["action": .string(action)]) }
+                            .disabled(state.controlsBusy || action == "stop" && state.codex["bridge"]["canStop"] != true || action == "connect" && (state.codex["native"]["connected"] == true || !state.codex["native"]["error"].isNull || !state.codex["native"]["phase"].isNull))
+                    }
+                    Button("Verify coding tools", nativeIcon: "shield-check") { run("verifyCodexTools") }
+                        .disabled(state.controlsBusy || state.codex["installed"] != true || !state.codex["configError"].isNull || state.codex["bridge"]["mode"] != "full" || state.codex["bridge"]["busy"] != false || state.codex["bridge"]["signInChecked"] != true)
+                        .help("Browser text access is separate from full local coding tools. Verification runs one explicit ephemeral tool check and stores evidence for the current bridge configuration.")
+                }
             }
         }
     }
+    private func bridgeActionTitle(_ action: String) -> String {
+        switch action {
+        case "setup": return "Open Web GPT"
+        case "doctor": return "Check connection"
+        case "start": return "Start bridge"
+        case "stop": return "Stop bridge"
+        default: return "Connect"
+        }
+    }
+    private func bridgeActionIcon(_ action: String) -> String {
+        switch action {
+        case "setup": return "globe"
+        case "doctor": return "search-check"
+        case "start": return "play"
+        case "stop": return "square"
+        default: return "plug"
+        }
+    }
+
     private func chosenModel(_ provider: JSONValue) -> String { models[provider["id"].string] ?? (state.claude["current"] == provider["id"] && !state.claude["snapshot"]["model"].string.isEmpty ? state.claude["snapshot"]["model"].string : provider["model"].string) }
     private func modelLabel(_ row: JSONValue) -> String { (row["name"].string.isEmpty ? row["id"].string : row["name"].string) + " · " + (row["source"] == "provider" ? row["providerId"].string : row["source"].string) + (row["custom"] == true ? " · User-added" : "") }
     private var availableModels: [(key: NativeSwitcherModelKey, label: String, row: JSONValue)] { state.codex["models"].array.map { (NativeSwitcherModelKey($0), modelLabel($0), $0) } }
     private func matches(_ row: JSONValue, _ query: String) -> Bool { query.lowercased().split(whereSeparator: \.isWhitespace).allSatisfy { (modelLabel(row) + " " + row["id"].string).lowercased().contains($0) } }
-    private var filteredModels: [(key: NativeSwitcherModelKey, label: String, row: JSONValue)] { availableModels.filter { $0.key == state.selection.key || matches($0.row, codexQuery) } }
     private var catalogWorkers: [(key: String, row: JSONValue)] { state.catalogDraft.visibleWorkers(state.codex["models"].array).filter { matches($0, workerQuery) }.map { (NativeSwitcherCatalogDraft.workerID($0), $0) } }
     private var selectedRow: JSONValue? { availableModels.first { $0.key == state.selection.key }?.row }
     private var selectionEffort: String { NativeSwitcherSelectionDraft.supportedEffort(selectedRow, state.selection.effort) }
-    private func readiness(_ label: String, _ value: JSONValue) -> some View { HStack { Text(label).font(Theme.ui(12)); Spacer(); Text(value.isNull ? "Unknown" : value.bool ? "Available" : "Not verified").font(Theme.mono(11)).foregroundStyle(value == true ? Theme.okFg : Theme.muted) } }
 }
 
-/// Measure wrapped labels at their actual column width, then give every choice
-/// the tallest natural height. ScrollView's unbounded height is never reused as
-/// a frame, and choosing a source does not change the geometry of its siblings.
-private struct NativeSwitcherSourceRow: Layout {
-    let spacing: CGFloat
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard !subviews.isEmpty else { return .zero }
-        let gaps = spacing * CGFloat(subviews.count - 1)
-        let natural = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
-        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? natural * CGFloat(subviews.count) + gaps
-        let column = max(0, (width - gaps) / CGFloat(subviews.count))
-        let height = subviews.map { $0.sizeThatFits(.init(width: column, height: nil)).height }.max() ?? 0
-        return CGSize(width: max(0, width), height: height)
-    }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard !subviews.isEmpty else { return }
-        let column = max(0, (bounds.width - spacing * CGFloat(subviews.count - 1)) / CGFloat(subviews.count))
-        for (index, view) in subviews.enumerated() {
-            view.place(at: CGPoint(x: bounds.minX + CGFloat(index) * (column + spacing), y: bounds.minY),
-                       anchor: .topLeading, proposal: .init(width: column, height: bounds.height))
+private func switcherCount(_ count: Int, _ noun: String, plural: String? = nil) -> String {
+    "\(count) " + (count == 1 ? noun : plural ?? noun + "s")
+}
+
+/// The page's reading: where new sessions go, set large. It hangs from a rule
+/// whose tick carries the signal color because this is the live route.
+private struct NativeSwitcherStatement: View {
+    let eyebrow: String
+    let name: String
+    var settled = true
+    var selectable = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                Rule()
+                (settled ? Theme.signal : Theme.faint).frame(width: 2, height: 7)
+            }
+            .frame(height: 7, alignment: .top).padding(.bottom, 12)
+            MicroLabel(eyebrow)
+            NativeNumberText(text: name, font: Theme.display(34), color: settled ? Theme.ink : Theme.muted)
+                .minimumScaleFactor(0.55).padding(.top, 8).padding(.bottom, 18)
+                .help(selectable ? name : "")
+            Rule(strong: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore).accessibilityLabel(eyebrow).accessibilityValue(name)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
-private struct NativeSwitcherListRow<Content: View>: View {
-    var active = false
+/// One line of the compact ledger under the statement: an engraved key, then
+/// its value or control.
+private struct NativeSwitcherFact<Value: View>: View {
+    let label: String
+    @ViewBuilder var value: () -> Value
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            MicroLabel(label).frame(width: 84, alignment: .leading)
+            value().frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+        .overlay(alignment: .bottom) { Rule() }
+    }
+}
+
+/// A provider line. The identity is the switch: one click routes new sessions
+/// here. The row's own controls sit beside it rather than inside the button,
+/// and the signal tick travels to whichever row is live.
+private struct NativeSwitcherRouteRow<Main: View, Trailing: View, Below: View>: View {
+    var active: Bool
+    var marker: Namespace.ID
+    var label: String
+    var action: (() -> Void)?
+    @ViewBuilder var main: () -> Main
+    @ViewBuilder var trailing: () -> Trailing
+    @ViewBuilder var below: () -> Below
+    @State private var hovering = false
+    @Environment(\.nativeReducedMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Button { action?() } label: {
+                    main().frame(maxWidth: .infinity, minHeight: 50, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(NativeModelChoiceButtonStyle()).disabled(action == nil).pointingHand(action != nil)
+                .accessibilityLabel(label).accessibilityValue(active ? "Active" : "")
+                .accessibilityAddTraits(active ? .isSelected : [])
+                .onHover { hovering = $0 }
+                trailing()
+            }
+            below()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous)
+                .fill(active ? Theme.pressed : hovering && action != nil ? Theme.hover : .clear)
+                .padding(.horizontal, -8)
+        }
+        .overlay(alignment: .topLeading) {
+            if active {
+                Theme.signal.frame(width: 2, height: 14).matchedGeometryEffect(id: "route", in: marker).offset(x: -8, y: 18)
+            }
+        }
+        .overlay(alignment: .bottom) { Rule() }
+        .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+    }
+}
+
+/// A choice in a list: selected rows carry the signal tick, checked rows a
+/// filled box. A disabled choice keeps its explanation readable.
+struct NativeSwitcherChoiceRow<Content: View>: View {
+    var selected: Bool
+    var checked: Bool? = nil
+    var enabled = true
+    var ruled = true
+    var action: () -> Void
     @ViewBuilder var content: () -> Content
     @State private var hovering = false
+    @Environment(\.nativeReducedMotion) private var reduceMotion
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) { content() }
-            .padding(.horizontal, 14).padding(.vertical, 11)
-            .background(active ? Theme.accent.opacity(0.09) : hovering ? Theme.subtle : .clear)
-            .onHover { hovering = $0 }
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 10) {
+                if let checked {
+                    NativeIcon(checked ? "square-check" : "square", size: 14, strokeWidth: 1.75)
+                        .foregroundStyle(checked ? Theme.ink : enabled ? Theme.muted : Theme.faint)
+                }
+                content().frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous)
+                    .fill(selected ? Theme.pressed : hovering && enabled ? Theme.hover : .clear)
+                    .padding(.horizontal, -8)
+            }
+            .overlay(alignment: .leading) { if selected { Theme.signal.frame(width: 2, height: 14).offset(x: -8) } }
+            .overlay(alignment: .bottom) { if ruled { Rule() } }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(NativeModelChoiceButtonStyle()).disabled(!enabled).pointingHand(enabled)
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+        .accessibilityValue(checked.map { $0 ? "Selected" : "Not selected" } ?? "")
+        .accessibilityAddTraits(selected || checked == true ? [.isSelected] : [])
     }
 }
 
-private struct NativeSwitcherCheckRow: View {
-    let title: String, detail: String
-    let checked: Bool
+/// One action in a provider's tools popover.
+private struct NativeSwitcherToolRow: View {
+    let icon: String
+    let title: String
+    var detail = ""
+    var danger = false
+    var ruled = true
     let action: () -> Void
-    @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
     var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 12) {
-                NativeIcon(checked ? "square-check" : "square", size: 14).foregroundStyle(checked ? Theme.accent : Theme.muted).padding(.top, 2)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(Theme.ui(12.5, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                    Text(detail).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+        LedgerRow(minHeight: 38, ruled: ruled, action: action) {
+            HStack(spacing: 10) {
+                NativeIcon(icon, size: 14, strokeWidth: 1.75).foregroundStyle(danger ? Theme.failFg : Theme.muted)
+                Text(title).font(Theme.ui(12.5)).foregroundStyle(danger ? Theme.failFg : Theme.ink).lineLimit(1)
+                Spacer(minLength: 8)
+                if !detail.isEmpty {
+                    Text(detail).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle).frame(maxWidth: 120, alignment: .trailing)
                 }
-                Spacer(minLength: 0)
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 10)
-                .background(hovering ? Theme.subtle2 : checked ? Theme.subtle : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                .contentShape(Rectangle())
-        }.buttonStyle(.plain).pointingHand().onHover { hovering = $0 }.accessibilityLabel(title).accessibilityValue(checked ? "Selected" : "Not selected").accessibilityAddTraits(checked ? [.isSelected] : [])
+            }
+        }
+        .opacity(enabled ? 1 : 0.4)
+    }
+}
+
+/// A value that opens a chooser: the same face as `Pick`, for popovers.
+struct NativeSwitcherTrigger: View {
+    var text: String
+    var mono = false
+    var fill = false
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(text).font(mono ? Theme.mono(11.5) : Theme.ui(12.5)).lineLimit(1).truncationMode(.middle)
+            if fill { Spacer(minLength: 0) }
+            NativeIcon("chevrons-up-down", size: 12, strokeWidth: 1.75).foregroundStyle(Theme.muted)
+        }
+        .foregroundStyle(Theme.ink).padding(.horizontal, 10).frame(maxWidth: fill ? .infinity : nil).frame(height: 28)
+        .background(hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous).strokeBorder(Theme.ruleStrong, lineWidth: 1))
+        .contentShape(Rectangle()).opacity(enabled ? 1 : 0.4)
+        .onHover { hovering = $0 && enabled }.pointingHand(enabled)
+    }
+}
+
+/// Worker slots drawn as ticks: filled for a taken slot.
+private struct NativeSwitcherSlots: View {
+    let used: Int
+    let of: Int
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<of, id: \.self) { index in
+                (index < used ? Theme.ink : Theme.faint).frame(width: 2, height: 9)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// Buttons in reading order that wrap onto the next line when the page narrows.
+private struct NativeSwitcherWrap: Layout {
+    var spacing: CGFloat = 8
+    private func lines(_ width: CGFloat, _ subviews: Subviews) -> [(range: Range<Int>, height: CGFloat)] {
+        var result: [(range: Range<Int>, height: CGFloat)] = []
+        var start = 0, x: CGFloat = 0, height: CGFloat = 0
+        for (index, view) in subviews.enumerated() {
+            let size = view.sizeThatFits(.unspecified)
+            if index > start, x + size.width > width {
+                result.append((start..<index, height)); start = index; x = 0; height = 0
+            }
+            x += size.width + spacing; height = max(height, size.height)
+        }
+        if start < subviews.count { result.append((start..<subviews.count, height)) }
+        return result
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? subviews.reduce(0) { $0 + $1.sizeThatFits(.unspecified).width + spacing }
+        let rows = lines(width, subviews)
+        return CGSize(width: width, height: rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(0, rows.count - 1)))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in lines(bounds.width, subviews) {
+            var x = bounds.minX
+            for index in row.range {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), anchor: .topLeading, proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
     }
 }
 
@@ -598,28 +909,46 @@ private struct NativeSwitcherRouteModelControl: View {
     @State private var query = ""
     var body: some View {
         Button { query = ""; open = true } label: {
-            HStack(spacing: 6) { Text(chosen.isEmpty ? "pick model" : chosen).font(Theme.mono(11.5)).lineLimit(1); Spacer(minLength: 0); NativeIcon("chevron-down", size: 12) }
-        }.popover(isPresented: $open) {
+            NativeSwitcherTrigger(text: chosen.isEmpty ? "pick model" : chosen, mono: true, fill: true)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $open) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Choose model").font(Theme.ui(16, weight: .semibold))
-                T3Field(placeholder: "Search or enter model ID", text: $query, mono: true)
+                Text("Choose model").font(Theme.display(17)).foregroundStyle(Theme.ink)
+                Entry(placeholder: "Search or enter model ID", text: $query, mono: true, icon: "search", autoFocus: true, onSubmit: { commitQuery() })
                     .accessibilityLabel("Search or enter model ID")
-                    .onSubmit { commitQuery() }
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         let custom = query.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !custom.isEmpty && !models.contains(custom) { Button("Use custom model: " + custom) { chosen = custom; open = false }.buttonStyle(T3Button(.ghost)) }
-                        ForEach(NativeSwitcherDisplayPolicies.matchingModels(models, query: query), id: \.self) { model in
-                            Button { chosen = model; open = false } label: {
-                                HStack(spacing: 10) { NativeIcon(model == chosen ? "circle-dot" : "circle", size: 14).foregroundStyle(model == chosen ? Theme.okFg : Theme.muted); Text(model).font(Theme.mono(12)); Spacer(minLength: 0) }
-                                    .padding(9).background(model == chosen ? Theme.subtle : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                            }.buttonStyle(.plain).pointingHand()
+                        if !custom.isEmpty && !models.contains(custom) {
+                            NativeSwitcherChoiceRow(selected: false) { chosen = custom; open = false } content: {
+                                HStack(spacing: 8) {
+                                    NativeIcon("plus", size: 13, strokeWidth: 1.75).foregroundStyle(Theme.muted)
+                                    Text("Use custom model: " + custom).font(Theme.ui(12.5)).lineLimit(1).truncationMode(.middle)
+                                }
+                            }
                         }
-                        if models.isEmpty { Text("No model list yet. Refresh the provider or enter a custom model ID.").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
+                        ForEach(NativeSwitcherDisplayPolicies.matchingModels(models, query: query), id: \.self) { model in
+                            NativeSwitcherChoiceRow(selected: model == chosen) { chosen = model; open = false } content: {
+                                Text(model).font(Theme.mono(12)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                            }
+                        }
+                        if models.isEmpty {
+                            Text("No model list yet. Refresh the provider or enter a custom model ID.")
+                                .font(Theme.ui(12.5)).foregroundStyle(Theme.muted).padding(.vertical, 14)
+                        }
                     }
-                }.frame(height: 300)
-                HStack { Text("Use or Save model applies this choice.").font(Theme.ui(11)).foregroundStyle(Theme.muted); Spacer(); Button("Done") { if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { open = false } else { commitQuery() } }.buttonStyle(T3Button(.primary)) }
-            }.padding(16).frame(width: 450).background(Theme.bg).foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 8)
+                }
+                .frame(height: 300).padding(.horizontal, -8)
+                HStack(spacing: 12) {
+                    Text("Applied when you click the provider's row.").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 0)
+                    Button("Done") { if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { open = false } else { commitQuery() } }
+                        .buttonStyle(Press(.primary))
+                }
+            }
+            .padding(20).frame(width: 440).background(Theme.popover).foregroundStyle(Theme.ink)
         }
     }
     private func commitQuery() {
@@ -636,11 +965,38 @@ private struct NativeSwitcherProviderForm: View {
     @State private var busy = false
     @State private var failed = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Add API provider").font(Theme.ui(18, weight: .semibold)); T3Field(placeholder: "Name", text: $name); T3Field(placeholder: "Base URL", text: $url, mono: true); T3Field(placeholder: "Free API key", text: $key, mono: true)
-            Text("This explicitly discovers models and detects the provider format. Browser session credentials stay in Codex Web GPT.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            if failed { NativeError(message: "Provider could not be added; inspect the Switcher message and retry explicitly.") }
-            HStack { Button("Cancel") { dismiss() }.buttonStyle(T3Button(.outline)).keyboardShortcut(.cancelAction); Spacer(); Button(busy ? "Detecting…" : "Add and detect") { busy = true; Task { let ok = await save(["operation": "add", "name": .string(name), "url": .string(url), "key": .string(key)]); busy = false; if ok { dismiss() } else { failed = true } } }.buttonStyle(T3Button(.primary)).disabled(busy || name.isEmpty || url.isEmpty) }
-        }.padding(20).frame(width: 650).background(Theme.bg).foregroundStyle(Theme.ink)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Add API provider").font(Theme.display(17)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+            TickRule(span: 60).padding(.top, 14).padding(.bottom, 20)
+            VStack(alignment: .leading, spacing: 16) {
+                field("Name") { Entry(placeholder: "Name", text: $name, autoFocus: true) }
+                field("Base URL") { Entry(placeholder: "https://api.example.com/v1", text: $url, mono: true).accessibilityLabel("Base URL") }
+                field("API key") { Entry(placeholder: "May be empty", text: $key, mono: true).accessibilityLabel("Free API key") }
+            }
+            Text("Adding discovers the models and detects the wire format. Browser session credentials stay in Codex Web GPT.")
+                .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
+            if failed {
+                Notice(text: "Provider could not be added; inspect the Switcher message and retry explicitly.", tone: .fail)
+                    .accessibilityLabel("Error: Provider could not be added; inspect the Switcher message and retry explicitly.").padding(.top, 14)
+            }
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button("Cancel") { dismiss() }.buttonStyle(Press(.secondary)).keyboardShortcut(.cancelAction)
+                Button(busy ? "Detecting" : "Add and detect") {
+                    busy = true
+                    Task {
+                        let ok = await save(["operation": "add", "name": .string(name), "url": .string(url), "key": .string(key)])
+                        busy = false
+                        if ok { dismiss() } else { failed = true }
+                    }
+                }
+                .buttonStyle(Press(.primary)).disabled(busy || name.isEmpty || url.isEmpty)
+            }
+            .padding(.top, 24)
+        }
+        .padding(24).frame(width: 520).background(Theme.canvas).foregroundStyle(Theme.ink)
+    }
+    private func field<Control: View>(_ label: String, @ViewBuilder control: () -> Control) -> some View {
+        VStack(alignment: .leading, spacing: 6) { MicroLabel(label); control() }
     }
 }
