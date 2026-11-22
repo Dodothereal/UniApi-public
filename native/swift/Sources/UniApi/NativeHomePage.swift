@@ -75,7 +75,7 @@ struct NativeHomePage: View {
                 NativeSection("Jobs", trailing: { Button("All jobs") { navigate(.jobs) }.buttonStyle(T3Button(.ghost)) }) {
                     NativeStack {
                         ForEach(snapshot["jobs"].array.prefix(4), id: \.self["id"]) { job in
-                            NativeJobRow(row: job.object, cancel: { Task { do { _ = try await runtime.jobs.cancel(job["id"].string); await reload(force: true) } catch { self.error = error.localizedDescription } } })
+                            NativeJobRow(row: job.object, cancel: { Task { do { _ = try await runtime.jobs.cancel(job["id"].string); await reload(force: true) } catch { self.error = error.localizedDescription } } }, onSelect: { navigate(.jobs) })
                         }
                     }
                 }

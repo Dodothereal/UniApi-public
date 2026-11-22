@@ -77,14 +77,15 @@ Once in the app, start with whichever part is useful:
 2. **Switcher** is where you can configure your own provider endpoint, model
    and credentials, or manage an optional coding-tool route.
 3. **Statistics** reads supported local coding-tool usage stores; configure
-   only the tools you use. **Speed** and **Arena** offer benchmarks and blind
+   only the tools you use. **Benchmark** and **Arena** offer benchmarks and blind
    comparisons when you have configured suitable providers.
 4. **Transcribe** can install an optional local Whisper model when you choose
    to use it. **Settings** lets you adjust appearance and other preferences.
 
-Empty pages keep their next action beside the explanation. Speed links directly
-to provider setup, Results links back to Benchmark, and Code uses the full
-workspace for adding your first project. The free-test action remains secondary
+Empty pages keep their next action beside the explanation. Home lists the
+remaining setup steps, Benchmark links directly to provider setup, its Results
+view links back to Run, and Code uses the full workspace for adding your first
+project. The free-test action remains secondary
 and cannot start without a configured provider.
 
 Provider requests, link retrieval, model downloads and optional summaries are
@@ -167,28 +168,31 @@ Choose the launch page, restore the last visited page, and customize sidebar
 visibility, order, width and badges. The sidebar editor supports drag targets
 and a keyboard-accessible Move menu. Telegram setup walks through creating a
 bot, explicitly finding destination chats, and saving optional delivery.
-Home, Jobs and Settings stay available in the sidebar. See
+Home and Settings stay available in the sidebar; running jobs appear above
+Settings and open Jobs. See
 [setup and navigation settings](docs/SETTINGS.md) for the controls and defaults.
 
 ## Explore the app
 
 | Page | What it does |
 | --- | --- |
-| Home | Overview and shortcuts |
-| Speed, Results, Prompts | Benchmark providers, compare history and manage prompts |
-| Arena | Blind model comparisons and rankings |
+| Home | Setup steps, the current Claude Code route and pages in use |
+| Benchmark | Choose providers and models, run a benchmark, compare results, charts and run history |
+| Arena | Blind model comparisons, rankings and the prompt library |
 | Switcher, Code | Configure providers and coding tools; work in coding sessions |
 | Statistics | Review supported local coding-tool usage history |
 | Transcribe | Run optional local Whisper transcription |
-| Activity, Fan Control, Battery | Inspect activity and supported Mac hardware controls |
+| Activity, Fan Control, Energy | Inspect activity, power and supported Mac hardware controls, including the charge limit |
 | Keyboard Stats | Optional key heatmap, typing speed, corrections and shortcut counts |
-| Jobs, Settings | Follow background work and configure the app |
+| Settings | Configure the app, one category at a time |
+| Jobs | Follow background work; opened from the running-work tray or Command-K |
 
-Jobs' **Clear old jobs…** action asks for confirmation before removing completed,
+Jobs' **Clear jobs older than seven days…** action asks for confirmation before removing completed,
 failed and cancelled entries older than seven days, including their job details
 and logs. It keeps running/queued jobs, benchmark results and saved transcripts.
-The Switcher's Codex tab also offers **Add provider** directly in its API-provider
-section; route checks and model selection remain separate steps.
+Switcher shows one route line per tool: source, model and effort, with one
+action to apply them. **Add provider** is in its bar on both tabs; a provider
+row opens an inspector with its model, route check, key and removal.
 
 Statistics Reload checks changed history; warm, growing plain Codex files can
 reuse bounded parser state after validating their old bytes. Strictly later,

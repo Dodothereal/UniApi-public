@@ -7,13 +7,14 @@ shadows are reserved for what floats above the window (menus, the command
 palette, notices). Theme overrides and the Light/Dark variants are described
 in [Settings](SETTINGS.md).
 
-The system lives in four files. Use them; do not restate their values in a page.
+The system lives in five files. Use them; do not restate their values in a page.
 
 | File | Holds |
 | --- | --- |
 | `NativeTheme.swift` | `Theme` colour, type, radius and size tokens, density, appearance |
 | `NativeControls.swift` | `T3Button`, `T3IconButton`, `T3Switch`, `T3Field`, `.nativeField()`, `T3Segmented`, `NativeTabs`, `NativeMenuSelect`, `MonoChip`, `NativeKbd`, `NativeStatus` |
 | `NativeLayout.swift` | `NativePage`, `NativePageBar`, `NativeSheet`, `NativeSection`, `NativeStack`, `NativeDisclosure`, `SettingRow`, `Card`, `NativeLinkRow`, `NativeReadoutStrip`, `NativeReadout`, `NativeTickMeter`, `NativeGrowBar`, `EmptyState`, `NativeError` |
+| `NativePatterns.swift` | `NativeSetup`, `NativeInspectorSplit`, `NativeInspector`, `NativeFact`, `NativeIconMenu`, `NativeRouteLine` |
 | `NativeMotion.swift` | `NativeMotion` curves and springs, `nativeEntrance`, `NativeNumberText`, visibility and reduced motion |
 
 Icons are the bundled Lucide set through `NativeIcon` (stroke 1.7). Pick the
@@ -46,35 +47,54 @@ icon that names the object or the verb; do not decorate text with one.
 
 ## Pages
 
-A page is one fixed bar and one column.
+A page is one fixed bar and the content under it.
 
-`NativePage` draws the bar (`NativePageBar`, 52 points): the page name, its
-views as `NativeTabs`, and its actions on the right. Actions never scroll
-away. A detail view passes `backTitle`/`back`, which the bar shows as a
-crumb before the name. The column is at most 1080 points wide and centred, so
-every page has the same left edge; do not pass a narrower width. A workbench
-that owns its whole frame passes `scrolls: false` and lays out its panes
-under the bar.
+`NativePage` draws the bar (`NativePageBar`, 52 points). Its order is the
+same on every page, left to right: the page name, its views (`NativeTabs`),
+then on the right a range or source filter, search, icon actions, and one
+primary action last. Rare actions go in one `NativeIconMenu`. Actions never
+scroll away. A detail view passes `backTitle`/`back`, which the bar shows as
+a crumb before the name. A scrolling page has a column at most 1080 points
+wide, so every page has the same left edge. A page that lays out its own
+panes passes `scrolls: false` and uses `NativePane` for each scrolling part.
 
 There is no title block, subtitle or description under the bar. Content
 starts immediately.
 
-Three grammars cover every page:
+A destination can hold several pages as views. `NativeBenchmarkPage` (Run,
+Free test, Results, Charts, Runs), `NativeArenaHost` (Judge, Ranking,
+Presets, History, Prompts) and `NativeEnergyHost` (Flow, History, Sensors,
+Preferences, Charge limit) pass `NativeHostTabs` to the page they show, and
+the bar draws one strip with the destination's name. The identifiers
+`results`, `prompts` and `battery` still resolve; they open their view.
 
-- **Board** (Home, Statistics, Results, Activity, Fan Control, Battery, Energy,
-  Keyboard Stats, Jobs). Lead with the numbers that matter as one
-  `NativeReadoutStrip`, then charts and tables, each a `Card` or a
-  `NativeSection` with a short literal name.
-- **Sheet** (Settings, Switcher, Speed, Transcribe). `NativeSheet` holds
-  `NativeSection`s; each is named in the left margin with its controls in the
-  column beside it, and sections are ruled apart. The margin label moves above
-  its content when the column is narrow.
-- **Workbench** (Code, Prompts, Arena). A list rail, the main pane and an
-  optional inspector, separated by hairlines rather than gaps.
+Four patterns from `NativePatterns.swift` carry the interaction on every
+page. Use them instead of a page-specific arrangement.
 
-Lists are tables: fixed columns, `NativeStack` hairlines between rows, a tone
-step under the pointer (`nativeRowHover`), and the action revealed where the
-pointer is. `NativeLinkRow` is the standard row that goes somewhere.
+- **Setup steps** (`NativeSetup`). Whatever a page needs before it works (a
+  provider, a helper, a permission, a model download, a service) is one
+  numbered list where content would start. The next open step carries the
+  action; a step that cannot run yet says why. The list is gone when every
+  step is done. Do not add a warning, a status mark or a disabled button
+  elsewhere for the same thing.
+- **List and inspector** (`NativeInspectorSplit`, `NativeInspector`,
+  `NativeFact`). A row opens an inspector on the right with its facts and its
+  actions pinned at the bottom. Rows do not expand in place and do not open a
+  sheet. Escape closes the inspector, arrow keys move between rows, and below
+  720 points the inspector covers the list. Activity, Statistics (Models),
+  Switcher (providers) and Jobs use it.
+- **List and detail panes.** A page about one selected object keeps the list
+  on the left and the object on the right: Transcribe, Settings (categories),
+  Benchmark Run (providers and models on the left, the run on the right).
+- **Route line** (`NativeRouteLine`). A tool's route reads left to right as
+  tool, source, model, effort. The stops are the controls and one action on
+  the right applies them. Switcher edits it; Home shows it.
+
+Lists are tables: fixed columns, hairlines between rows, a tone step under
+the pointer (`nativeRowHover`), and the action revealed where the pointer
+is. `NativeLinkRow` is the standard row that goes somewhere. Group with
+hairlines and tone steps; a bordered `Card` is for a chart or a keyboard, not
+for wrapping a list.
 
 `NativeTickMeter` is the UniApi meter for a level, a load, a share or
 progress. A chart bar stays a `NativeGrowBar`.
@@ -99,11 +119,11 @@ Write the name of the thing or the action and stop.
 with the one next action. Do not centre it in the page and do not place an
 action outside it. Loading uses `ShimmerText` in the same position.
 
-Speed's provider setup and Results' Benchmark navigation use this group. The
-free-test action has secondary emphasis and is unavailable when no providers
-are configured. Code omits its project rail after a successful read returns
-no projects; the full workspace then offers Add project. Loading, read failures
-and existing projects keep their normal project rail.
+When the bar already holds the action, the empty state does not repeat it.
+Benchmark's Run view sends a new installation to Switcher to add a provider;
+Results sends it to Run. Code omits its project rail after a successful read
+returns no projects; the full workspace then offers Add project. Loading,
+read failures and existing projects keep their normal project rail.
 
 ## Motion
 
@@ -126,8 +146,10 @@ Motion explains a change; it is never decoration.
 
 The sidebar is recessed (`sidebarBG`), with a selection plate that slides
 between rows. Command-B collapses it to an icon rail; it never disappears.
-The footer shows the route new Claude Code sessions take and opens Switcher;
-it shows a warning only when the shim is not running. Command-K opens the
+Running and queued jobs appear above Settings as a tray with their progress
+on every page; the tray opens Jobs, which is otherwise reached from the
+command palette or Home. The footer shows the route new Claude Code sessions
+take and opens Switcher; it shows a warning only when the shim is not running. Command-K opens the
 command palette: type part of a page or command name, arrow keys move, Return
 runs, Escape closes.
 
