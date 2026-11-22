@@ -8,14 +8,14 @@ struct NativeResultsCharts: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if history {
-                Text("Open a source run to inspect its input scaling and token-arrival charts.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                Text("Scaling and arrival curves belong to one run. Open a run to see them.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
             } else {
                 scaling(cells.contains(where: \.browser) ? "First response vs input size" : "First token vs input size", field: "ttft_ms", caption: "Log₂ input size; browser entries measure first visible text.", format: nativeBenchMilliseconds)
                 arrival
             }
             // Preserve the native's supplementary measured views without
             // repeating the main ranking board in the web reading order.
-            DisclosureGroup("More measured views") {
+            NativeDisclosure("More views") {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 380), alignment: .top)], alignment: .leading, spacing: 14) {
                     ranking(cells.contains(where: \.browser) ? "First response" : "First token", caption: history ? "Best run median; lower is better." : "Median with min/max spread; lower is better.", metric: "latency", lower: true, value: { $0.ttft }, format: nativeBenchMilliseconds)
                     ranking("Output speed", caption: "Generation-phase tokens per second; browser entries estimate visible updates.", metric: "throughput", value: { $0.speed }, format: { String(format: "%.2f tok/s", $0) })
@@ -28,8 +28,8 @@ struct NativeResultsCharts: View {
                         scaling(cells.contains(where: \.browser) ? "First response vs input" : "First token vs input", field: "ttft_ms", caption: "Log₂ input size; browser entries measure first visible text.", format: nativeBenchMilliseconds)
                         arrival
                     }
-                }.padding(.top, 12)
-            }.font(Theme.ui(12)).foregroundStyle(Theme.dim)
+                }
+            }
         }
     }
     private func ranking(_ title: String, caption: String, metric: String = "", lower: Bool = false, maximum: Double? = nil,
