@@ -37,28 +37,28 @@ struct NativeTranscribePage: View {
     private var pageError: String? { error ?? mediaReads.detailError }
     private var transcriptText: String { NativeTranscriptPresentation.text(detail, parts: parts) }
     var body: some View {
-        NativePage(title: selected == nil ? "Transcribe" : (detail["title"].string.isEmpty ? (detail["source"].string.isEmpty ? "Transcription" : detail["source"].string) : detail["title"].string), subtitle: selected == nil ? "Private, on-device transcription with Whisper large-v3-turbo. Install the optional model once; it runs only for a transcription job." : "", readiness: pageError != nil ? .failed : status.isNull || selected != nil && detail.isNull ? .pending : .ready, backTitle: "Transcripts", back: selected == nil ? nil : back, actions: {
-            if selected == nil {
-                Button { Task { await reload() } } label: {
-                    HStack(spacing: 6) { NativeIcon("rotate-cw", size: 12); Text("Reload") }
-                }.buttonStyle(T3Button(.outline))
-            } else { transcriptActions }
+        NativePage(title: selected == nil ? "Transcribe" : (detail["title"].string.isEmpty ? (detail["source"].string.isEmpty ? "Transcription" : detail["source"].string) : detail["title"].string),
+                   maxWidth: 880,
+                   readiness: pageError != nil ? .failed : status.isNull || selected != nil && detail.isNull ? .pending : .ready,
+                   backTitle: "Transcripts", back: selected == nil ? nil : back, actions: {
+            if selected == nil { T3IconButton(system: "refresh-cw", help: "Reload") { Task { await reload() } } }
+            else { transcriptActions }
         }) {
             if let pageError { NativeError(message: pageError) }
             if selected == nil { input; history } else { transcript }
         }
-        .overlay { if dropTarget { RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 2, dash: [8, 5])).padding(12).allowsHitTesting(false) } }
+        .overlay { if dropTarget { RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])).padding(12).allowsHitTesting(false) } }
         .onDrop(of: [UTType.fileURL], isTargeted: $dropTarget) { providers in acceptFiles(providers) }
         .sheet(isPresented: $rename) {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Rename transcript").font(Theme.ui(18, weight: .semibold))
+                Text("Rename").font(Theme.ui(Theme.textBase, weight: .semibold))
                 T3Field(placeholder: "Title", text: $title).accessibilityLabel("Transcript title")
                 HStack {
                     Button("Cancel") { rename = false }.buttonStyle(T3Button(.ghost)).keyboardShortcut(.cancelAction)
                     Spacer()
                     Button("Save") { Task { await renameTranscript() } }.buttonStyle(T3Button(.primary)).disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
                 }
-            }.padding(22).frame(width: 500).background(Theme.bg)
+            }.padding(20).frame(width: 420).background(Theme.bg)
         }
         .alert("Delete transcript?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Cancel", role: .cancel) { deleting = nil }
@@ -84,73 +84,52 @@ struct NativeTranscribePage: View {
         }
         .nativePageActivity(reads: reads, suspended: { dropTarget = false })
     }
+    private var modelReady: Bool { status["model"]["available"].bool }
     private var input: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            localModelSetup
-            if !status.isNull && !status["ytdlp"].bool {
-                Text("Links need optional yt-dlp. Local WAV, MP3 and M4A files use the built-in decoder; other formats may need ffmpeg.")
-                    .font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 16) {
+            if !status.isNull, !modelReady || installingModel || !status["localRuntime"].bool { modelRow }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { sourceField; sourceActions }
+                VStack(alignment: .leading, spacing: 8) { sourceField; HStack(spacing: 8) { sourceActions } }
             }
-            Card {
-                VStack(alignment: .leading, spacing: 10) {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) { sourceField; sourceActions }
-                        VStack(alignment: .leading, spacing: 8) { sourceField; HStack(spacing: 8) { sourceActions } }
-                    }
-                    Text("Drop audio files on this card. Several at once are fine. Audio stays on this Mac; the local model is released from memory when its job finishes." + (status["runs"].int > 0 ? " Time estimates are learned from \(status["runs"].int) earlier runs." : ""))
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            VStack(spacing: 20) {
-                SettingRow(title: "Language", desc: "Forced when set; Auto lets the recognizer detect it per chunk.") {
-                    Menu {
-                        ForEach(languages, id: \.0) { id, label in Button(label) { language = id } }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text(languages.first(where: { $0.0 == language })?.1 ?? language)
-                            Spacer(minLength: 0)
-                            NativeIcon("chevron-down", size: 12)
-                        }.font(Theme.ui(12)).foregroundStyle(Theme.dim).padding(.horizontal, 11).frame(width: 150, height: 30)
-                            .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1))
-                    }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().pointingHand().accessibilityLabel("Language")
-                }
-                SettingRow(title: "Telegram when done", desc: "One ping per transcript. Configure and enable Telegram delivery in Settings first.") {
+            HStack(spacing: 16) {
+                NativeMenuSelect(title: "Language", selection: $language, options: languages.map { ($0.0, $0.0.isEmpty ? "Detect language" : $0.1) }, width: 150)
+                HStack(spacing: 8) {
                     T3Switch(isOn: $notify).accessibilityLabel("Telegram when done")
+                    Text("Telegram when done").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.dim)
+                }
+                Spacer(minLength: 0)
+                if !status.isNull && !status["ytdlp"].bool {
+                    Text("Links need yt-dlp").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                        .help("Install yt-dlp to transcribe links. WAV, MP3 and M4A files use the built-in decoder; other formats may need ffmpeg.")
                 }
             }
-            Rectangle().fill(Theme.border).frame(height: 1).accessibilityHidden(true)
-        }
+        }.padding(.bottom, 8)
     }
-    private var localModelSetup: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    NativeIcon("database", size: 18).foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Local Whisper large-v3-turbo").font(Theme.ui(14, weight: .semibold))
-                        Text("Optional 574 MB model. No account or cloud transcription service. Downloads only when you choose Install.")
-                            .font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 12)
-                    if installingModel {
-                        Button("Cancel") { modelTask?.cancel() }.buttonStyle(T3Button(.outline))
-                    } else if status["model"]["available"].bool {
-                        Button("Remove model") { modelAction("model.remove") }.buttonStyle(T3Button(.outline)).disabled(status["model"]["inUse"].bool)
-                    } else {
-                        Button("Install model") { modelAction("model.install") }.buttonStyle(T3Button(.primary)).disabled(status.isNull)
-                    }
+    /// Shown above the source while the model is missing; afterwards it lives at the foot of the list.
+    private var modelRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Whisper large-v3-turbo").font(Theme.mono(Theme.textXs, weight: .medium)).foregroundStyle(Theme.ink)
+                    Text(installingModel ? (modelProgress["message"].string.isEmpty ? "Preparing download…" : modelProgress["message"].string)
+                         : !modelReady ? "574 MB. Runs on this Mac, no account."
+                         : status["localRuntime"].bool ? "574 MB, on this Mac" : "The bundled runtime is missing. Reinstall UniApi.")
+                        .font(Theme.ui(Theme.textXs)).foregroundStyle(modelReady && !status["localRuntime"].bool ? Theme.failFg : Theme.muted)
                 }
-                if installingModel {
-                    ProgressView(value: modelProgress["progress"].double).progressViewStyle(.linear)
-                    Text(modelProgress["message"].string.isEmpty ? "Preparing model download…" : modelProgress["message"].string)
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                } else if status["model"]["available"].bool {
-                    Text(status["localRuntime"].bool ? "Installed. Ready for on-device transcription." : "Model installed, but the bundled runtime is missing. Reinstall UniApi.")
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                }
+                Spacer(minLength: 12)
+                if installingModel { Button("Cancel") { modelTask?.cancel() }.buttonStyle(T3Button(.outline)) }
+                else if modelReady { Button("Remove") { modelAction("model.remove") }.buttonStyle(T3Button(.outline)).disabled(status["model"]["inUse"].bool) }
+                else { Button("Install model", nativeIcon: "download") { modelAction("model.install") }.buttonStyle(T3Button(.primary)).disabled(status.isNull) }
+            }
+            if installingModel {
+                NativeTickMeter(fraction: modelProgress["progress"].double, color: Theme.accent, height: 8)
+                    .accessibilityLabel("Model download").accessibilityValue(String(format: "%.0f percent", modelProgress["progress"].double * 100))
             }
         }
+        .padding(.vertical, 12)
+        .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
+        .overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
     }
     private func modelAction(_ operation: String) {
         guard let service, !installingModel else { return }
@@ -168,123 +147,108 @@ struct NativeTranscribePage: View {
     }
     @ViewBuilder private var sourceActions: some View {
         Button { Task { await submit(source, upload: false) } } label: {
-            HStack(spacing: 6) { NativeIcon("mic", size: 14); Text(submitting ? "Starting…" : "Transcribe") }
-                .frame(minWidth: 93)
+            Text(submitting ? "Starting…" : "Transcribe").frame(minWidth: 72)
         }.buttonStyle(T3Button(.primary)).disabled(submitting || source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !status["localReady"].bool)
-        Button(action: chooseFiles) {
-            HStack(spacing: 6) { NativeIcon("folder-open", size: 14); Text("Files") }
-        }.buttonStyle(T3Button(.outline)).accessibilityLabel("Choose files")
+        Button("Files", nativeIcon: "folder-open", action: chooseFiles).buttonStyle(T3Button(.outline)).accessibilityLabel("Choose files")
     }
     private var history: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionLabel(text: "Transcripts") {
-                NativeNumberText(text: "\(rows.count) \(rows.count == 1 ? "transcript" : "transcripts")", font: Theme.ui(12), color: Theme.muted)
-            }
+        VStack(alignment: .leading, spacing: 0) {
             if rows.isEmpty {
-                if status.isNull && error == nil { ShimmerText(text: "Loading transcripts …") }
-                else {
-                    VStack(spacing: 8) {
-                        NativeIcon("mic", size: 24).foregroundStyle(Theme.muted).accessibilityHidden(true)
-                        Text("No transcripts yet").font(Theme.ui(14, weight: .medium))
-                        Text("Paste a link above or drop a file on the card.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                    }.frame(maxWidth: .infinity).padding(.vertical, 48)
-                }
-            }
-            else {
-                Card(padding: 0) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(rows.enumerated()), id: \.element["id"]) { index, row in
-                            if index > 0 { Rectangle().fill(Theme.border).frame(height: 1).accessibilityHidden(true) }
-                            NativeTranscriptHistoryRow(row: row, progress: progress[row["job_id"].string] ?? .null,
-                                metadata: historyMetadata(row), onOpen: {
-                                    selected = row["id"].string; parts = [:]; detail = .null; Task { await loadDetail() }
-                                }, onDelete: { deleting = row["id"].string }) { countdown(row["id"].string) }
-                        }
+                if status.isNull && error == nil { ShimmerText(text: "Loading…") }
+                else { Theme.rule.frame(height: 1); NativeEmptyState(title: "No transcripts", detail: "Paste a link, choose files or drop audio here.", icon: "mic") }
+            } else {
+                Theme.rule.frame(height: 1)
+                LazyVStack(spacing: 0) {
+                    ForEach(rows, id: \.self["id"]) { row in
+                        NativeTranscriptHistoryRow(row: row, progress: progress[row["job_id"].string] ?? .null,
+                            metadata: historyMetadata(row), onOpen: {
+                                selected = row["id"].string; parts = [:]; detail = .null; Task { await loadDetail() }
+                            }, onDelete: { deleting = row["id"].string }) { countdown(row["id"].string) }
+                        Theme.rule.frame(height: 1).accessibilityHidden(true)
                     }
                 }
             }
+            if !status.isNull, modelReady, !installingModel, status["localRuntime"].bool { modelRow.padding(.top, 32) }
         }
     }
     private func historyMetadata(_ row: JSONValue) -> String {
         var values: [String] = []
-        if !row["duration_s"].isNull { values.append("Audio " + duration(row["duration_s"].double)) }
+        if !row["duration_s"].isNull { values.append(duration(row["duration_s"].double)) }
         if row["status"].string == "done" { values.append("\(row["wordCount"].int) words") }
+        if row["status"].string == "done", !row["wordsPerMinute"].isNull { values.append(String(format: "%.0f words/min", row["wordsPerMinute"].double)) }
         if !row["lang"].string.isEmpty { values.append(row["lang"].string) }
         return values.joined(separator: " · ")
     }
-    private var transcriptActions: some View {
-        HStack(spacing: 4) {
-            if NativeTranscriptPresentation.canResume(detail) {
-                Button { Task { await resume() } } label: {
-                    HStack(spacing: 6) { NativeIcon("rotate-cw", size: 13); Text("Resume") }
-                }.buttonStyle(T3Button(.outline)).disabled(runtime.paths.readOnly || submitting)
-            }
-            Button { copy(transcriptText) } label: {
-                HStack(spacing: 6) { NativeIcon("copy", size: 13); Text("Copy") }
-            }.buttonStyle(T3Button(.outline)).disabled(transcriptText.isEmpty)
-            Button { title = detail["title"].string; rename = true } label: { NativeIcon("pencil", size: 13) }
-                .buttonStyle(T3Button(.ghost)).disabled(detail.isNull).help("Rename").accessibilityLabel("Rename transcript")
-            Button { Task { await save() } } label: { NativeIcon("download", size: 13) }
-                .buttonStyle(T3Button(.ghost)).disabled(detail["text"].string.isEmpty).help("Save text").accessibilityLabel("Save transcript text")
-            Button { deleting = selected } label: { NativeIcon("trash-2", size: 13) }
-                .buttonStyle(T3Button(.ghost)).disabled(detail.isNull).help("Delete transcript").accessibilityLabel("Delete transcript")
+    @ViewBuilder private var transcriptActions: some View {
+        T3IconButton(system: "pencil", help: "Rename") { title = detail["title"].string; rename = true }.disabled(detail.isNull)
+        T3IconButton(system: "download", help: "Save text") { Task { await save() } }.disabled(detail["text"].string.isEmpty)
+        T3IconButton(system: "trash-2", help: "Delete transcript") { deleting = selected }.disabled(detail.isNull)
+        if NativeTranscriptPresentation.canResume(detail) {
+            Button("Resume", nativeIcon: "rotate-cw") { Task { await resume() } }.buttonStyle(T3Button(.outline)).disabled(runtime.paths.readOnly || submitting)
         }
+        Button("Copy", nativeIcon: "copy") { copy(transcriptText) }.buttonStyle(T3Button(.primary)).disabled(transcriptText.isEmpty)
     }
     private var transcript: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             if detail.isNull {
                 if mediaReads.detailError != nil {
-                    NativeReadFailureState(icon: "mic", title: "Could not load transcript", detail: "Try loading this transcript again.", retryTitle: "Reload transcript") {
-                        Task { await loadDetail() }
-                    }
-                } else { ShimmerText(text: "Loading the transcript …") }
-            }
-            else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) { transcriptMetadata }
-                    VStack(alignment: .leading, spacing: 6) { transcriptMetadata }
-                }
+                    NativeReadFailureState(icon: "mic", title: "Could not load transcript", detail: "", retryTitle: "Retry") { Task { await loadDetail() } }
+                } else { ShimmerText(text: "Loading…") }
+            } else {
+                transcriptMetadata
                 if ["queued", "running"].contains(detail["status"].string) {
                     let job = progress[detail["job_id"].string] ?? detail["job"]
                     VStack(alignment: .leading, spacing: 6) {
-                        CapsuleBar(fraction: job["progress"].double)
+                        NativeTickMeter(fraction: job["progress"].double, color: Theme.accent, height: 10)
                             .accessibilityLabel("Transcription progress").accessibilityValue(String(format: "%.0f percent", job["progress"].double * 100))
-                        Text(job["progress_text"].string.isEmpty ? detail["status"].string : job["progress_text"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted)
+                        HStack(spacing: 10) {
+                            Text(job["progress_text"].string.isEmpty ? detail["status"].string : job["progress_text"].string)
+                            if let selected { countdown(selected) }
+                        }.font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted)
                     }
                 }
-                if detail["status"].string == "done" { NativeTranscriptPerformance(row: detail) }
-                if detail["failed_chunks"].int > 0 { Text("\(detail["failed_chunks"].int) audio chunks are missing from this transcript.").font(Theme.ui(12.5)).foregroundStyle(Theme.warnFg) }
+                if detail["failed_chunks"].int > 0 {
+                    Text("\(detail["failed_chunks"].int) audio chunks are missing.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.warnFg)
+                }
                 if !detail["error"].isNull { NativeError(message: detail["error"].string) }
-                if let selected { countdown(selected) }
-                Card(padding: 20) {
-                    if !transcriptText.isEmpty {
-                        Text(transcriptText).font(Theme.ui(13.5)).foregroundStyle(Theme.ink.opacity(0.9)).lineSpacing(7)
-                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    else if detail["status"].string == "cancelled" { Text("Cancelled. Resume to continue from saved chunks.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted) }
-                    else if detail["status"].string == "failed" { Text("No transcript was produced.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted) }
-                    else {
-                        ShimmerText(text: detail["status"].string == "queued" ? "Waiting for a transcription slot…" : "Reading audio and transcribing…").padding(.vertical, 16)
-                    }
+                Theme.rule.frame(height: 1)
+                if !transcriptText.isEmpty {
+                    Text(transcriptText).font(Theme.ui(Theme.textBase)).foregroundStyle(Theme.ink).lineSpacing(7)
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 680, alignment: .leading)
                 }
+                else if detail["status"].string == "cancelled" { Text("Cancelled. Resume continues from the saved chunks.").font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.muted) }
+                else if detail["status"].string == "failed" { Text("No transcript was produced.").font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.muted) }
+                else { ShimmerText(text: detail["status"].string == "queued" ? "Queued…" : "Transcribing…") }
                 if !detail["summary"].string.isEmpty {
-                    NativeCard(title: "Saved summary") {
-                        Text(detail["summary"].string).font(Theme.ui(13)).lineSpacing(6).textSelection(.enabled)
+                    NativeCard(title: "Summary") {
+                        Text(detail["summary"].string).font(Theme.ui(Theme.textSm)).lineSpacing(6).textSelection(.enabled).frame(maxWidth: 680, alignment: .leading)
                         if !detail["summary_model"].string.isEmpty { Text(detail["summary_model"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted) }
                     }
                 }
             }
         }
     }
-    @ViewBuilder private var transcriptMetadata: some View {
-        MonoChip(text: detail["source_kind"].string == "url" ? "link" : "file")
-        MonoChip(text: detail["status"].string)
-        if !detail["duration_s"].isNull { MonoChip(text: "Audio " + duration(detail["duration_s"].double)) }
-        if detail["status"].string == "done" { MonoChip(text: "\(detail["wordCount"].int) words") }
-        if !detail["lang"].string.isEmpty { MonoChip(text: detail["lang"].string) }
-        Text(Date(timeIntervalSince1970: detail["created_at"].double / 1000), style: .date).font(Theme.mono(11)).foregroundStyle(Theme.muted)
-        Text(detail["source"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
-            .textSelection(.enabled).help(detail["source"].string)
+    /// One line of facts, then where the audio came from.
+    private var transcriptMetadata: some View {
+        var facts: [String] = []
+        if !["done", ""].contains(detail["status"].string) { facts.append(detail["status"].string) }
+        if !detail["duration_s"].isNull { facts.append(duration(detail["duration_s"].double)) }
+        if detail["status"].string == "done" {
+            facts.append("\(detail["wordCount"].int) words")
+            if !detail["transcribe_ms"].isNull { facts.append("transcribed in " + NativeListTimeFormat.duration(detail["transcribe_ms"].double)) }
+            if !detail["wordsPerMinute"].isNull { facts.append(String(format: "%.0f words/min", detail["wordsPerMinute"].double)) }
+        }
+        if !detail["lang"].string.isEmpty { facts.append(detail["lang"].string) }
+        facts.append(Date(timeIntervalSince1970: detail["created_at"].double / 1000).formatted(date: .abbreviated, time: .omitted))
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(facts.joined(separator: " · ")).font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.dim)
+                .help("Transcription time covers speech recognition and retries, not downloading, decoding or queueing. Words per minute is words divided by that time.")
+            HStack(spacing: 6) {
+                NativeIcon(detail["source_kind"].string == "url" ? "link" : "file-audio", size: 12).foregroundStyle(Theme.faint)
+                Text(detail["source"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                    .textSelection(.enabled).help(detail["source"].string)
+            }
+        }
     }
     @ViewBuilder private func countdown(_ id: String) -> some View {
         if let estimate = eta[id], rows.first(where: { $0["id"].string == id })?["status"].string == "running" {
@@ -294,7 +258,7 @@ struct NativeTranscribePage: View {
     }
     private func etaLabel(_ estimate: (value: JSONValue, received: Date), at date: Date) -> some View {
         let left = max(0, estimate.value["eta_ms"].double / 1000 - date.timeIntervalSince(estimate.received))
-        return Text("About " + duration(left) + " left (" + estimate.value["phase"].string + ")").font(Theme.mono(10)).foregroundStyle(Theme.muted).help("Estimated from " + estimate.value["basis"].string)
+        return Text(duration(left) + " left, " + estimate.value["phase"].string).font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted).help("Estimated from " + estimate.value["basis"].string)
     }
     private func reload() async {
         guard let service, let ticket = reads.begin("list") else { return }
@@ -358,13 +322,13 @@ private struct NativeTranscribeSourceField: View {
     @Environment(\.nativeReducedMotion) private var reduceMotion
     var body: some View {
         HStack(spacing: 8) {
-            NativeIcon("link", size: 11).foregroundStyle(Theme.muted).accessibilityHidden(true)
-            TextField("Paste an HTTP(S) link or file path", text: $source)
-                .textFieldStyle(.plain).font(Theme.mono(12)).accessibilityLabel("Transcription source")
+            NativeIcon("link", size: 13).foregroundStyle(Theme.faint).accessibilityHidden(true)
+            TextField("Link or file path", text: $source)
+                .textFieldStyle(.plain).font(Theme.ui(Theme.textSm)).accessibilityLabel("Transcription source")
                 .focused($focused).onSubmit(onSubmit)
-        }.padding(.horizontal, 11).frame(minWidth: 180, maxWidth: .infinity).frame(height: 32)
-            .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(focused ? Theme.accent.opacity(0.7) : Theme.input, lineWidth: 1))
+        }.padding(.horizontal, 11).frame(minWidth: 180, maxWidth: .infinity).frame(height: Theme.control)
+            .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(focused ? Theme.accent : Theme.input, lineWidth: 1))
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: focused)
     }
 }
@@ -379,59 +343,38 @@ private struct NativeTranscriptHistoryRow<Countdown: View>: View {
     @State private var hovering = false
 
     var body: some View {
+        let status = row["status"].string, active = ["queued", "running"].contains(status)
         HStack(spacing: 0) {
             Button(action: onOpen) {
                 HStack(spacing: 12) {
-                    StatusDot(color: row["status"].string == "done" ? Theme.ok : row["status"].string == "failed" ? Theme.fail : Theme.accent, pulse: row["status"].string == "running")
-                        .accessibilityLabel(row["status"].string)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 7) {
-                            Text(row["title"].string.isEmpty ? row["source"].string : row["title"].string)
-                                .font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                            MonoChip(text: row["source_kind"].string == "url" ? "link" : "file")
-                            if row["failed_chunks"].int > 0 { MonoChip(text: "\(row["failed_chunks"].int) gaps", color: Theme.warnFg) }
-                        }
+                    NativeIcon(status == "failed" ? "circle-alert" : row["source_kind"].string == "url" ? "link" : "file-audio", size: 14)
+                        .foregroundStyle(status == "failed" ? Theme.failFg : Theme.faint).frame(width: 16)
+                        .accessibilityLabel(status)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(row["title"].string.isEmpty ? row["source"].string : row["title"].string)
+                            .font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
                         HStack(spacing: 5) {
                             if !metadata.isEmpty { Text(metadata + " ·").lineLimit(1) }
                             Text(NativeListTimeFormat.ago(row["created_at"].double)).lineLimit(1)
-                        }.font(Theme.mono(11.5)).foregroundStyle(Theme.muted)
-                        if row["status"].string == "done" { NativeTranscriptPerformance(row: row) }
+                            if row["failed_chunks"].int > 0 { Text("· \(row["failed_chunks"].int) gaps").foregroundStyle(Theme.warnFg) }
+                            if status == "cancelled" { Text("· cancelled") }
+                        }.font(Theme.num(11.5, weight: .regular)).foregroundStyle(Theme.muted)
                         if !row["error"].isNull { Text(row["error"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.failFg).lineLimit(2) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
-                    if ["queued", "running"].contains(row["status"].string) {
+                    if active {
                         VStack(alignment: .leading, spacing: 4) {
-                            CapsuleBar(fraction: progress["progress"].double)
-                            Text(progress["progress_text"].string.isEmpty ? row["status"].string : progress["progress_text"].string)
-                                .font(Theme.mono(10)).foregroundStyle(Theme.muted).lineLimit(1)
-                            countdown()
-                        }.frame(width: 168)
+                            NativeTickMeter(fraction: progress["progress"].double, color: Theme.accent, height: 8)
+                            HStack(spacing: 6) {
+                                Text(progress["progress_text"].string.isEmpty ? status : progress["progress_text"].string).lineLimit(1)
+                                countdown()
+                            }.font(Theme.num(10.5, weight: .regular)).foregroundStyle(Theme.muted)
+                        }.frame(width: 190)
                     }
-                    RowActionLabel(title: "Open", hovering: hovering, width: 50).accessibilityHidden(true)
-                }.padding(.leading, 14).padding(.trailing, 6).padding(.vertical, 10).contentShape(Rectangle())
+                    NativeIcon("chevron-right", size: 13).foregroundStyle(hovering ? Theme.ink : Theme.faint).accessibilityHidden(true)
+                }.padding(.leading, 4).padding(.trailing, 6).frame(minHeight: 52).contentShape(Rectangle())
             }.buttonStyle(.plain).pointingHand()
                 .help(row["source"].string)
-            Button(action: onDelete) { NativeIcon("trash-2", size: 13) }
-                .buttonStyle(T3Button(.ghost)).help("Delete transcript").accessibilityLabel("Delete transcript")
-                .padding(.trailing, 4)
+            T3IconButton(system: "trash-2", help: "Delete transcript", size: 13, action: onDelete).opacity(hovering ? 1 : 0.35)
         }.background(hovering ? Theme.subtle : .clear).onHover { hovering = $0 }
-    }
-}
-
-private struct NativeTranscriptPerformance: View {
-    let row: JSONValue
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { processingTime; processingRate }
-            VStack(alignment: .leading, spacing: 4) { processingTime; processingRate }
-        }.font(Theme.mono(11.5)).foregroundStyle(Theme.dim)
-    }
-    private var processingTime: some View {
-        Text(row["transcribe_ms"].isNull ? "Transcription time unavailable" : "Transcribed in " + NativeListTimeFormat.duration(row["transcribe_ms"].double))
-            .fixedSize(horizontal: true, vertical: false)
-            .help("Time spent on speech recognition, including retries. Excludes downloading, decoding and queue waits.")
-    }
-    private var processingRate: some View {
-        NativeNumberText(text: row["wordsPerMinute"].isNull ? "— words/min" : row["wordsPerMinute"].double.formatted(.number.locale(Locale(identifier: "en_US")).precision(.fractionLength(0))) + " words/min", font: Theme.mono(11.5), color: Theme.dim)
-            .help("Full transcript word count divided by ASR processing minutes. This measures processing throughput, not speaker pace; audio duration is separate.")
     }
 }
