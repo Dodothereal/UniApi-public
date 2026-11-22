@@ -11,19 +11,20 @@ public struct NativeKeyboardIO: Sendable {
     public var end: @Sendable () -> Void
     /// Removes and returns the presses observed since the previous call.
     public var take: @Sendable () -> [NativeKeyboardEvent]
-    public var iso: @Sendable () -> Bool
+    /// The keyboards macOS lists and the standard of the one in use.
+    public var hardware: @Sendable () -> NativeKeyboardHardware
     public var slot: @Sendable (Double) -> NativeKeyboardSlot
     public var now: @Sendable () -> Double
     public var sleep: @Sendable (Double) async throws -> Void
     public init(supported: @escaping @Sendable () -> Bool = { true }, permitted: @escaping @Sendable () -> Bool,
                 requestPermission: @escaping @Sendable () -> Bool, begin: @escaping @Sendable () -> Bool,
                 end: @escaping @Sendable () -> Void, take: @escaping @Sendable () -> [NativeKeyboardEvent],
-                iso: @escaping @Sendable () -> Bool = { false },
+                hardware: @escaping @Sendable () -> NativeKeyboardHardware = { .init() },
                 slot: @escaping @Sendable (Double) -> NativeKeyboardSlot = { NativeKeyboardSlot.local($0) },
                 now: @escaping @Sendable () -> Double = { Date().timeIntervalSince1970 * 1000 },
                 sleep: @escaping @Sendable (Double) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1e9)) }) {
         self.supported = supported; self.permitted = permitted; self.requestPermission = requestPermission
-        self.begin = begin; self.end = end; self.take = take; self.iso = iso; self.slot = slot; self.now = now; self.sleep = sleep
+        self.begin = begin; self.end = end; self.take = take; self.hardware = hardware; self.slot = slot; self.now = now; self.sleep = sleep
     }
 }
 
@@ -35,6 +36,10 @@ public actor NativeKeyboardService {
     private var fold: NativeKeyboardFold
     private var initialized = false
     private var enabled = false
+    /// Chosen drawing; nil follows the detected keyboard.
+    private var form: NativeKeyboardLayout.Form?, standard: NativeKeyboardLayout.Standard?
+    /// Chosen key arrangement: Apple or third-party. Nil follows detection.
+    private var apple: Bool?
     private var recording = false
     private var error: String?
     private var loop: Task<Void, Never>?
@@ -62,6 +67,8 @@ public actor NativeKeyboardService {
         if let text = (try? runtime.db.query("SELECT value FROM keyboard_preferences WHERE id=1"))?.first?["value"]?.string,
            let saved = try? JSONValue.decode(Data(text.utf8)) {
             enabled = saved["enabled"].bool
+            form = .init(rawValue: saved["form"].string); standard = .init(rawValue: saved["standard"].string)
+            apple = Self.style(saved["style"].string)
         }
         initialized = true
     }
@@ -164,12 +171,30 @@ public actor NativeKeyboardService {
             shortcuts[row["combo"]?.string ?? ""] = row["n"]?.int ?? 0
         }
         let days = try rows("SELECT DISTINCT day FROM keyboard_hours WHERE keys>0").compactMap { $0["day"]?.string }
-        var state = NativeKeyboardSummary.build(slots: slots, keys: keys, shortcuts: shortcuts, allDays: days, range: range, now: now, iso: io.iso())
+        // The drawing follows every key ever counted, not only the range shown.
+        let used = Set(try rows("SELECT DISTINCT code FROM keyboard_keys WHERE count>0").compactMap { $0["code"]?.int })
+        var model = NativeKeyboardLayout.detect(io.hardware(), used: used)
+        if let form { model.form = form }
+        if let standard { model.standard = standard }
+        if let apple { model.apple = apple }
+        var state = NativeKeyboardSummary.build(slots: slots, keys: keys, shortcuts: shortcuts, allDays: days, range: range, now: now, model: model)
+        state["layoutChoice"] = ["form": .string(form?.rawValue ?? "auto"), "standard": .string(standard?.rawValue ?? "auto"),
+                                 "style": .string(apple.map { $0 ? "apple" : "other" } ?? "auto")]
         state["supported"] = .bool(io.supported()); state["readOnly"] = .bool(runtime.paths.readOnly)
         state["enabled"] = .bool(enabled); state["permitted"] = .bool(io.permitted()); state["recording"] = .bool(recording)
         state["live"] = .object(live(now: now)); state["error"] = error.map(JSONValue.string) ?? .null
         state["hasData"] = .bool(!days.isEmpty)
         return .object(state)
+    }
+
+    private static func style(_ value: String) -> Bool? { value == "apple" ? true : value == "other" ? false : nil }
+    private func savePreferences() throws {
+        var value: JSONObject = ["enabled": .bool(enabled)]
+        if let form { value["form"] = .string(form.rawValue) }
+        if let standard { value["standard"] = .string(standard.rawValue) }
+        if let apple { value["style"] = .string(apple ? "apple" : "other") }
+        try runtime.db.execute("INSERT INTO keyboard_preferences VALUES (1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
+                               [.string(String(decoding: try JSONValue.object(value).encoded(), as: UTF8.self))])
     }
 
     public func handle(_ operation: String, input: JSONObject = [:]) async throws -> JSONValue {
@@ -184,10 +209,15 @@ public actor NativeKeyboardService {
             let next = input["enabled"]?.bool == true
             if next, !io.permitted() { _ = io.requestPermission() }
             enabled = next
-            try runtime.db.execute("INSERT INTO keyboard_preferences VALUES (1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
-                                   [.string(next ? "{\"enabled\":true}" : "{\"enabled\":false}")])
+            try savePreferences()
             if next { if !recording { recording = io.permitted() && io.begin() } }
             else if recording { io.end(); recording = false; persist(io.take()) }
+        case "set-layout":
+            try runtime.paths.assertWritable()
+            if let value = input["form"]?.string { form = .init(rawValue: value) }
+            if let value = input["standard"]?.string { standard = .init(rawValue: value) }
+            if let value = input["style"]?.string { apple = Self.style(value) }
+            try savePreferences()
         case "request-permission":
             _ = io.requestPermission()
             if enabled, !recording, io.permitted() { recording = io.begin() }

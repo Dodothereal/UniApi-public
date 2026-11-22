@@ -25,7 +25,7 @@ import UniApiCore
         case "checking": return running + " Checking GitHub for a newer release."
         case "current": return running + " This is the newest release."
         case "downloading": return "Downloading UniApi \(latest), \(Int((state["progress"].double * 100).rounded())) percent."
-        case "ready": return "UniApi \(latest) is downloaded and verified. Installing takes a few seconds; the window closes and reopens, and providers, data and settings are kept."
+        case "ready": return "UniApi \(latest) is downloaded and verified. Installing takes under a minute; the window closes and reopens, and providers, data and settings are kept."
         case "waiting", "installing", "failed", "unavailable": return state["message"].string
         default: return running
         }

@@ -19,7 +19,7 @@ public enum NativeKeyboardKeys {
     public static let modifiers: Set<Int> = [54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
     static let keypad: Set<Int> = [65, 67, 69, 75, 78, 81, 82, 83, 84, 85, 86, 87, 88, 89, 91, 92]
     /// Keys that produce a visible character, excluding separators.
-    public static let glyphs: Set<Int> = Set(0...50).subtracting([returnKey, tab, space]).union(keypad)
+    public static let glyphs: Set<Int> = Set(0...50).subtracting([returnKey, tab, space]).union(keypad).union([93, 94])
     public static let separators: Set<Int> = [space, returnKey, keypadEnter]
     public static func isCorrection(_ code: Int) -> Bool { code == delete || code == forwardDelete }
     public static func category(_ code: Int) -> String {
@@ -67,7 +67,9 @@ public struct NativeKeyboardTotals: Sendable, Equatable {
     }
     /// Five characters per word over the time spent typing.
     public var wpm: Double { activeMs >= 1000 ? Double(timedCharacters) / 5 / (activeMs / 60_000) : 0 }
-    public var correctionRate: Double { characters > 0 ? Double(deleted) / Double(characters) : 0 }
+    /// Delete presses per character typed. A press that removed nothing
+    /// cannot be told apart, so this is an upper estimate capped at one.
+    public var correctionRate: Double { characters > 0 ? min(1, Double(deleted) / Double(characters)) : 0 }
 }
 
 public struct NativeKeyboardDelta: Sendable, Equatable {
@@ -87,6 +89,7 @@ public struct NativeKeyboardFold: Sendable {
     private var lastTypedAt: Double?, burstStartedAt: Double?
     private var burstCharacters = 0, burstSlot: NativeKeyboardSlot?
     private var wordOpen = false, deleting = false
+    private var lastDeleteAt: Double?, heldMs = 0.0
     private var recent: [Double] = []
     public private(set) var sessionKeys = 0
     public private(set) var lastKeyAt: Double?
@@ -99,37 +102,43 @@ public struct NativeKeyboardFold: Sendable {
         var totals = pending.slots[slot] ?? .init()
         defer { pending.slots[slot] = totals }
         lastKeyAt = event.time
-        let chord = event.command || event.control
-        if event.repeated {
-            totals.repeats += 1
-            if NativeKeyboardKeys.isCorrection(event.code), !chord { totals.deleted += 1; touch(event.time, &totals) }
-            return
+        // A held key is one physical press; its repeats are counted apart.
+        if event.repeated { totals.repeats += 1 } else {
+            totals.keys += 1; sessionKeys += 1
+            pending.keys[slot.day, default: [:]][event.code, default: 0] += 1
         }
-        totals.keys += 1; sessionKeys += 1
-        pending.keys[slot.day, default: [:]][event.code, default: 0] += 1
         if NativeKeyboardKeys.modifiers.contains(event.code) { return }
-        if chord {
-            totals.shortcuts += 1
-            pending.shortcuts[slot.day, default: [:]][NativeKeyboardKeys.combination(event), default: 0] += 1
+        if event.command || event.control {
+            deleting = false
+            if !event.repeated {
+                totals.shortcuts += 1
+                pending.shortcuts[slot.day, default: [:]][NativeKeyboardKeys.combination(event), default: 0] += 1
+            }
             return
         }
         if NativeKeyboardKeys.isCorrection(event.code) {
             totals.deleted += 1
-            if !deleting { totals.corrections += 1; deleting = true }
-            touch(event.time, &totals)
+            // A run of Delete presses is one correction until another key or a pause ends it.
+            let paused = lastDeleteAt.map { event.time - $0 > Self.pause || event.time < $0 } ?? true
+            if !deleting || (paused && !event.repeated) { totals.corrections += 1 }
+            deleting = true; lastDeleteAt = event.time
+            if event.repeated { hold(event.time) } else { touch(event.time, &totals) }
             return
         }
+        deleting = false
         let glyph = NativeKeyboardKeys.glyphs.contains(event.code), separator = NativeKeyboardKeys.separators.contains(event.code)
         guard glyph || separator else { return }
-        deleting = false
         totals.characters += 1
+        if event.repeated {
+            // Characters from a held key are typed text but say nothing about speed.
+            hold(event.time)
+            if glyph { wordOpen = true }
+            return
+        }
         if let last = lastTypedAt, event.time >= last, event.time - last <= Self.pause {
             totals.activeMs += event.time - last; totals.timedCharacters += 1; burstCharacters += 1
         } else {
-            if let peak = finishBurst() {
-                if peak.slot == slot { totals.peakWpm = max(totals.peakWpm, peak.wpm) }
-                else { pending.slots[peak.slot, default: .init()].peakWpm = max(pending.slots[peak.slot]?.peakWpm ?? 0, peak.wpm) }
-            }
+            close(finishBurst(), into: &totals, slot)
             burstStartedAt = event.time; burstCharacters = 1; totals.bursts += 1
         }
         lastTypedAt = event.time; burstSlot = slot
@@ -142,11 +151,29 @@ public struct NativeKeyboardFold: Sendable {
         guard let last = lastTypedAt, time >= last, time - last <= Self.pause else { return }
         totals.activeMs += time - last; lastTypedAt = time
     }
-    /// Ends the current burst and returns its speed when it was long enough to rank.
-    private mutating func finishBurst() -> (slot: NativeKeyboardSlot, wpm: Double)? {
-        defer { burstStartedAt = nil; burstCharacters = 0; burstSlot = nil; wordOpen = false; deleting = false }
-        guard let start = burstStartedAt, let end = lastTypedAt, let slot = burstSlot, burstCharacters >= 25, end - start >= 4_000 else { return nil }
-        return (slot, Double(burstCharacters - 1) / 5 / ((end - start) / 60_000))
+    /// Keeps a burst open while a key is held, without counting the hold as typing time.
+    private mutating func hold(_ time: Double) {
+        guard let last = lastTypedAt, time >= last, time - last <= Self.pause else { return }
+        lastTypedAt = time; heldMs += time - last
+    }
+    private struct Burst { var slot: NativeKeyboardSlot, wpm: Double?, word: Bool }
+    /// Ends the current burst. A word still open counts, because nothing
+    /// typed after a pause can be known to continue it.
+    private mutating func finishBurst() -> Burst? {
+        defer { burstStartedAt = nil; burstCharacters = 0; burstSlot = nil; wordOpen = false; deleting = false; heldMs = 0 }
+        guard let start = burstStartedAt, let end = lastTypedAt, let slot = burstSlot else { return nil }
+        let duration = end - start - heldMs
+        let ranks = burstCharacters >= 25 && duration >= 4_000
+        return .init(slot: slot, wpm: ranks ? Double(burstCharacters - 1) / 5 / (duration / 60_000) : nil, word: wordOpen)
+    }
+    /// Books a finished burst to its hour; `totals` is the open copy of `current`.
+    private mutating func close(_ burst: Burst?, into totals: inout NativeKeyboardTotals, _ current: NativeKeyboardSlot) {
+        guard let burst else { return }
+        func book(_ value: inout NativeKeyboardTotals) {
+            if let wpm = burst.wpm { value.peakWpm = max(value.peakWpm, wpm) }
+            if burst.word { value.words += 1 }
+        }
+        if burst.slot == current { book(&totals) } else { book(&pending.slots[burst.slot, default: .init()]) }
     }
     /// Speed over the trailing window, or zero once typing has paused.
     public func liveWpm(now: Double) -> Double {
@@ -158,7 +185,11 @@ public struct NativeKeyboardFold: Sendable {
     /// Removes and returns everything counted since the previous drain.
     public mutating func drain(now: Double) -> NativeKeyboardDelta {
         if let last = lastTypedAt, now - last > Self.pause {
-            if let peak = finishBurst() { pending.slots[peak.slot, default: .init()].peakWpm = max(pending.slots[peak.slot]?.peakWpm ?? 0, peak.wpm) }
+            if let burst = finishBurst() {
+                var totals = pending.slots[burst.slot] ?? .init()
+                close(burst, into: &totals, burst.slot)
+                pending.slots[burst.slot] = totals
+            }
             lastTypedAt = nil
         }
         recent.removeAll { now - $0 > Self.liveWindow }

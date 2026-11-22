@@ -8,7 +8,8 @@ import UniApiPresentation
 /// Key legends for the input source in use, so the heatmap matches the keys
 /// the user sees. Positions come from key codes and never change.
 enum NativeKeyboardLegends {
-    @MainActor static func current() -> [Int: String] {
+    /// `shift` gives the characters printed in the upper half of a key.
+    @MainActor static func current(shift: Bool = false) -> [Int: String] {
         guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
               let property = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return [:] }
         let data = Unmanaged<CFData>.fromOpaque(property).takeUnretainedValue() as Data
@@ -18,7 +19,7 @@ enum NativeKeyboardLegends {
             for code in NativeKeyboardKeys.glyphs {
                 var dead: UInt32 = 0, length = 0
                 var characters = [UniChar](repeating: 0, count: 4)
-                let status = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDisplay), 0, UInt32(LMGetKbdType()),
+                let status = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDisplay), shift ? 2 : 0, UInt32(LMGetKbdType()),
                                             OptionBits(kUCKeyTranslateNoDeadKeysBit), &dead, 4, &length, &characters)
                 guard status == noErr, length > 0 else { continue }
                 let text = String(utf16CodeUnits: characters, count: length).uppercased()
@@ -40,6 +41,26 @@ enum NativeKeyboardLegends {
     }
 }
 
+/// A key cap outline. `notch` cuts the lower left away below `upper`, which
+/// gives the two-row Return key of ISO and JIS boards.
+struct NativeKeycapShape: Shape {
+    var notch: CGFloat = 0, upper: CGFloat = 0
+    var radius: CGFloat
+    func path(in rect: CGRect) -> Path {
+        let box = rect.insetBy(dx: 0.5, dy: 0.5)
+        guard notch > 0 else { return Path(roundedRect: box, cornerRadius: radius, style: .continuous) }
+        let points = [CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.maxX, y: box.minY), CGPoint(x: box.maxX, y: box.maxY),
+                      CGPoint(x: box.minX + notch, y: box.maxY), CGPoint(x: box.minX + notch, y: box.minY + upper), CGPoint(x: box.minX, y: box.minY + upper)]
+        var path = Path()
+        path.move(to: CGPoint(x: box.midX, y: box.minY))
+        for index in 1...points.count {
+            path.addArc(tangent1End: points[index % points.count], tangent2End: points[(index + 1) % points.count], radius: radius)
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
 struct NativeKeyboardPage: View {
     let runtime: NativeRuntime
     @EnvironmentObject private var session: NativeAppSession
@@ -49,6 +70,7 @@ struct NativeKeyboardPage: View {
     @State private var state: JSONValue = .null
     @State private var live: JSONValue = .null
     @State private var legends: [Int: String] = [:]
+    @State private var shifted: [Int: String] = [:]
     @State private var error: String?
     @State private var pending = false
     @State private var confirmingReset = false
@@ -103,7 +125,7 @@ struct NativeKeyboardPage: View {
             .onChange(of: max(0, min(1240, viewport.size.width) - 2 * density.pageMargin), initial: true) { _, width in contentWidth = width }
         }
         .nativePageTask {
-            legends = NativeKeyboardLegends.current()
+            readLegends()
             let events = await runtime.events.stream()
             await reload()
             var refreshed = Date.distantPast
@@ -122,6 +144,7 @@ struct NativeKeyboardPage: View {
                 await reload()
             }
         }
+        .onReceive(DistributedNotificationCenter.default().publisher(for: Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String))) { _ in readLegends() }
         .nativePageActivity(reads: reads)
     }
 
@@ -225,9 +248,9 @@ struct NativeKeyboardPage: View {
             NativeValueTile(label: "Words", value: totals["words"].double,
                             detail: String(format: "%.1f characters per word", totals["charactersPerWord"].double), format: NativeNumberFormat.compact)
             NativeValueTile(label: "Corrections", value: totals["corrections"].double,
-                            detail: NativeNumberFormat.compact(totals["deleted"].double) + " characters deleted", accent: Theme.failFg, format: NativeNumberFormat.compact)
+                            detail: NativeNumberFormat.compact(totals["deleted"].double) + " Delete presses", accent: Theme.failFg, format: NativeNumberFormat.compact)
             NativeValueTile(label: "Correction rate", value: totals["correctionRate"].double, unit: "%",
-                            detail: percent(totals["accuracy"].double) + "% of characters kept", accent: Theme.failFg) { percent($0) }
+                            detail: percent(totals["accuracy"].double) + "% kept, estimated", accent: Theme.failFg) { percent($0) }
             NativeValueTile(label: "Typing time", value: totals["activeMs"].double, unit: time.1,
                             detail: NativeNumberFormat.compact(totals["bursts"].double) + " bursts, pauses excluded") { _ in time.0 }
             NativeValueTile(label: "Day streak", value: totals["streak"].double, unit: totals["streak"].int == 1 ? "day" : "days",
@@ -238,59 +261,119 @@ struct NativeKeyboardPage: View {
     }
 
     private func heat(_ count: Double, _ peak: Double) -> Double { peak > 0 && count > 0 ? (count / peak).squareRoot() : 0 }
-    private func keyCell(_ code: Int, counts: [Int: Double], peak: Double, pressed: Double, compact: Bool, showsLabel: Bool = true) -> some View {
-        let count: Double = counts[code] ?? 0
+    private var model: NativeKeyboardLayout.Model {
+        let layout = state["layout"]
+        return .init(standard: .init(rawValue: layout["standard"].string) ?? .ansi, form: .init(rawValue: layout["form"].string) ?? .compact,
+                     apple: layout["apple"].bool, name: layout["name"].string)
+    }
+    /// The legend printed on a key, and the shifted character above it.
+    private func legend(_ code: Int, width: CGFloat, symbols: Bool) -> (main: String, upper: String) {
+        if let cap = NativeKeyboardLayout.caps[code] {
+            let fits: Bool = width >= CGFloat(cap.word.count) * 6 + 8
+            return (symbols || !fits ? cap.symbol : cap.word, "")
+        }
+        if let glyph = legends[code] {
+            let upper: String = shifted[code] ?? ""
+            return (glyph, upper == glyph ? "" : upper)
+        }
+        return (NativeKeyboardLayout.named[code] ?? NativeKeyboardLayout.labels[code] ?? "", "")
+    }
+    private func keycap(_ key: NativeKeyboardLayout.Key, pitch: CGFloat, gap: CGFloat, symbols: Bool, counts: [Int: Double], peak: Double, pressed: Double) -> some View {
+        let width: CGFloat = CGFloat(key.width) * pitch - gap
+        let height: CGFloat = CGFloat(key.height) * pitch - gap
+        let upper: CGFloat = key.notch > 0 ? pitch - gap : height
+        let shape = NativeKeycapShape(notch: CGFloat(key.notch) * pitch, upper: upper, radius: min(6, pitch * 0.14))
+        let count: Double = counts[key.code] ?? 0
         let level: Double = heat(count, peak)
-        let label: String = NativeKeyboardLegends.label(code, legends)
-        let shape = RoundedRectangle(cornerRadius: compact ? 4 : 6, style: .continuous)
+        let name: String = NativeKeyboardLegends.label(key.code, legends)
         let tint: Color = level == 0 ? Color.clear : Theme.accent.opacity(0.14 + 0.82 * level)
-        let stroke: Color = hovered == code ? Theme.ink.opacity(0.7) : Theme.border
-        let size: CGFloat = compact ? 8.5 : (label.count > 2 ? 9.5 : 12)
+        let stroke: Color = hovered == key.code ? Theme.ink.opacity(0.7) : Theme.border
         let ink: Color = level > 0.5 ? Theme.onAccent : Theme.dim
+        let text = legend(key.code, width: width, symbols: symbols)
+        let stacked: Bool = !text.upper.isEmpty && upper >= 30
+        let size: CGFloat = min(text.main.count > 2 ? 10 : 13, pitch * (text.main.count > 2 ? 0.2 : 0.28)) * (stacked ? 0.88 : 1)
         let share: String = percent(pressed > 0 ? count / pressed : 0)
         let value: String = "\(Int(count)) presses, " + share + " percent"
-        let legend = Text(showsLabel ? label : "").font(Theme.ui(size, weight: .medium)).foregroundStyle(ink)
-            .lineLimit(1).minimumScaleFactor(0.6).padding(.horizontal, 2)
-        let face = shape.fill(Theme.track).overlay(shape.fill(tint)).overlay(shape.strokeBorder(stroke, lineWidth: 1)).overlay(legend)
-        return face
+        let caption = VStack(spacing: 0) {
+            if stacked { Text(text.upper).font(Theme.ui(size * 0.86)).opacity(0.75) }
+            Text(text.main).font(Theme.ui(size, weight: .medium))
+        }.foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.5).padding(.horizontal, 2).frame(width: width, height: upper)
+        return shape.fill(Theme.track).overlay(shape.fill(tint)).overlay(shape.stroke(stroke, lineWidth: 1)).overlay(alignment: .top) { caption }
+            .frame(width: width, height: height)
+            .contentShape(shape)
             .onHover { inside in
-                if inside { hovered = code } else if hovered == code { hovered = nil }
+                if inside { hovered = key.code } else if hovered == key.code { hovered = nil }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(label + " key")
+            .accessibilityLabel(name + " key")
             .accessibilityValue(value)
+            .offset(x: CGFloat(key.x) * pitch, y: CGFloat(key.y) * pitch)
+    }
+    /// A cap that sends no key code, drawn so the board keeps its shape.
+    private func inertCap(_ key: NativeKeyboardLayout.Key, pitch: CGFloat, gap: CGFloat) -> some View {
+        let width: CGFloat = CGFloat(key.width) * pitch - gap
+        let height: CGFloat = CGFloat(key.height) * pitch - gap
+        let shape = NativeKeycapShape(radius: min(6, pitch * 0.14))
+        return shape.fill(Theme.track).overlay(shape.stroke(Theme.border, lineWidth: 1))
+            .overlay(Circle().strokeBorder(Theme.border, lineWidth: 1).frame(width: min(width, height) * 0.5, height: min(width, height) * 0.5))
+            .frame(width: width, height: height)
+            .accessibilityHidden(true)
+            .offset(x: CGFloat(key.x) * pitch, y: CGFloat(key.y) * pitch)
+    }
+    private func layoutChoice(_ title: String, _ field: String, _ value: String) -> some View {
+        let selected: Bool = state["layoutChoice"][field].string == value
+        return Button(selected ? "\u{2713} " + title : title) { Task { await operation("set-layout", [field: .string(value)]) } }
+    }
+    private var layoutLine: some View {
+        let model = model, choice = state["layoutChoice"]
+        let chosen: Bool = ["form", "standard", "style"].contains { choice[$0].string != "auto" }
+        let name: String = model.name.isEmpty ? "Keyboard" : model.name
+        let title: String = [name, model.standard.title, model.form.title, model.apple ? "Apple keys" : "Third-party keys"].joined(separator: " \u{00B7} ")
+        return HStack(spacing: 10) {
+            Text(title).font(Theme.ui(12.5, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+            Text(chosen ? "Chosen by you" : "Detected from this Mac").font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
+            Spacer(minLength: 8)
+            Menu("Layout") {
+                Section("Size") {
+                    layoutChoice("Automatic", "form", "auto")
+                    ForEach(NativeKeyboardLayout.Form.allCases, id: \.self) { layoutChoice($0.title, "form", $0.rawValue) }
+                }
+                Section("Standard") {
+                    layoutChoice("Automatic", "standard", "auto")
+                    ForEach(NativeKeyboardLayout.Standard.allCases, id: \.self) { layoutChoice($0.title, "standard", $0.rawValue) }
+                }
+                Section("Key arrangement") {
+                    layoutChoice("Automatic", "style", "auto")
+                    layoutChoice("Apple", "style", "apple")
+                    layoutChoice("Third-party", "style", "other")
+                }
+            }
+            .menuStyle(.borderlessButton).fixedSize().font(Theme.ui(12.5))
+            .disabled(pending || state["readOnly"].bool)
+            .accessibilityLabel("Keyboard layout")
+        }
     }
     private var heatmap: some View {
-        let counts = counts, rows = NativeKeyboardLayout.rows(iso: state["iso"].bool)
-        let board = Set(rows.flatMap { $0 }.flatMap { [$0.code] + ($0.lower.map { [$0] } ?? []) })
+        let counts = counts, model = model
+        let keys = NativeKeyboardLayout.keys(model), size = NativeKeyboardLayout.size(model)
+        let board = Set(keys.map(\.code))
         let peak = counts.filter { board.contains($0.key) }.values.max() ?? 0
         let pressed = counts.values.reduce(0, +)
-        let width: CGFloat = min(contentWidth - 34, 900)
-        let gap: CGFloat = width < 520 ? 2 : 4
-        let unit: CGFloat = max(8, (width - gap * 13) / 14.5)
-        let compact = unit < 30
+        let available: CGFloat = max(120, contentWidth - 34)
+        let pitch: CGFloat = min(62, available / CGFloat(size.width))
+        let gap: CGFloat = pitch < 36 ? 2 : 4
+        let symbols = model.standard != .ansi
         return NativeCard(title: "Key heatmap") {
             VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: gap) {
-                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                        let height: CGFloat = index == 0 ? unit * 0.62 : unit
-                        HStack(spacing: gap) {
-                            ForEach(row) { key in
-                                let wide = CGFloat(key.width)
-                                let span: CGFloat = unit * wide + gap * (wide - 1)
-                                if let lower = key.lower {
-                                    VStack(spacing: gap / 2) {
-                                        keyCell(key.code, counts: counts, peak: peak, pressed: pressed, compact: true, showsLabel: false)
-                                        keyCell(lower, counts: counts, peak: peak, pressed: pressed, compact: true, showsLabel: false)
-                                    }.frame(width: span, height: height)
-                                } else {
-                                    keyCell(key.code, counts: counts, peak: peak, pressed: pressed, compact: compact, showsLabel: !key.continuation)
-                                        .frame(width: span, height: height)
-                                }
-                            }
-                        }
+                layoutLine
+                ZStack(alignment: .topLeading) {
+                    ForEach(keys) { key in
+                        if key.code < 0 { inertCap(key, pitch: pitch, gap: gap) }
+                        else { keycap(key, pitch: pitch, gap: gap, symbols: symbols, counts: counts, peak: peak, pressed: pressed) }
                     }
-                }.frame(maxWidth: .infinity, alignment: .center)
+                }
+                .frame(width: CGFloat(size.width) * pitch - gap, height: CGFloat(size.height) * pitch - gap, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .center)
                 HStack(spacing: 10) {
                     if let hovered {
                         let count = counts[hovered] ?? 0
@@ -362,18 +445,18 @@ struct NativeKeyboardPage: View {
                             Text("kept").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
                         }
                     }.frame(width: 92, height: 92).accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Characters kept").accessibilityValue(percent(accuracy) + " percent")
+                        .accessibilityLabel("Estimated share of characters kept").accessibilityValue(percent(accuracy) + " percent")
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("You delete " + percent(totals["correctionRate"].double) + "% of what you type").font(Theme.ui(13.5, weight: .medium)).foregroundStyle(Theme.ink)
+                        Text("You delete about " + percent(totals["correctionRate"].double) + "% of what you type").font(Theme.ui(13.5, weight: .medium)).foregroundStyle(Theme.ink)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("A correction is one run of Delete presses. Deleted characters include those removed while Delete is held.")
+                        Text("A correction is one run of Delete presses. The rate compares Delete presses, including repeats while the key is held, with characters typed. A press that removed nothing still counts, so it is an upper estimate.")
                             .font(Theme.ui(12)).foregroundStyle(Theme.muted).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 VStack(spacing: 0) {
                     fact("Corrections", NativeNumberFormat.decimal(totals["corrections"].double))
-                    fact("Characters deleted", NativeNumberFormat.decimal(totals["deleted"].double))
-                    fact("Deleted per correction", String(format: "%.1f", totals["deletedPerCorrection"].double))
+                    fact("Delete presses", NativeNumberFormat.decimal(totals["deleted"].double), "with repeats")
+                    fact("Presses per correction", String(format: "%.1f", totals["deletedPerCorrection"].double))
                     fact("Typed between corrections", String(format: "%.0f", totals["charactersPerCorrection"].double), "characters")
                     fact("Delete", NativeNumberFormat.decimal(backspace), "presses")
                     fact("Forward delete", NativeNumberFormat.decimal(forward), "presses")
@@ -431,6 +514,7 @@ struct NativeKeyboardPage: View {
         let hours = points(state["hours"].array) { index, _ in String(format: "%02d", index) }
         let names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         let weekdays = points(state["weekdays"].array) { index, _ in names[min(index, 6)] }
+        let recorded: Int = state["daily"].array.count
         let daily = points(Array(state["daily"].array.suffix(120))) { _, item in dayTitle(item["day"].string) }
         let busiest = totals["busiestHour"].isNull ? "" : "Busiest at " + hourTitle(totals["busiestHour"].int)
         let best = totals["bestDay"]["day"].string
@@ -449,7 +533,8 @@ struct NativeKeyboardPage: View {
                 }
             }
             if daily.count > 1 {
-                NativeCard(title: "Day by day") {
+                // The callouts below describe the whole range; the chart holds 120 days.
+                NativeCard(title: recorded > 120 ? "Day by day, latest 120 of \(recorded) days" : "Day by day") {
                     if !best.isEmpty {
                         Text("Best day " + dayTitle(best) + " with " + NativeNumberFormat.compact(totals["bestDay"]["keys"].double) + " keys"
                              + (totals["fastestDay"].isNull ? "" : String(format: ". Fastest day %@ at %.0f WPM", dayTitle(totals["fastestDay"]["day"].string), totals["fastestDay"]["wpm"].double)))
@@ -548,6 +633,9 @@ struct NativeKeyboardPage: View {
 
     // MARK: - Data
 
+    private func readLegends() {
+        legends = NativeKeyboardLegends.current(); shifted = NativeKeyboardLegends.current(shift: true)
+    }
     private func reload() async {
         guard let service = session.keyboard, let ticket = reads.begin("status") else { return }
         do {

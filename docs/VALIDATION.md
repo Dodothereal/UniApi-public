@@ -2,8 +2,8 @@
 
 ## In-app update and Keyboard Stats (candidate)
 
-The optimized native gate passed 1,355 tests with zero failures on macOS with
-Swift 6.4 and SDK 26.5, including 13 keyboard aggregation, summary and
+The optimized native gate passed 1,363 tests with zero failures on macOS with
+Swift 6.4 and SDK 26.5, including 18 keyboard aggregation, layout, summary and
 persistence methods and the updater's version, checksum, staging, idle-wait,
 cancellation and failure-result methods, all against injected fixtures. The
 secret scan was clean. The static gate ran 72 Python tests; the nine
@@ -24,8 +24,17 @@ refused or rolled-back installation are covered by fixtures only.
 
 Keyboard Stats pages were rendered from a development build against an isolated
 data folder with synthetic counters. Live capture through Input Monitoring,
-secure-field behavior, non-US layouts, external keyboards and the effect of an
-update on a granted permission were not exercised.
+secure-field behavior, non-US input sources and the effect of an update on a
+granted permission were not exercised.
+
+Keyboard detection ran on one host whose only keyboard is a virtual Apple USB
+keyboard that macOS reports as ANSI; it was detected as an Apple compact ANSI
+board. The ISO, JIS, tenkeyless and full-size drawings were rendered there
+through the manual layout choice only. No physical ISO or JIS keyboard, no
+built-in laptop keyboard, no third-party keyboard and no keyboard with a
+number pad was connected, so detection of those rests on fixtures. A staged
+update restored after a restart and the installer-log failure messages are
+likewise covered by fixtures only.
 
 ## UTC watermark day keys (candidate)
 

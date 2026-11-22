@@ -65,6 +65,23 @@ public enum NativeAppUpdatePolicy {
         if code > 0 { parts.append("\(code) coding " + (code == 1 ? "turn" : "turns")) }
         return "Waiting for " + parts.joined(separator: " and ") + " to finish. The update installs as soon as UniApi is idle."
     }
+    /// Describes an update that did not complete, from the installer's own
+    /// log. Only the installer's explicit statements say what was restored;
+    /// an exit status or a missing report is never read as a rollback.
+    public static func failureMessage(log: String, path: String) -> String {
+        let lines = log.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let details = path.isEmpty ? "" : " Log: " + path
+        if lines.contains(where: { $0.contains("recovery is incomplete") || $0.contains("current app and definitions retained") }) {
+            return "The update failed and the installer could not fully restore the previous installation. Its backups were kept; check the installation before using UniApi further." + details
+        }
+        if lines.contains(where: { $0.contains("previous app/service definitions and running PIDs restored") }) {
+            return "The update failed. The installer restored the previous version and its services, and kept data and settings." + details
+        }
+        guard let reason = lines.last else {
+            return "The update did not complete and the installer left no report, so the state of the installation is unknown." + details
+        }
+        return "The update was not installed. The installer reported: " + String(reason.prefix(240)) + details
+    }
 }
 
 public struct NativeAppUpdateWork: Sendable, Equatable {
@@ -154,17 +171,35 @@ public actor NativeAppUpdater {
             if saved["status"].string != "installed" { phase = .failed; message = failureText(saved) }
         }
         let current = io.currentVersion()
-        if let names = try? FileManager.default.contentsOfDirectory(atPath: updates.path) {
-            for name in names {
-                guard let version = NativeAppVersion(name) else { continue }
-                if !NativeAppUpdatePolicy.isNewer(version, than: current) { try? FileManager.default.removeItem(at: stage(version)) }
-            }
+        let found = ((try? FileManager.default.contentsOfDirectory(atPath: updates.path)) ?? []).compactMap { NativeAppVersion($0) }.sorted(by: >)
+        for version in found {
+            // Only the newest package that is still exactly what was verified is kept.
+            if staged == nil, NativeAppUpdatePolicy.isNewer(version, than: current), await retained(version) { staged = version; continue }
+            try? FileManager.default.removeItem(at: stage(version))
         }
+        if let staged, phase != .failed { latest = staged; progress = 1; phase = .ready }
         await publish()
     }
+    private static let sealed = ["install.sh", "tools/install-native.sh"]
+    private func manifest(_ version: NativeAppVersion) -> URL { stage(version).appendingPathComponent("verified.json") }
+    private func seal(_ version: NativeAppVersion) throws -> JSONValue {
+        var files: JSONObject = [:]
+        for name in Self.sealed { files[name] = .string(try io.digest(package(version).appendingPathComponent(name))) }
+        return ["version": .string(version.description), "files": .object(files)]
+    }
+    /// A package staged by an earlier run counts only when its record, its
+    /// installer scripts and the bundle's signature and version still agree.
+    private func retained(_ version: NativeAppVersion) async -> Bool {
+        guard let saved = try? NativeFile.readJSON(manifest(version)), !saved.isNull, let now = try? seal(version), saved == now else { return false }
+        return (try? await io.validate(package(version))) == version
+    }
+    private func log(_ version: String) -> URL? {
+        NativeAppVersion(version).map { runtime.paths.logs.appendingPathComponent("update-\($0).log") }
+    }
     private func failureText(_ saved: JSONValue) -> String {
-        let log = saved["log"].string
-        return "The last update did not install; the previous version and all data were kept." + (log.isEmpty ? "" : " Details: " + log)
+        guard let log = log(saved["version"].string) else { return NativeAppUpdatePolicy.failureMessage(log: "", path: "") }
+        let text = (try? Data(contentsOf: log)).map { String(decoding: $0.suffix(16_384), as: UTF8.self) } ?? ""
+        return NativeAppUpdatePolicy.failureMessage(log: text, path: log.path)
     }
     public func acknowledgeResult() async {
         result = .null; try? FileManager.default.removeItem(at: resultFile)
@@ -226,6 +261,7 @@ public actor NativeAppUpdater {
             let bundled = try await io.validate(bundle)
             guard bundled == version else { throw NativeFailure("The downloaded package is not UniApi \(version)") }
             try Task.checkCancellation()
+            try NativeFile.writeAtomic(try seal(version).encoded(), to: manifest(version))
         } catch { try? FileManager.default.removeItem(at: folder); throw error }
         guard generation == run else { return }
         staged = version; progress = 1
@@ -260,13 +296,17 @@ public actor NativeAppUpdater {
                 try await io.sleep(2)
             }
             try Task.checkCancellation()
+            guard await retained(version) else {
+                staged = nil; try? FileManager.default.removeItem(at: stage(version))
+                throw NativeFailure("The downloaded update changed after it was verified. Check for updates again.")
+            }
             result = .null; try? FileManager.default.removeItem(at: resultFile)
             await set(.installing, "Installing UniApi \(version)")
             await hide()
             let log = runtime.paths.logs.appendingPathComponent("update-\(version).log")
             try io.launch(package(version), resultFile, log)
             // A successful transfer replaces this process. Still being here
-            // means the installer refused or restored the previous version.
+            // means it did not complete; only the installer's log says how far it got.
             var waited = 0.0
             while waited < 300 {
                 try await io.sleep(1); waited += 1
@@ -277,7 +317,7 @@ public actor NativeAppUpdater {
                 }
             }
             installation = nil
-            await set(.failed, "The installer did not report a result. The previous version and all data were kept.")
+            await set(.failed, "The installer has not reported a result after five minutes, so the state of the installation is unknown. Check the log before continuing: " + log.path)
         } catch is CancellationError {
         } catch {
             installation = nil

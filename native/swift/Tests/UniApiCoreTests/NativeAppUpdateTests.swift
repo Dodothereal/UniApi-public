@@ -17,7 +17,7 @@ final class NativeAppUpdateTests: XCTestCase {
         return (try NativeRuntime(paths: NativePaths(root: root, home: root, dataRoot: root.appendingPathComponent("data"))), root)
     }
     private func io(_ record: Record, current: String = "0.1.16", latest: String = "0.1.17", digest: String = String(repeating: "a", count: 64),
-                    bundled: String? = nil, unavailable: String? = nil, result: String? = "installed") -> NativeAppUpdateIO {
+                    bundled: String? = nil, unavailable: String? = nil, result: String? = "installed", output: String? = nil) -> NativeAppUpdateIO {
         .init(currentVersion: { NativeAppVersion(current) }, unavailable: { unavailable },
               latest: { record.add("latest"); return NativeAppVersion(latest)! },
               text: { url in record.add("text " + url.lastPathComponent); return String(repeating: "a", count: 64) + "  UniApi-macos-\(latest).zip\n" },
@@ -25,17 +25,21 @@ final class NativeAppUpdateTests: XCTestCase {
                   record.add("download " + url.absoluteString); progress(0.5)
                   try Data("zip".utf8).write(to: destination)
               },
-              digest: { _ in digest },
+              // Staged installer scripts are sealed by their real contents.
+              digest: { url in url.pathExtension == "zip" ? digest : try Data(contentsOf: url).map { String(format: "%02x", $0) }.joined() },
               extract: { _, folder in
                   record.add("extract")
                   let package = folder.appendingPathComponent("UniApi-macos-\(latest)")
                   try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+                  try FileManager.default.createDirectory(at: package.appendingPathComponent("tools"), withIntermediateDirectories: true)
                   try Data("#!/bin/bash\n".utf8).write(to: package.appendingPathComponent("install.sh"))
+                  try Data("#!/bin/bash\n# transfer\n".utf8).write(to: package.appendingPathComponent("tools/install-native.sh"))
               },
               validate: { _ in record.add("validate"); return NativeAppVersion(bundled ?? latest)! },
               work: { let busy = record.takeBusy(); record.add("work \(busy)"); return .init(jobs: busy, code: 0) },
               launch: { package, resultFile, log in
                   record.add("launch " + package.lastPathComponent + " " + log.lastPathComponent)
+                  if let output { try Data(output.utf8).write(to: log) }
                   if let result { try Data("{\"status\":\"\(result)\",\"version\":\"\(latest)\"}".utf8).write(to: resultFile) }
               },
               now: { 1_000_000 }, sleep: { _ in await Task.yield() })
@@ -144,7 +148,7 @@ final class NativeAppUpdateTests: XCTestCase {
         let state = await settle(updater, until: ["current", "failed"])
         XCTAssertEqual(state["phase"].string, "current"); XCTAssertEqual(state["result"]["status"].string, "installed")
         let steps = record.values.drop { !$0.hasPrefix("work") }
-        XCTAssertEqual(Array(steps), ["work 2", "work 1", "work 0", "hide", "launch UniApi-macos-0.1.17 update-0.1.17.log"])
+        XCTAssertEqual(Array(steps), ["work 2", "work 1", "work 0", "validate", "hide", "launch UniApi-macos-0.1.17 update-0.1.17.log"])
     }
     func testRefusedInstallerReportsFailureAndKeepsTheStagedUpdate() async throws {
         let (runtime, root) = try runtime(); defer { try? FileManager.default.removeItem(at: root) }
@@ -153,10 +157,79 @@ final class NativeAppUpdateTests: XCTestCase {
         await updater.install { record.add("hide") }
         let state = await settle(updater, until: ["current", "failed"])
         XCTAssertEqual(state["phase"].string, "failed"); XCTAssertEqual(state["staged"].string, "0.1.17")
-        XCTAssertTrue(state["message"].string.contains("previous version"))
+        // Without a statement from the installer nothing is claimed about what was restored.
+        XCTAssertTrue(state["message"].string.contains("state of the installation is unknown")); XCTAssertFalse(state["message"].string.contains("restored"))
         await updater.acknowledgeResult()
         let cleared = await updater.state()
         XCTAssertEqual(cleared["phase"].string, "ready"); XCTAssertTrue(cleared["result"].isNull)
+    }
+    func testFailureMessagesFollowTheInstallerLog() async throws {
+        let restored = "Stopping services\nNative installation failed; previous app/service definitions and running PIDs restored. Data and configs retained.\n"
+        let incomplete = "Native installation failed; recovery is incomplete. Backups and configs retained at /tmp/backup; inspect restored services before continuing.\n"
+        let retained = "Native recovery could not retire only this install's idle services; current app and definitions retained. Evidence: /tmp/evidence\n" + restored
+        let refused = "Checking\nAnother native transfer owns the installation lock.\n\n"
+        func message(_ log: String) -> String { NativeAppUpdatePolicy.failureMessage(log: log, path: "/logs/update.log") }
+        XCTAssertTrue(message(restored).contains("restored the previous version")); XCTAssertTrue(message(restored).hasSuffix("Log: /logs/update.log"))
+        for log in [incomplete, retained] {
+            XCTAssertTrue(message(log).contains("could not fully restore"), log); XCTAssertFalse(message(log).contains("restored the previous version"), log)
+        }
+        XCTAssertTrue(message(refused).contains("was not installed")); XCTAssertTrue(message(refused).contains("Another native transfer owns the installation lock."))
+        XCTAssertFalse(message(refused).contains("restored"))
+        XCTAssertTrue(message("").contains("unknown")); XCTAssertFalse(NativeAppUpdatePolicy.failureMessage(log: "", path: "").contains("Log:"))
+        // The updater reads the log the installer wrote for that version, also after a restart.
+        let (runtime, root) = try runtime(); defer { try? FileManager.default.removeItem(at: root) }
+        let record = Record(), updater = NativeAppUpdater(runtime: runtime, io: io(record, result: "failed", output: incomplete))
+        await updater.check()
+        await updater.install { record.add("hide") }
+        let state = await settle(updater, until: ["current", "failed"])
+        XCTAssertTrue(state["message"].string.contains("could not fully restore")); XCTAssertTrue(state["message"].string.contains("update-0.1.17.log"))
+        let next = NativeAppUpdater(runtime: runtime, io: io(Record()))
+        await next.start()
+        let saved = await next.state()
+        XCTAssertEqual(saved["phase"].string, "failed"); XCTAssertTrue(saved["message"].string.contains("could not fully restore"))
+    }
+    func testVerifiedStageSurvivesARestartOnlyWhileUnchanged() async throws {
+        let (runtime, root) = try runtime(); defer { try? FileManager.default.removeItem(at: root) }
+        let first = NativeAppUpdater(runtime: runtime, io: io(Record()))
+        await first.check()
+        let record = Record(), second = NativeAppUpdater(runtime: runtime, io: io(record))
+        await second.start()
+        var state = await second.state()
+        XCTAssertEqual(state["phase"].string, "ready"); XCTAssertEqual(state["staged"].string, "0.1.17"); XCTAssertEqual(state["latest"].string, "0.1.17")
+        XCTAssertEqual(record.values, ["validate"])
+        // The same release is not downloaded again by the next check.
+        await second.check()
+        state = await second.state()
+        XCTAssertEqual(state["phase"].string, "ready"); XCTAssertFalse(record.values.contains { $0.hasPrefix("download") })
+        // A package whose installer changed after verification is discarded.
+        let stage = runtime.paths.data.appendingPathComponent("updates/0.1.17")
+        try Data("#!/bin/bash\nrm -rf /\n".utf8).write(to: stage.appendingPathComponent("UniApi-macos-0.1.17/tools/install-native.sh"))
+        let third = NativeAppUpdater(runtime: runtime, io: io(Record()))
+        await third.start()
+        state = await third.state()
+        XCTAssertEqual(state["phase"].string, "idle"); XCTAssertTrue(state["staged"].isNull)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stage.path))
+        // So is one the installed build has caught up with, and one whose bundle no longer validates.
+        await first.check()
+        let current = NativeAppUpdater(runtime: runtime, io: io(Record(), current: "0.1.17"))
+        await current.start()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stage.path))
+        let again = NativeAppUpdater(runtime: runtime, io: io(Record()))
+        await again.check()
+        let invalid = NativeAppUpdater(runtime: runtime, io: io(Record(), bundled: "0.1.15"))
+        await invalid.start()
+        state = await invalid.state()
+        XCTAssertTrue(state["staged"].isNull); XCTAssertFalse(FileManager.default.fileExists(atPath: stage.path))
+    }
+    func testStagedPackageChangedBeforeInstallIsRefused() async throws {
+        let (runtime, root) = try runtime(); defer { try? FileManager.default.removeItem(at: root) }
+        let record = Record(), updater = NativeAppUpdater(runtime: runtime, io: io(record))
+        await updater.check()
+        try Data("changed".utf8).write(to: runtime.paths.data.appendingPathComponent("updates/0.1.17/UniApi-macos-0.1.17/install.sh"))
+        await updater.install { record.add("hide") }
+        let state = await settle(updater, until: ["current", "failed"])
+        XCTAssertEqual(state["phase"].string, "failed"); XCTAssertTrue(state["staged"].isNull)
+        XCTAssertFalse(record.values.contains("hide")); XCTAssertFalse(record.values.contains { $0.hasPrefix("launch") })
     }
     func testWaitingInstallCanBeCancelled() async throws {
         let (runtime, root) = try runtime(); defer { try? FileManager.default.removeItem(at: root) }
@@ -179,7 +252,9 @@ final class NativeAppUpdateTests: XCTestCase {
         await updater.start()
         let state = await updater.state()
         XCTAssertEqual(state["phase"].string, "failed"); XCTAssertEqual(state["result"]["version"].string, "0.1.18")
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: updates.path).sorted(), ["0.1.18", "last-result.json"])
+        XCTAssertTrue(state["message"].string.contains("unknown")); XCTAssertTrue(state["staged"].isNull)
+        // A folder without a verification record is not a staged update.
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: updates.path).sorted(), ["last-result.json"])
     }
     func testInstallerScriptReportsOnlyValidatedValues() {
         let script = NativeAppUpdateSystem.installer

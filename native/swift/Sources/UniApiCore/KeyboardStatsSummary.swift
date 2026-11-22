@@ -55,7 +55,8 @@ public enum NativeKeyboardSummary {
     }
 
     public static func build(slots: [NativeKeyboardSlot: NativeKeyboardTotals], keys: [Int: Int], shortcuts: [String: Int],
-                             allDays: [String], range: String, now: Double, iso: Bool, calendar: Calendar = .current) -> JSONObject {
+                             allDays: [String], range: String, now: Double, model: NativeKeyboardLayout.Model = .init(),
+                             calendar: Calendar = .current) -> JSONObject {
         var total = NativeKeyboardTotals()
         var byDay: [String: NativeKeyboardTotals] = [:]
         var byHour = Array(repeating: NativeKeyboardTotals(), count: 24)
@@ -90,7 +91,7 @@ public enum NativeKeyboardSummary {
         result["fastestDay"] = fastest.map { ["day": .string($0.key), "wpm": .number($0.value.wpm)] } ?? .null
         result["streak"] = .number(Double(streak.current)); result["longestStreak"] = .number(Double(streak.longest))
         result["uniqueKeys"] = .number(Double(keys.filter { $0.value > 0 }.count))
-        result["travelMeters"] = .number(NativeKeyboardLayout.travelMeters(keys, iso: iso))
+        result["travelMeters"] = .number(NativeKeyboardLayout.travelMeters(keys, model))
         let busiest = byHour.enumerated().max { ($0.element.keys, $1.offset) < ($1.element.keys, $0.offset) }
         result["busiestHour"] = (busiest?.element.keys ?? 0) > 0 ? .number(Double(busiest!.offset)) : .null
 
@@ -98,14 +99,14 @@ public enum NativeKeyboardSummary {
         let ranked = keys.filter { $0.value > 0 }.sorted { ($0.value, $1.key) > ($1.value, $0.key) }
         var categories: [String: Int] = [:], fingers: [String: Int] = [:], rows = Array(repeating: 0, count: NativeKeyboardLayout.rowTitles.count)
         var left = 0, right = 0
-        let positions = NativeKeyboardLayout.positions(iso: iso)
+        let positions = NativeKeyboardLayout.positions(model)
         for (code, count) in keys {
             categories[NativeKeyboardKeys.category(code), default: 0] += count
             if let finger = NativeKeyboardLayout.finger(code) {
                 fingers[finger.rawValue, default: 0] += count
                 if finger.left == true { left += count } else if finger.left == false { right += count }
             }
-            if let row = positions[code]?.row { rows[row] += count }
+            if let key = positions[code], key.section == .main { rows[key.row] += count }
         }
         func series(_ value: NativeKeyboardTotals) -> JSONObject {
             ["keys": .number(Double(value.keys)), "characters": .number(Double(value.characters)), "deleted": .number(Double(value.deleted)),
@@ -113,7 +114,8 @@ public enum NativeKeyboardSummary {
              "correctionRate": .number(value.correctionRate)]
         }
         return [
-            "range": .string(ranges.contains(range) ? range : "all"), "today": .string(today), "iso": .bool(iso),
+            "range": .string(ranges.contains(range) ? range : "all"), "today": .string(today),
+            "layout": ["standard": .string(model.standard.rawValue), "form": .string(model.form.rawValue), "apple": .bool(model.apple), "name": .string(model.name)],
             "totals": .object(result),
             "keys": .array(ranked.map { ["code": .number(Double($0.key)), "count": .number(Double($0.value)), "share": share($0.value),
                                          "category": .string(NativeKeyboardKeys.category($0.key))] }),

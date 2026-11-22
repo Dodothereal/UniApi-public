@@ -51,6 +51,49 @@ final class KeyboardStatsTests: XCTestCase {
         XCTAssertEqual(delta.keys["2024-01-15"]?[NativeKeyboardKeys.delete], 3)
         XCTAssertEqual(delta.keys["2024-01-15"]?[NativeKeyboardKeys.forwardDelete], 1)
     }
+    func testAWordLeftOpenByAPauseIsCountedOnce() {
+        var fold = fold()
+        let end = type(&fold, [4, 14, 37, 37, 31], from: base)
+        XCTAssertEqual(total(fold.drain(now: end + 3_000)).words, 1)
+        // The separator that follows the pause does not count the word again.
+        fold.record(.init(code: 49, time: end + 3_000))
+        XCTAssertEqual(total(fold.drain(now: end + 9_000)).words, 0)
+        // A burst ended by the next burst rather than by a drain books its word too.
+        type(&fold, [4, 14], from: end + 20_000)
+        type(&fold, [4, 14, 49], from: end + 30_000)
+        XCTAssertEqual(total(fold.drain(now: end + 40_000)).words, 2)
+    }
+    func testHeldKeysAddCharactersButNoPressesOrSpeed() {
+        var fold = fold()
+        var end = type(&fold, [4, 14, 37, 37, 31], from: base)
+        let before = total(fold.drain(now: end))
+        fold.record(.init(code: 49, time: end + 200))
+        for index in 1...10 { fold.record(.init(code: 49, repeated: true, time: end + 200 + Double(index) * 50)) }
+        end += 700
+        let value = total(fold.drain(now: end))
+        XCTAssertEqual(value.keys, 1); XCTAssertEqual(value.repeats, 10); XCTAssertEqual(value.characters, 11)
+        XCTAssertEqual(value.timedCharacters, 1); XCTAssertEqual(value.activeMs, 200); XCTAssertEqual(value.words, 1)
+        XCTAssertEqual(before.keys, 5)
+        XCTAssertEqual(fold.sessionKeys, 6)
+        // The time the key was held does not open a pause either.
+        fold.record(.init(code: 4, time: end + 1_900))
+        XCTAssertEqual(total(fold.drain(now: end + 1_900)).bursts, 0)
+    }
+    func testDeleteRunsEndAtAPauseOrAnotherKey() {
+        var fold = fold()
+        // Deleting in existing text: two runs separated by a pause, then one after moving the cursor.
+        fold.record(.init(code: 51, time: base)); fold.record(.init(code: 51, time: base + 200))
+        fold.record(.init(code: 51, repeated: true, time: base + 700)); fold.record(.init(code: 51, repeated: true, time: base + 3_000))
+        fold.record(.init(code: 51, time: base + 8_000))
+        fold.record(.init(code: 123, time: base + 8_200)); fold.record(.init(code: 51, time: base + 8_400))
+        fold.record(.init(code: 0, command: true, time: base + 8_500)); fold.record(.init(code: 117, time: base + 8_600))
+        let value = total(fold.drain(now: base + 9_000))
+        XCTAssertEqual(value.corrections, 4); XCTAssertEqual(value.deleted, 7); XCTAssertEqual(value.characters, 0)
+        // More Delete presses than characters still reads as at most everything.
+        var totals = NativeKeyboardTotals(); totals.characters = 3; totals.deleted = 40
+        XCTAssertEqual(totals.correctionRate, 1)
+    }
+
     func testShortcutsAndModifiersAreNotTyping() {
         var fold = fold()
         fold.record(.init(code: 55, command: true, time: base))
@@ -98,22 +141,75 @@ final class KeyboardStatsTests: XCTestCase {
         XCTAssertTrue(fold.drain(now: base).isEmpty)
     }
 
+    private typealias Layout = NativeKeyboardLayout
     func testLayoutsAreConsistent() {
-        for iso in [false, true] {
-            let rows = NativeKeyboardLayout.rows(iso: iso)
-            XCTAssertEqual(rows.count, NativeKeyboardLayout.rowTitles.count)
-            for row in rows { XCTAssertEqual(row.reduce(0) { $0 + $1.width }, 14.5, accuracy: 0.0001, "iso \(iso)") }
-            let codes = rows.flatMap { $0 }.filter { !$0.continuation }.flatMap { [$0.code] + ($0.lower.map { [$0] } ?? []) }
-            XCTAssertEqual(codes.count, Set(codes).count)
-            for code in codes where !(96...122).contains(code) { XCTAssertNotNil(NativeKeyboardLayout.finger(code), "code \(code)") }
-        }
-        XCTAssertNotNil(NativeKeyboardLayout.row(10, iso: true)); XCTAssertNil(NativeKeyboardLayout.row(10, iso: false))
+        for standard in Layout.Standard.allCases { for form in Layout.Form.allCases { for apple in [true, false] {
+            let model = Layout.Model(standard: standard, form: form, apple: apple), keys = Layout.keys(model), size = Layout.size(model)
+            let label = "\(standard) \(form) apple \(apple)"
+            XCTAssertEqual(keys.count, Set(keys.map(\.code)).count, label)
+            // Each row of the main block is filled edge to edge apart from the gaps between function-key groups.
+            let main = keys.filter { $0.section == .main }
+            var covered = Array(repeating: 0.0, count: 6)
+            for key in main {
+                for row in Int(key.y)..<Int((key.y + key.height).rounded(.up)) { covered[row] += key.width * min(1, key.height) - (row > Int(key.y) ? key.notch : 0) }
+            }
+            for row in 1..<5 { XCTAssertEqual(covered[row], Layout.mainWidth, accuracy: 0.0001, label + " row \(row)") }
+            // Left and Right are half-height on a compact board, leaving a unit of the row empty above them.
+            XCTAssertEqual(covered[5], form == .compact ? 13.5 : 14.5, accuracy: 0.0001, label)
+            XCTAssertEqual(covered[0], apple ? 14.5 : 13, accuracy: 0.0001, label)
+            for key in keys {
+                XCTAssertTrue(key.x >= 0 && key.y >= 0 && key.x + key.width <= size.width + 0.0001 && key.y + key.height <= size.height + 0.0001, label + " \(key.code)")
+                if key.section == .main, key.code >= 0, !(96...122).contains(key.code) { XCTAssertNotNil(Layout.finger(key.code), label + " \(key.code)") }
+            }
+            for (index, first) in keys.enumerated() { for second in keys[(index + 1)...] {
+                // The cut corner of a two-row Return holds the key beside it.
+                let left = first.notch > 0 && second.y >= first.y + 1 ? first.x + first.notch : first.x
+                let overlap = left < second.x + second.width - 0.0001 && second.x < first.x + first.width - 0.0001
+                    && first.y < second.y + second.height - 0.0001 && second.y < first.y + first.height - 0.0001
+                XCTAssertFalse(overlap, label + " \(first.code) and \(second.code)")
+            } }
+            XCTAssertEqual(keys.contains { $0.section == .numpad }, form == .full, label)
+            XCTAssertEqual(keys.contains { $0.section == .navigation }, form != .compact, label)
+            XCTAssertEqual(keys.contains { $0.code == Layout.touchID }, apple && form == .compact, label)
+            for home in [0, 1, 2, 3, 38, 40, 37, 41, 49] { XCTAssertEqual(Layout.row(home, model), home == 49 ? 5 : 3, label) }
+        } } }
+        let ansi = Layout.Model(), iso = Layout.Model(standard: .iso), jis = Layout.Model(standard: .jis)
+        XCTAssertNil(Layout.row(10, ansi)); XCTAssertEqual(Layout.row(10, iso), 1); XCTAssertEqual(Layout.row(50, iso), 4)
+        XCTAssertEqual(Layout.positions(iso)[36]?.height, 2); XCTAssertEqual(Layout.row(36, iso), 3); XCTAssertEqual(Layout.positions(ansi)[36]?.height, 1)
+        XCTAssertNil(Layout.row(50, jis)); XCTAssertEqual(Layout.row(93, jis), 1); XCTAssertEqual(Layout.row(94, jis), 4)
+        XCTAssertEqual(Layout.row(102, jis), 5); XCTAssertEqual(Layout.row(59, jis), 3); XCTAssertEqual(Layout.row(57, jis), 5)
+        XCTAssertNil(Layout.row(82, Layout.Model(form: .full)), "number pad keys are outside the typing rows")
+        XCTAssertNotNil(Layout.positions(.init(form: .full, apple: false))[114]); XCTAssertNil(Layout.positions(.init(form: .full))[114])
         // Home keys cost nothing; a neighbouring key costs one pitch there and back.
-        XCTAssertEqual(NativeKeyboardLayout.travelMeters([0: 100, 38: 100, 49: 100], iso: false), 0)
-        XCTAssertEqual(NativeKeyboardLayout.travelMeters([5: 10], iso: false), 10 * 2 * 19.05 / 1000, accuracy: 0.000001)
+        XCTAssertEqual(Layout.travelMeters([0: 100, 38: 100, 49: 100], ansi), 0)
+        XCTAssertEqual(Layout.travelMeters([5: 10], ansi), 10 * 2 * 19.05 / 1000, accuracy: 0.000001)
         XCTAssertEqual(NativeKeyboardKeys.category(0), "Letters"); XCTAssertEqual(NativeKeyboardKeys.category(18), "Digits")
         XCTAssertEqual(NativeKeyboardKeys.category(51), "Corrections"); XCTAssertEqual(NativeKeyboardKeys.category(43), "Punctuation")
         XCTAssertEqual(NativeKeyboardKeys.category(122), "Function keys"); XCTAssertEqual(NativeKeyboardKeys.category(56), "Modifiers")
+        XCTAssertEqual(NativeKeyboardKeys.category(93), "Punctuation")
+    }
+    func testKeyboardDetection() {
+        let laptop = NativeKeyboardDevice(name: "Apple Internal Keyboard / Trackpad", builtIn: true, apple: true)
+        let magic = NativeKeyboardDevice(name: "Magic Keyboard", apple: true), keypad = NativeKeyboardDevice(name: "Magic Keyboard with Numeric Keypad", apple: true)
+        let board = NativeKeyboardDevice(name: "Keychron K8"), receiver = NativeKeyboardDevice(name: "USB Receiver")
+        func detect(_ devices: [NativeKeyboardDevice], _ standard: Layout.Standard = .ansi, generic: Bool = false, used: Set<Int> = []) -> Layout.Model {
+            Layout.detect(.init(devices: devices, standard: standard, generic: generic), used: used)
+        }
+        XCTAssertEqual(detect([laptop], .iso), .init(standard: .iso, form: .compact, apple: true, name: laptop.name))
+        // Fn with an arrow sends navigation codes on a laptop, and a pointer receiver is not a keyboard.
+        XCTAssertEqual(detect([laptop, receiver], used: [115, 119, 117]).form, .compact)
+        XCTAssertEqual(detect([laptop, receiver], generic: true).name, laptop.name)
+        XCTAssertEqual(detect([laptop, magic]).name, magic.name)
+        XCTAssertEqual(detect([laptop, keypad]), .init(form: .full, apple: true, name: keypad.name))
+        XCTAssertEqual(detect([magic], used: [83]).form, .full)
+        // A recognised Apple keyboard was typed on last, so the other board is not drawn.
+        XCTAssertEqual(detect([laptop, board]).name, laptop.name)
+        XCTAssertEqual(detect([laptop, board], .jis, generic: true), .init(standard: .jis, form: .compact, apple: false, name: board.name))
+        XCTAssertEqual(detect([board], generic: true, used: [115]).form, .tenkeyless)
+        XCTAssertEqual(detect([board], generic: true, used: [115, 86]).form, .full)
+        XCTAssertEqual(detect([board]).apple, false)
+        XCTAssertEqual(detect([]), .init())
+        XCTAssertEqual(detect([], generic: true, used: [86]), .init(form: .full, apple: false))
     }
     func testStreaks() {
         let calendar = Self.utc
@@ -134,7 +230,7 @@ final class KeyboardStatsTests: XCTestCase {
         let state = NativeKeyboardSummary.build(
             slots: [.init(day: "2024-01-15", hour: 9): morning, .init(day: "2024-01-13", hour: 21): evening],
             keys: [0: 60, 38: 30, 51: 10, 49: 20, 56: 30], shortcuts: ["cmd+8": 5, "cmd+9": 7],
-            allDays: ["2024-01-13", "2024-01-15"], range: "7d", now: base, iso: false, calendar: Self.utc)
+            allDays: ["2024-01-13", "2024-01-15"], range: "7d", now: base, calendar: Self.utc)
         let totals = state["totals"] ?? .null
         XCTAssertEqual(totals["keys"].int, 150); XCTAssertEqual(totals["characters"].int, 120)
         XCTAssertEqual(totals["wpm"].double, 16, accuracy: 0.001)
@@ -224,5 +320,33 @@ final class KeyboardStatsTests: XCTestCase {
         state = try await again.handle("reset")
         XCTAssertEqual(state["totals"]["keys"].int, 0); XCTAssertFalse(state["hasData"].bool); XCTAssertTrue(state["enabled"].bool)
         do { _ = try await again.handle("unknown"); XCTFail("Expected refusal") } catch {}
+    }
+    func testLayoutFollowsTheKeyboardUnlessChosen() async throws {
+        let (first, board, runtime, root) = try service(); defer { try? FileManager.default.removeItem(at: root) }
+        let start = board.clock
+        func io(_ hardware: NativeKeyboardHardware) -> NativeKeyboardIO {
+            .init(permitted: { false }, requestPermission: { false }, begin: { false }, end: {}, take: { [] }, hardware: { hardware },
+                  slot: { NativeKeyboardSlot.local($0, calendar: Self.utc) }, now: { start })
+        }
+        // Number pad presses recorded earlier show that the keyboard has one.
+        board.allow(true)
+        _ = try await first.handle("set-enabled", input: ["enabled": true])
+        board.press([.init(code: 83, time: start)])
+        await first.stop()
+        let magic = NativeKeyboardHardware(devices: [.init(name: "Magic Keyboard", apple: true)], standard: .iso)
+        let service = NativeKeyboardService(runtime: runtime, io: io(magic))
+        var state = try await service.handle("status")
+        XCTAssertEqual(state["layout"], ["standard": "iso", "form": "full", "apple": true, "name": "Magic Keyboard"])
+        XCTAssertEqual(state["layoutChoice"], ["form": "auto", "standard": "auto", "style": "auto"])
+        state = try await service.handle("set-layout", input: ["form": "tenkeyless", "standard": "jis", "style": "other"])
+        XCTAssertFalse(state["layout"]["apple"].bool)
+        XCTAssertEqual(state["layout"]["form"].string, "tenkeyless"); XCTAssertEqual(state["layout"]["standard"].string, "jis")
+        // The choice outlives the service and a reset, and leaves recording as it was.
+        let again = NativeKeyboardService(runtime: runtime, io: io(.init()))
+        state = try await again.handle("reset")
+        XCTAssertEqual(state["layoutChoice"], ["form": "tenkeyless", "standard": "jis", "style": "other"]); XCTAssertTrue(state["enabled"].bool)
+        XCTAssertEqual(state["layout"]["standard"].string, "jis")
+        state = try await again.handle("set-layout", input: ["form": "auto", "standard": "auto", "style": "auto"])
+        XCTAssertEqual(state["layout"], ["standard": "ansi", "form": "compact", "apple": true, "name": ""])
     }
 }

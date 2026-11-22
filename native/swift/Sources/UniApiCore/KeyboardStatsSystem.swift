@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import Carbon.HIToolbox
+import IOKit
 
 extension NativeKeyboardIO {
     public static func production() -> NativeKeyboardIO {
@@ -9,7 +10,41 @@ extension NativeKeyboardIO {
             permitted: { CGPreflightListenEventAccess() },
             requestPermission: { CGRequestListenEventAccess() },
             begin: { observer.begin() }, end: { observer.end() }, take: { observer.take() },
-            iso: { KBGetLayoutType(Int16(truncatingIfNeeded: LMGetKbdType())) == UInt32(kKeyboardISO) })
+            hardware: { hardware(type: observer.keyboardType() ?? Int(LMGetKbdType())) })
+    }
+
+    /// Keyboard types macOS assigns to boards it does not recognise.
+    private static let genericTypes: Set<Int> = [40, 41, 42]
+
+    static func hardware(type: Int) -> NativeKeyboardHardware {
+        let standard: NativeKeyboardLayout.Standard
+        switch Int(KBGetLayoutType(Int16(truncatingIfNeeded: type))) {
+        case kKeyboardISO: standard = .iso
+        case kKeyboardJIS: standard = .jis
+        default: standard = .ansi
+        }
+        return .init(devices: devices(), standard: standard, generic: genericTypes.contains(type))
+    }
+
+    /// Names of connected keyboards from the I/O Registry. Reading them needs
+    /// no permission and observes no input.
+    static func devices() -> [NativeKeyboardDevice] {
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOHIDDevice"), &iterator) == KERN_SUCCESS else { return [] }
+        defer { IOObjectRelease(iterator) }
+        var result: [NativeKeyboardDevice] = []
+        while true {
+            let service = IOIteratorNext(iterator)
+            guard service != 0 else { break }
+            defer { IOObjectRelease(service) }
+            func value(_ key: String) -> Any? { IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() }
+            guard (value("PrimaryUsagePage") as? Int) == 1, (value("PrimaryUsage") as? Int) == 6 else { continue }
+            let vendor = value("VendorID") as? Int ?? 0
+            let device = NativeKeyboardDevice(name: String((value("Product") as? String ?? "").prefix(80)), builtIn: (value("Built-In") as? Bool) == true,
+                                              apple: vendor == 0x05AC || vendor == 0x004C)
+            if !result.contains(device) { result.append(device) }
+        }
+        return result
     }
 }
 
@@ -21,9 +56,13 @@ final class NativeKeyboardObserver: @unchecked Sendable {
     private let lock = NSLock()
     private var events: [NativeKeyboardEvent] = []
     private var held: Set<Int> = []
+    private var lastType: Int?
     private var port: CFMachPort?
     private var source: CFRunLoopSource?
     private var runLoop: CFRunLoop?
+
+    /// Type of the keyboard that sent the most recent key press.
+    func keyboardType() -> Int? { lock.withLock { lastType } }
 
     func take() -> [NativeKeyboardEvent] {
         lock.withLock { defer { events.removeAll(keepingCapacity: true) }; return events }
@@ -68,8 +107,10 @@ final class NativeKeyboardObserver: @unchecked Sendable {
             return
         }
         let code = Int(event.getIntegerValueField(.keyboardEventKeycode)), flags = event.flags
+        let keyboard = Int(event.getIntegerValueField(.keyboardEventKeyboardType))
         var repeated = false
         lock.lock(); defer { lock.unlock() }
+        if keyboard > 0 { lastType = keyboard }
         if type == .flagsChanged {
             // One event per modifier press and release; only presses count.
             let active: Bool

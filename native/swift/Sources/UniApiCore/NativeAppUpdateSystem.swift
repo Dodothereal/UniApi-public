@@ -116,9 +116,11 @@ enum NativeAppUpdateSystem {
     package="$1"; result="$2"; log="$3"; application="$4"; version="$5"
     sleep 1
     status=failed
-    if /bin/bash "$package/install.sh" --install >"$log" 2>&1; then status=installed; fi
+    /bin/bash "$package/install.sh" --install >"$log" 2>&1
+    code=$?
+    if [ "$code" = 0 ]; then status=installed; fi
     temporary="$result.$$"
-    printf '{"status":"%s","version":"%s","finishedAt":%s}\\n' "$status" "$version" "$(date +%s)" >"$temporary" && mv -f "$temporary" "$result"
+    printf '{"status":"%s","version":"%s","exit":%s,"finishedAt":%s}\\n' "$status" "$version" "$code" "$(date +%s)" >"$temporary" && mv -f "$temporary" "$result"
     if [ "$status" = installed ]; then rm -rf "$(dirname "$package")"; fi
     if launchctl print "gui/$(id -u)/app.devved.uniapi-server" >/dev/null 2>&1; then /usr/bin/open "$application"; fi
     """
