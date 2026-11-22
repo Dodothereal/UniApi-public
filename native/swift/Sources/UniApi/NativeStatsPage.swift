@@ -763,7 +763,7 @@ private struct NativeStatsHeat: View {
                     .font(Theme.mono(10.5)).foregroundStyle(Theme.faint)
                 }
                 .padding(.leading, 36).padding(.top, 5).accessibilityHidden(true)
-                Text(peak > 0 ? "Busiest hour \(String(format: "%02d", best?.offset ?? 0)):00 · darkest cell is \(Int(peak)) responses" : "No dated activity")
+                Text(peak > 0 ? "Busiest hour \(String(format: "%02d", best?.offset ?? 0)):00 · fullest cell holds \(Int(peak)) responses" : "No dated activity")
                     .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).padding(.top, 10)
             }
         }
