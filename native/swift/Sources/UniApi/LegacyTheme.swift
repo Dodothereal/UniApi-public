@@ -76,54 +76,61 @@ enum Theme {
                         lightAlpha: lightOverride == nil ? lightAlpha : 1,
                         darkAlpha: darkOverride == nil ? darkAlpha : 1)
     }
-    static var bg: Color { token(.background, light: 0xfcfcfc, dark: 0x0a0a0a) }
-    static var surface: Color { token(.surface, light: 0xffffff, dark: 0x111111) }
-    static var popover: Color { token(.popover, light: 0xffffff, dark: 0x191919) }
-    static var ink: Color { token(.text, light: 0x18181b, dark: 0xf5f5f5) }
-    static var dim: Color { token(.secondaryText, light: 0x47464e, dark: 0xa8a8a8) }
-    static var muted: Color { token(.mutedText, light: 0x71717b, dark: 0x818181) }
-    static let subtle = adaptive(light: 0x000000, dark: 0xffffff, lightAlpha: 0.04, darkAlpha: 0.04)
-    static let subtle2 = adaptive(light: 0x000000, dark: 0xffffff, lightAlpha: 0.07, darkAlpha: 0.07)
-    static var border: Color { token(.border, light: 0xe4e4e7, dark: 0xffffff, darkAlpha: 0.06) }
-    static var input: Color { token(.input, light: 0xd4d4d8, dark: 0xffffff, darkAlpha: 0.08) }
-    static var field: Color { token(.field, light: 0xffffff, dark: 0xffffff, darkAlpha: 0.035) }
-    static let well = adaptive(light: 0x000000, dark: 0x000000, lightAlpha: 0.04, darkAlpha: 0.3)
-    static let track = adaptive(light: 0x000000, dark: 0xffffff, lightAlpha: 0.07, darkAlpha: 0.05)
-    static let segTrack = adaptive(light: 0x000000, dark: 0x000000, lightAlpha: 0.045, darkAlpha: 0.5)
-    static let grid = adaptive(light: 0x000000, dark: 0xffffff, lightAlpha: 0.07, darkAlpha: 0.06)
-    static let baseline = adaptive(light: 0x000000, dark: 0xffffff, lightAlpha: 0.12, darkAlpha: 0.08)
-    static let crosshair = adaptive(light: 0x000000, dark: 0xf5f5f5, lightAlpha: 0.28, darkAlpha: 0.18)
-    static let shadow = adaptive(light: 0x000000, dark: 0x000000, lightAlpha: 0.12, darkAlpha: 0.55)
-    static let overlay = adaptive(light: 0x000000, dark: 0x000000, lightAlpha: 0.28, darkAlpha: 0.55)
-    static var accent: Color { token(.accent, light: 0x1447e6, dark: 0x346bf1) }
-    static var link: Color { token(.highlight, light: 0x1447e6, dark: 0x8fb2ff) }
-    static var onAccent: Color { token(.onAccent, light: 0xffffff, dark: 0xffffff) }
-    static let controlStroke = Color.white.opacity(0.12)
-    static let controlShadow = Color.black.opacity(0.3)
-    static var ok: Color { token(.success, light: 0x00bc7d, dark: 0x00bc7d) }
-    static var okFg: Color { token(.success, light: 0x047857, dark: 0x00d492) }
-    static var warn: Color { token(.warning, light: 0xfe9a00, dark: 0xfe9a00) }
-    static var warnFg: Color { token(.warning, light: 0xbb4d00, dark: 0xffb900) }
-    static var fail: Color { token(.failure, light: 0xfb2c36, dark: 0xfb2c36) }
-    static var failFg: Color { token(.failure, light: 0xc10007, dark: 0xff6467) }
-    static var sidebarAccent: Color { token(.sidebarSelection, light: 0xf1f1f4, dark: 0x191a1d) }
-    static var sidebarBG: Color { token(.sidebar, light: 0xfcfcfc, dark: 0x0a0a0a) }
-    static var sidebarInk: Color { token(.text, light: 0x18181b, dark: 0xf1f3f7) }
-    static var sidebarMuted: Color { token(.mutedText, light: 0x71717b, dark: 0xa3a3a3) }
-    static var sidebarBorder: Color { token(.border, light: 0xe4e4e7, dark: 0xffffff, darkAlpha: 0.08) }
-    static func surfaceFor(_ color: Color) -> Color { color.opacity(0.16) }
-    static let radiusSm: CGFloat = 6
-    static let radiusMd: CGFloat = 8
-    static let radius: CGFloat = 10
+    // Warm graphite in Dark, paper in Light. The canvas carries the content;
+    // `surface` is reserved for wells a person types into and things that float.
+    static var bg: Color { token(.background, light: 0xf6f4ef, dark: 0x131211) }
+    static var surface: Color { token(.surface, light: 0xfdfcf9, dark: 0x1b1a18) }
+    static var popover: Color { token(.popover, light: 0xffffff, dark: 0x22201e) }
+    static var ink: Color { token(.text, light: 0x1a1917, dark: 0xf0ede6) }
+    static var dim: Color { token(.secondaryText, light: 0x4a4741, dark: 0xb5b0a6) }
+    static var muted: Color { token(.mutedText, light: 0x726d63, dark: 0x8a857b) }
+    static let subtle = adaptive(light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.045, darkAlpha: 0.045)
+    static let subtle2 = adaptive(light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.08, darkAlpha: 0.08)
+    static var border: Color { token(.border, light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.10, darkAlpha: 0.08) }
+    static var input: Color { token(.input, light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.16, darkAlpha: 0.12) }
+    static var field: Color { token(.field, light: 0xffffff, dark: 0xf0ede6, darkAlpha: 0.045) }
+    static let well = adaptive(light: 0x1a1917, dark: 0x000000, lightAlpha: 0.04, darkAlpha: 0.28)
+    static let track = adaptive(light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.08, darkAlpha: 0.07)
+    static let segTrack = adaptive(light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.055, darkAlpha: 0.055)
+    static let grid = adaptive(light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.07, darkAlpha: 0.06)
+    static let baseline = adaptive(light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.14, darkAlpha: 0.10)
+    static let crosshair = adaptive(light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.30, darkAlpha: 0.22)
+    static let shadow = adaptive(light: 0x2a2418, dark: 0x000000, lightAlpha: 0.14, darkAlpha: 0.55)
+    static let overlay = adaptive(light: 0x2a2418, dark: 0x000000, lightAlpha: 0.22, darkAlpha: 0.5)
+    /// The one signal color: focus, the live series, progress, links.
+    static var accent: Color { token(.accent, light: 0xd4410f, dark: 0xff6a3d) }
+    static var link: Color { token(.highlight, light: 0xc2410c, dark: 0xff9469) }
+    static var onAccent: Color { token(.onAccent, light: 0xffffff, dark: 0x1c0b04) }
+    static let controlStroke = adaptive(light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.14, darkAlpha: 0.12)
+    static let controlShadow = Color.black.opacity(0.22)
+    static var ok: Color { token(.success, light: 0x1f9d63, dark: 0x3ecf8e) }
+    static var okFg: Color { token(.success, light: 0x15734a, dark: 0x62dba3) }
+    static var warn: Color { token(.warning, light: 0xd99a06, dark: 0xf2b84b) }
+    static var warnFg: Color { token(.warning, light: 0x8f6400, dark: 0xf6c766) }
+    // Rose, not red: a failure must not read as the vermilion signal color.
+    static var fail: Color { token(.failure, light: 0xd11149, dark: 0xff4d6d) }
+    static var failFg: Color { token(.failure, light: 0xb00d3c, dark: 0xff7d95) }
+    static var sidebarAccent: Color { token(.sidebarSelection, light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.075, darkAlpha: 0.075) }
+    static var sidebarBG: Color { token(.sidebar, light: 0xeeebe4, dark: 0x0d0c0b) }
+    static var sidebarInk: Color { token(.text, light: 0x1a1917, dark: 0xf0ede6) }
+    static var sidebarMuted: Color { token(.mutedText, light: 0x6f6a61, dark: 0x8f8a80) }
+    static var sidebarBorder: Color { token(.border, light: 0x1a1917, dark: 0xf0ede6, lightAlpha: 0.08, darkAlpha: 0.06) }
+    static func surfaceFor(_ color: Color) -> Color { color.opacity(0.14) }
+    static let radiusSm: CGFloat = 5
+    static let radiusMd: CGFloat = 7
+    static let radius: CGFloat = 12
     static let textXs: CGFloat = 12
-    static let textSm: CGFloat = 14
-    static let textBase: CGFloat = 16
-    static let textLg: CGFloat = 18
+    static let textSm: CGFloat = 13
+    static let textBase: CGFloat = 15
+    static let textLg: CGFloat = 17
     static let text2Xl: CGFloat = 24
+    /// Every page aligns to this left edge and this vertical step.
+    static let gutter: CGFloat = 28
+    static let step: CGFloat = 8
     // Same saturated hues and UTF-16 hash as the current web results/stats kit.
     static let pairPalette: [Color] = [
-        0x3b82f6, 0xf97316, 0x10b981, 0xa855f7, 0xf59e0b, 0xec4899,
-        0x06b6d4, 0x84cc16, 0xef4444, 0x6366f1, 0xd946ef, 0xeab308,
+        0xff6a3d, 0x4f9dff, 0x3ecf8e, 0xc084fc, 0xf2b84b, 0xf472b6,
+        0x38c8d8, 0xa3d14a, 0xe86a5c, 0x8b8cf8, 0xd98be0, 0xd9c23c,
     ].map { Color(hex: UInt32($0)) }
     static func pairColor(_ key: String) -> Color {
         let hash = key.utf16.reduce(UInt32(0)) { ($0 &* 31) &+ UInt32($1) }
@@ -134,6 +141,15 @@ enum Theme {
     }
     static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight)
+    }
+    /// Measured values: proportional, tabular digits. Mono is for literal
+    /// identifiers (model ids, paths, keys), not for readings.
+    static func num(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        .system(size: size, weight: weight).monospacedDigit()
+    }
+    /// The large reading that leads a page or a section.
+    static func display(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        .system(size: size, weight: weight).width(.condensed).monospacedDigit()
     }
 }
 
@@ -200,9 +216,9 @@ extension View {
 // MARK: - Containers
 // ======================================================================
 
-/// `bg-card border rounded-lg` - T3 only boxes things that are genuinely a
-/// unit (a table, a chart, a selectable tile). Settings-style content stays
-/// flat on the canvas; use `SettingRow` for that.
+/// A well: a filled, borderless surface. Reserve it for a unit a person acts
+/// inside (a composer, a form, a floating group). Readings and lists sit on
+/// the canvas with `NativeSection` and hairline rules instead.
 struct Card<Content: View>: View {
     @Environment(\.nativeInterfaceDensity) private var density
     var padding: CGFloat = 16
@@ -212,12 +228,7 @@ struct Card<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) { content() }
             .padding(padding * density.cardScale)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            )
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
 }
 
@@ -249,37 +260,22 @@ struct TopBar<Leading: View, Trailing: View>: View {
     }
 }
 
-/// Big page title + optional muted description, T3 settings-page style.
+/// An in-flow title with its actions. A page's own title lives in the pinned
+/// `NativePage` bar; this is for a titled region inside a workbench. The
+/// subtitle parameter is accepted and deliberately not drawn.
 struct PageHeader<Trailing: View>: View {
     var title: String
     var subtitle: String? = nil
-    /// Tall trailing content (a badge, not a button) reads better centred on
-    /// the whole title block than baselined to the title's first line.
     var centerTrailing: Bool = false
     @ViewBuilder var trailing: () -> Trailing
 
-    private var heading: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(Theme.ui(22, weight: .semibold)).tracking(-0.22).foregroundStyle(Theme.ink)
-                .accessibilityAddTraits(.isHeader)
-            if let subtitle {
-                Text(subtitle).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                    .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: centerTrailing ? .center : .firstTextBaseline, spacing: 20) {
-                heading.fixedSize(horizontal: true, vertical: true)
-                Spacer(minLength: 0)
-                HStack(spacing: 10) { trailing() }.fixedSize(horizontal: true, vertical: false)
-            }
-            VStack(alignment: .leading, spacing: 12) {
-                heading.frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 10) { trailing() }.frame(maxWidth: .infinity, alignment: .trailing)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-        }
+        HStack(alignment: .center, spacing: 16) {
+            Text(title).font(Theme.ui(15, weight: .semibold)).foregroundStyle(Theme.ink)
+                .lineLimit(1).accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+            HStack(spacing: 8) { trailing() }.fixedSize(horizontal: true, vertical: false)
+        }.frame(minHeight: 28)
     }
 }
 
@@ -297,8 +293,8 @@ struct SectionLabel<Trailing: View>: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(text)
-                .font(Theme.ui(Theme.textSm, weight: .medium))
-                .foregroundStyle(Theme.ink)
+                .font(Theme.ui(13, weight: .semibold))
+                .foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
             trailing()
         }
@@ -411,27 +407,28 @@ private struct T3ButtonBody: View {
     @Environment(\.nativeMotionVisible) private var visible
     private var isHovering: Bool { hovering && enabled && visible }
 
+    // Primary is ink on the canvas, not the signal color: one filled button
+    // per view reads as the next step without competing with the data.
     private var fg: Color {
         switch kind {
-        case .primary: return Theme.onAccent
+        case .primary: return Theme.bg
         case .outline: return isHovering ? Theme.ink : Theme.dim
         case .ghost: return isHovering ? Theme.ink : Theme.muted
-        case .destructive: return Theme.onAccent
+        case .destructive: return Theme.failFg
         }
     }
     private var bg: Color {
         switch kind {
-        case .primary: return Theme.accent.opacity(configuration.isPressed ? 0.8 : (isHovering ? 1.0 : 0.92))
-        case .outline: return isHovering ? Theme.subtle2 : Theme.subtle
-        case .ghost: return isHovering ? Theme.subtle : .clear
-        case .destructive: return Theme.fail.opacity(configuration.isPressed ? 0.8 : (isHovering ? 1.0 : 0.92))
+        case .primary: return Theme.ink.opacity(configuration.isPressed ? 0.78 : (isHovering ? 0.9 : 1))
+        case .outline: return isHovering ? Theme.subtle2 : .clear
+        case .ghost: return isHovering ? Theme.subtle2 : .clear
+        case .destructive: return Theme.fail.opacity(isHovering ? 0.2 : 0.12)
         }
     }
     private var stroke: Color {
         switch kind {
-        case .primary, .destructive: return Theme.controlStroke
+        case .primary, .destructive, .ghost: return .clear
         case .outline: return Theme.input
-        case .ghost: return .clear
         }
     }
 
@@ -440,14 +437,14 @@ private struct T3ButtonBody: View {
             .font(Theme.ui(size, weight: .medium))
             .foregroundStyle(fg)
             .lineLimit(1)
-            .padding(.horizontal, kind == .ghost ? 8 : 11)
+            .padding(.horizontal, kind == .ghost ? 8 : 12)
             .frame(height: 28)
             .frame(maxWidth: full ? .infinity : nil)
             .background(
-                RoundedRectangle(cornerRadius: Theme.radiusMd, style: .circular).fill(bg)
+                RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).fill(bg)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: Theme.radiusMd, style: .circular)
+                RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
                     .strokeBorder(stroke, lineWidth: 1)
             )
             // Mixed Text, Label and icon-row labels must expose one control
@@ -525,7 +522,7 @@ struct T3Switch: View {
                     .fill(isOn ? Theme.accent : Theme.input)
                     .frame(width: 34, height: 19)
                 Circle()
-                    .fill(Theme.onAccent)
+                    .fill(Color.white)
                     .frame(width: 15, height: 15)
                     .padding(.horizontal, 2)
                     .shadow(color: Theme.controlShadow, radius: 1, y: 0.5)
@@ -607,14 +604,10 @@ struct T3Segmented<T: Hashable>: View {
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
+                        .frame(height: 26)
                         .background {
                             if sel {
-                                RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
-                                    .fill(Theme.subtle2)
-                                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm,
-                                                              style: .continuous)
-                                        .strokeBorder(Theme.input, lineWidth: 1))
+                                Capsule().fill(Theme.subtle2)
                                     .matchedGeometryEffect(id: "seg-thumb", in: ns)
                             }
                         }
@@ -627,12 +620,7 @@ struct T3Segmented<T: Hashable>: View {
                 .pointingHand(enabled && environmentEnabled)
             }
         }
-        .padding(3)
         .accessibilityElement(children: .contain)
-        .background(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
-            .fill(Theme.segTrack))
-        .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
-            .strokeBorder(Theme.border, lineWidth: 1))
         .opacity(enabled && environmentEnabled ? 1 : 0.5)
         .animation(reduceMotion || !visible ? nil : NativeMotion.segmented, value: selection)
     }
@@ -660,10 +648,9 @@ private struct T3SegmentButtonBody: View {
         configuration.label
             .foregroundStyle(selected || isHovering ? Theme.ink : Theme.muted)
             .background {
-                RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
-                    .fill(isHovering && !selected ? Theme.subtle : .clear)
+                Capsule().fill(isHovering && !selected ? Theme.subtle : .clear)
             }
-            .scaleEffect(configuration.isPressed && !reduceMotion && visible ? 0.98 : 1)
+            .opacity(configuration.isPressed ? 0.7 : 1)
             .animation(reduceMotion || !visible ? nil : NativeMotion.hover, value: isHovering)
             .animation(reduceMotion || !visible ? nil : NativeMotion.press, value: configuration.isPressed)
             .onHover { inside in

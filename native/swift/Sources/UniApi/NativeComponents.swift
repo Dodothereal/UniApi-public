@@ -26,6 +26,7 @@ struct NativePage<Content: View>: View {
     var backAction: (() -> Void)?
     @Environment(\.nativePageVisit) private var visit
     @Environment(\.nativeInterfaceDensity) private var density
+    @State private var scrolled = false
     private let content: Content
     private let actions: AnyView
 
@@ -51,24 +52,35 @@ struct NativePage<Content: View>: View {
 
     var body: some View {
         GeometryReader { viewport in
-        ScrollView {
-            VStack(alignment: .leading, spacing: density.pageGap) {
-                if let backAction {
-                    Button(action: backAction) {
-                        HStack(spacing: 6) { NativeIcon("arrow-left", size: 14); Text(backTitle) }
-                    }.buttonStyle(T3Button(.ghost))
-                }
-                if showsHeader {
-                    PageHeader(title: title, subtitle: subtitle.isEmpty ? nil : subtitle) { actions }
-                }
-                content
+        let column = max(0, min(maxWidth, viewport.size.width))
+        VStack(spacing: 0) {
+            if showsHeader || backAction != nil {
+                NativePageBar(title: title, showsTitle: showsHeader, backTitle: backTitle, back: backAction, scrolled: scrolled) { actions }
+                    .padding(.horizontal, density.pageMargin)
+                    .frame(width: column).frame(maxWidth: .infinity)
+                    .overlay(alignment: .bottom) {
+                        Theme.border.frame(height: 1).opacity(scrolled ? 1 : 0)
+                    }
+                    .zIndex(1)
             }
-            .padding(.horizontal, density.pageMargin).padding(.top, density.pageGap).padding(.bottom, 44)
-            .frame(width: max(0, min(maxWidth, viewport.size.width)), alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .nativeEntrance(.page)
+            ScrollView {
+                VStack(alignment: .leading, spacing: density.pageGap) { content }
+                    .padding(.horizontal, density.pageMargin)
+                    .padding(.top, showsHeader || backAction != nil ? 10 : density.pageGap).padding(.bottom, 48)
+                    .frame(width: column, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .background(alignment: .top) {
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: NativePageScrollKey.self,
+                                                   value: proxy.frame(in: .named("native-page-scroll")).minY < -4)
+                        }.frame(height: 1)
+                    }
+                    .nativeEntrance(.page)
+            }
+            .coordinateSpace(name: "native-page-scroll")
+            .onPreferenceChange(NativePageScrollKey.self) { next in if next != scrolled { scrolled = next } }
+            .scrollContentBackground(.hidden)
         }
-        .scrollContentBackground(.hidden)
         .background(Theme.bg)
         .foregroundStyle(Theme.ink)
         .font(Theme.ui(13))
@@ -85,6 +97,38 @@ struct NativePage<Content: View>: View {
     }
 }
 
+private struct NativePageScrollKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
+/// The one pinned row every page shares: where you are on the left, what you
+/// can do on the right. It never carries a description.
+struct NativePageBar<Actions: View>: View {
+    var title: String
+    var showsTitle = true
+    var backTitle = "Back"
+    var back: (() -> Void)? = nil
+    var scrolled = false
+    @ViewBuilder var actions: () -> Actions
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            if let back {
+                Button(action: back) { NativeIcon("arrow-left", size: 15) }
+                    .buttonStyle(T3Button(.ghost)).help(backTitle).accessibilityLabel(backTitle)
+                    .padding(.leading, -8)
+            }
+            if showsTitle {
+                Text(title).font(Theme.ui(15, weight: .semibold)).foregroundStyle(Theme.ink)
+                    .lineLimit(1).accessibilityAddTraits(.isHeader)
+            }
+            Spacer(minLength: 12)
+            HStack(spacing: 8) { actions() }
+        }
+        .frame(height: 52)
+    }
+}
+
 struct NativeCard<Content: View>: View {
     var title: String
     private let content: Content
@@ -94,17 +138,7 @@ struct NativeCard<Content: View>: View {
         self.content = content()
     }
 
-    var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                if !title.isEmpty {
-                    Text(title).font(Theme.ui(14, weight: .medium))
-                        .foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-                }
-                content
-            }
-        }
-    }
+    var body: some View { NativeSection(title) { content } }
 }
 
 enum NativeNumberFormat {
@@ -146,42 +180,21 @@ struct NativeValueTile: View {
     private var reading: String { value.flatMap { $0.isFinite ? format($0) : nil } ?? "-" }
 
     var body: some View {
-        Card(padding: 14) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    StatusDot(color: accent, size: 5)
-                    Text(label).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
-                }
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    NativeNumberText(text: reading, font: Theme.mono(22, weight: .semibold), delay: delay)
-                    if !unit.isEmpty {
-                        Text(unit).font(Theme.mono(12)).foregroundStyle(Theme.muted).lineLimit(1)
-                    }
-                }
-                if !detail.isEmpty {
-                    Text(detail).font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
-        .accessibilityValue([reading, unit, detail].filter { !$0.isEmpty }.joined(separator: " "))
+        NativeFigure(label: label, value: reading, unit: unit, detail: detail, delay: delay)
     }
 }
 
 struct NativeError: View {
     var message: String
     var body: some View {
-        HStack(alignment: .top, spacing: 9) {
-            NativeIcon(systemName: "exclamationmark.circle").foregroundStyle(Theme.failFg)
-                .accessibilityHidden(true)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Capsule().fill(Theme.fail).frame(width: 3).frame(maxHeight: .infinity)
+                .alignmentGuide(.firstTextBaseline) { $0[.top] + 12 }.accessibilityHidden(true)
             Text(message).font(Theme.ui(12.5)).foregroundStyle(Theme.failFg)
                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .padding(12)
-        .background(Theme.surfaceFor(Theme.fail), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .combine).accessibilityLabel("Error: " + message)
     }
 }
@@ -207,16 +220,7 @@ struct NativeReadFailureState: View {
     let retry: () -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
-            VStack(spacing: 8) {
-                NativeIcon(icon, size: 24).foregroundStyle(Theme.muted).accessibilityHidden(true)
-                Text(title).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink)
-                Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-            }.accessibilityElement(children: .combine)
-            Button(retryTitle, action: retry).buttonStyle(T3Button(.outline))
-        }
-        .frame(maxWidth: .infinity).padding(.horizontal, 16).padding(.vertical, 48)
+        EmptyState(icon: icon, title: title, detail: detail, actionTitle: retryTitle, actionIcon: "refresh-cw", action: retry)
     }
 }
 
@@ -227,20 +231,27 @@ struct EmptyState: View {
     var actionTitle: String? = nil
     var actionIcon: String = "plus"
     var action: (() -> Void)? = nil
+    // Left-aligned on the page grid and short: what is missing, then the one
+    // thing to do about it. No centered illustration floating in a void.
     var body: some View {
-        VStack(spacing: 16) {
-            VStack(spacing: 10) {
-                NativeIcon(systemName: icon, size: 24)
-                    .foregroundStyle(Theme.muted.opacity(0.8)).accessibilityHidden(true)
-                Text(title).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink)
-                Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-            }.accessibilityElement(children: .combine)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                NativeIcon(systemName: icon, size: 15).foregroundStyle(Theme.muted)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }.accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink)
+                    if !detail.isEmpty {
+                        Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }.accessibilityElement(children: .combine)
+            }
             if let actionTitle, let action {
                 Button(actionTitle, nativeIcon: actionIcon, action: action).buttonStyle(T3Button(.primary))
+                    .padding(.leading, 25)
             }
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 48)
+        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 20)
     }
 }
 
@@ -276,7 +287,7 @@ struct StatTile: View {
 struct NativeGrowBar: View {
     var fraction: Double
     var color: Color = Theme.accent
-    var height: CGFloat = 6
+    var height: CGFloat = 4
     var delay: Double = 0
     var spread: ClosedRange<Double>? = nil
     var entrance: Bool = true
