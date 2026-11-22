@@ -94,10 +94,9 @@ struct Band<Trailing: View, Content: View>: View {
                 Text(title).font(Theme.heading()).foregroundStyle(Theme.ink)
                     .lineLimit(1).fixedSize().accessibilityAddTraits(.isHeader)
                 if !hint.isEmpty {
-                    Text(hint).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
-                        .layoutPriority(-1)
+                    Text(hint).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1)
                 }
-                Rule().frame(minWidth: 12, maxWidth: .infinity)
+                Rule().frame(minWidth: 12, maxWidth: .infinity).layoutPriority(-1)
                 trailing()
             }
             .frame(minHeight: 28)
