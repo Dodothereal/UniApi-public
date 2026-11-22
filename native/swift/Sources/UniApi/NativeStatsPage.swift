@@ -15,6 +15,18 @@ extension NativeStatsModel {
     }
 }
 
+/// The last complete reading of this view (the overview, or one model). While
+/// another range or source is being read the page keeps showing it, so numbers
+/// roll to the new scope instead of the page emptying. Readiness never uses it.
+@MainActor private final class NativeStatsRetained {
+    private var model: String?
+    private var value: NativeStatsSnapshot?
+    func resolve(_ current: NativeStatsSnapshot?, model: String?, failed: Bool) -> NativeStatsSnapshot? {
+        if let current, current.payload["loaded"].bool { self.model = model; value = current; return current }
+        return !failed && self.model == model ? value : nil
+    }
+}
+
 /// Keep observing after the manual load returns: its stats.scanned event may
 /// own the final read, or may have committed before the scan receipt arrives.
 @MainActor private final class NativeStatsHeaderVisit {
@@ -39,6 +51,7 @@ struct NativeStatsPage: View {
     @Environment(\.nativePageVisit) private var navigationVisit
     @Environment(\.nativePageActivation) private var activation
     @Environment(\.nativeInterfaceDensity) private var density
+    @State private var retained = NativeStatsRetained()
     init(runtime: NativeRuntime, model: NativeStatsModel? = nil) { self.runtime = runtime; _state = StateObject(wrappedValue: model ?? NativeStatsModel(runtime: runtime)) }
     private var scope: String { "\(source):\(selectedModel ?? ""):\(selectedModel == nil ? range : detailRange)" }
     private var actualRange: Int { selectedModel == nil ? range : detailRange }
@@ -114,25 +127,22 @@ struct NativeStatsPage: View {
     }
     var body: some View {
         GeometryReader { geometry in
-        let contentWidth = max(0, min(1500, geometry.size.width) - 2 * density.pageMargin)
-        Group {
-            if let model = selectedModel {
-                NativeStatsDetailFrame(readiness: measuredReadiness) {
-                    HStack {
-                        Button { selectedModel = nil } label: { HStack(spacing: 6) { NativeIcon("arrow-left", size: 14); Text("Back to Statistics") } }.buttonStyle(T3Button(.ghost))
-                        Spacer()
-                        Text("Model statistics").font(Theme.ui(11)).foregroundStyle(Theme.muted)
+            let compact = min(960, geometry.size.width) - 2 * density.pageMargin < 640
+            let shown = retained.resolve(snapshot, model: selectedModel, failed: !state.error.isEmpty)
+            Group {
+                if let model = selectedModel {
+                    NativePage(title: model.split(separator: "/").last.map(String.init) ?? model,
+                               eyebrow: model.contains("/") ? model : "Model statistics",
+                               readiness: measuredReadiness, backTitle: "Back to Statistics", back: { selectedModel = nil },
+                               actions: { headerActions }) {
+                        pageContents(shown, compact: compact)
                     }
-                    PageHeader(title: model.split(separator: "/").last.map(String.init) ?? model,
-                               subtitle: model.contains("/") ? model : "Usage, activity and history for this model.") { headerActions }
-                    pageContents(width: contentWidth)
-                }
-            } else {
-                NativePage(title: "Statistics", subtitle: "Token usage from Claude Code, Codex, Antigravity, Z Code, OpenCode and DeepSeek Harness, with model, project and daily breakdowns.", maxWidth: 1500, readiness: measuredReadiness, actions: { headerActions }) {
-                    pageContents(width: contentWidth)
+                } else {
+                    NativePage(title: "Statistics", eyebrow: "Token usage", readiness: measuredReadiness, actions: { headerActions }) {
+                        pageContents(shown, compact: compact)
+                    }
                 }
             }
-        }
         }
         .environment(\.nativePageVisit, headerVisit?.visit ?? navigationVisit)
         .nativePageTask(id: scope) {
@@ -147,102 +157,97 @@ struct NativeStatsPage: View {
         .onDisappear { endHeaderVisit(reason: .disappeared) }
         .nativePageActivity(suspended: { endHeaderVisit(reason: .inactive); state.stop(owner: readOwner) })
     }
-    private var headerActions: some View {
-        HStack(spacing: 8) {
-            if state.busy { HStack(spacing: 5) { StatusDot(color: Theme.accent, size: 5); Text("reading").font(Theme.mono(11)).foregroundStyle(Theme.muted) } }
-            if selectedModel == nil {
-                T3Segmented(options: [(7, "7 days"), (30, "30 days"), (0, "All time")], selection: range) { range = $0 }
-            } else {
-                Menu {
-                    ForEach([7, 30, 90, 365, 0], id: \.self) { days in Button(days == 0 ? "All time" : days == 365 ? "1 year" : "\(days) days") { detailRange = days } }
-                } label: { NativeStatsMenuLabel(title: detailRange == 0 ? "All time" : detailRange == 365 ? "1 year" : "\(detailRange) days") }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-            }
-            Button { reload(.refresh, trigger: .refresh) } label: {
-                HStack(spacing: 6) { NativeIcon("refresh-cw", size: 12); Text(selectedModel == nil ? "Reload" : "Refresh") }
-            }.disabled(state.busy).help("Check for new or changed usage without reparsing unchanged history")
-            Menu {
-                Button("Rebuild All") { reload(.rebuild, trigger: .rebuild) }
-                    .help("Reparse every usage file, including files whose size and modification time stayed the same")
-            } label: { NativeIcon("ellipsis", size: 14) }
-                .menuStyle(.button).buttonStyle(T3Button(.ghost)).menuIndicator(.hidden)
-                .help("Statistics actions")
-                .accessibilityLabel("Statistics actions").disabled(state.busy)
-            if let model = selectedModel {
-                Button { Task { await state.export(model: model, source: source, range: detailRange) } } label: { HStack(spacing: 6) { NativeIcon("download", size: 12); Text("CSV") } }
-                    .disabled(current["derived"]["days"].array.isEmpty).help("Export daily CSV")
-            }
-        }.fixedSize(horizontal: true, vertical: false)
+
+    // One primary per view: Reload on the overview, the export on a model.
+    @ViewBuilder private var headerActions: some View {
+        Menu {
+            Button("Rebuild All") { reload(.rebuild, trigger: .rebuild) }
+                .help("Reparse every usage file, including files whose size and modification time stayed the same")
+        } label: { NativeStatsMenuGlyph() }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .help("Statistics actions")
+            .accessibilityLabel("Statistics actions").disabled(state.busy)
+        if let model = selectedModel {
+            Button("Refresh", nativeIcon: "refresh-cw") { reload(.refresh, trigger: .refresh) }
+                .buttonStyle(Press(.secondary))
+                .disabled(state.busy).help("Check for new or changed usage without reparsing unchanged history")
+            Button("Export CSV", nativeIcon: "download") { Task { await state.export(model: model, source: source, range: detailRange) } }
+                .buttonStyle(Press(.primary))
+                .disabled(current["derived"]["days"].array.isEmpty).help("Export daily CSV")
+        } else {
+            Button("Reload", nativeIcon: "refresh-cw") { reload(.refresh, trigger: .refresh) }
+                .buttonStyle(Press(.primary))
+                .disabled(state.busy).help("Check for new or changed usage without reparsing unchanged history")
+        }
     }
-    private var sourceRail: some View {
-        ScrollView(.horizontal) {
-            T3Segmented(options: [("all", "All apps")] + StatisticsSource.allCases.map { ($0.rawValue, nativeStatsSourceName($0.rawValue)) }, selection: source) { source = $0 }
-        }.scrollIndicators(.hidden).fixedSize(horizontal: false, vertical: true)
+
+    private var sourceOptions: [(value: String, label: String)] {
+        [(value: "all", label: "All apps")] + StatisticsSource.allCases.map { (value: $0.rawValue, label: nativeStatsSourceName($0.rawValue)) }
+    }
+    private var rangeOptions: [(value: Int, label: String)] {
+        selectedModel == nil
+            ? [(value: 7, label: "7 days"), (value: 30, label: "30 days"), (value: 0, label: "All time")]
+            : [7, 30, 90, 365, 0].map { (value: $0, label: $0 == 0 ? "All time" : $0 == 365 ? "1 year" : "\($0) days") }
+    }
+    private var rangeSelection: Binding<Int> {
+        selectedModel == nil ? $range : $detailRange
     }
     private var sourceNote: String {
         ["all": "Each app counted separately, then added together", "claude": "Claude Code transcripts and lifetime cache", "codex": "Codex sessions and archived sessions", "antigravity": "Antigravity app, IDE and ACP conversations", "zcode": "Z Code from z.ai sessions and model usage", "opencode": "OpenCode sessions and their sub-agents", "dsh": "DeepSeek Harness records; streaming uses host-observed arrivals"][source] ?? ""
     }
-    private func pageContents(width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { sourceRail; if selectedModel == nil { Text(sourceNote).font(Theme.ui(11)).foregroundStyle(Theme.muted).fixedSize() } }
-                VStack(alignment: .leading, spacing: 8) { sourceRail; if selectedModel == nil { Text(sourceNote).font(Theme.ui(11)).foregroundStyle(Theme.muted) } }
-            }
-            if !state.error.isEmpty { NativeError(message: state.error) }
-            if state.busy {
-                NativeStatsProgressLabel(progress: state.readProgress, hasContent: current["loaded"].bool)
-            }
-            if current["loaded"].bool {
-                NativeStatsContents(payload: current, benchmark: currentBenchmark, detail: selectedModel != nil, selectModel: { model in detailRange = range; selectedModel = model }, selectSource: { source = $0 }, availableWidth: width)
-                    .id(scope)
-            } else if !state.busy && state.error.isEmpty {
-                ShimmerText(text: "Reading saved usage…", font: Theme.ui(12))
-                    .frame(maxWidth: .infinity).padding(.vertical, 40)
-            }
+    /// Which app and which span: the two questions every reading below answers.
+    /// Stops while they fit, the same choices as menus when they do not.
+    private var scopeControls: some View {
+        let sourceStops = Stops(options: sourceOptions, selection: source) { source = $0 }
+        let rangeStops = Stops(options: rangeOptions, selection: rangeSelection.wrappedValue) { rangeSelection.wrappedValue = $0 }
+        let sourcePick = Pick(title: "App", selection: $source, options: sourceOptions)
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 24) { sourceStops; Spacer(minLength: 0); rangeStops }
+            HStack(spacing: 12) { sourcePick; Spacer(minLength: 0); rangeStops }
+            HStack(spacing: 12) { sourcePick; Spacer(minLength: 0); Pick(title: "Range", selection: rangeSelection, options: rangeOptions) }
+        }
+        .help(sourceNote)
+    }
+    @ViewBuilder private func pageContents(_ shown: NativeStatsSnapshot?, compact: Bool) -> some View {
+        scopeControls
+        if !state.error.isEmpty { Notice(text: state.error, tone: .fail).accessibilityLabel("Error: " + state.error) }
+        if let shown {
+            NativeStatsContents(payload: shown.payload, benchmark: shown.benchmark, detail: selectedModel != nil, compact: compact,
+                                progress: state.busy ? state.readProgress : nil,
+                                selectModel: { model in detailRange = range; selectedModel = model }, selectSource: { source = $0 })
+        } else if state.busy {
+            NativeStatsProgressLabel(progress: state.readProgress).padding(.vertical, 12)
+        } else if state.error.isEmpty {
+            Text("Reading saved usage").font(Theme.ui(12.5)).foregroundStyle(Theme.muted).padding(.vertical, 12)
         }
     }
 }
 
+/// The scan's own words for where it is. It observes the progress object
+/// itself, so a file counter never re-evaluates the page.
 private struct NativeStatsProgressLabel: View {
     @ObservedObject var progress: NativeStatsReadProgress
-    let hasContent: Bool
     var body: some View {
-        ShimmerText(text: NativeStatsPresentationPolicy.progressText(progress.value), font: Theme.ui(12))
-            .frame(maxWidth: .infinity).padding(.vertical, hasContent ? 6 : 40)
+        HStack(spacing: 7) {
+            Theme.signal.frame(width: 2, height: 9)
+            Text(NativeStatsPresentationPolicy.progressText(progress.value).replacingOccurrences(of: "…", with: ""))
+                .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).monospacedDigit().lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
-struct NativeStatsMenuLabel: View {
-    let title: String
-    var width: CGFloat? = nil
+private struct NativeStatsMenuGlyph: View {
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
     var body: some View {
-        HStack(spacing: 8) { Text(title).lineLimit(1); if width != nil { Spacer(minLength: 0) }; NativeIcon("chevron-down", size: 10) }
-            .font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-            .padding(.horizontal, 11).padding(.vertical, 6)
-            .frame(width: width)
-            .background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1))
-    }
-}
-
-// The detail's Back row precedes its title, inside the same scrolling flow as
-// the web ModelStatsPage; readiness still belongs to this page visit.
-private struct NativeStatsDetailFrame<Content: View>: View {
-    let readiness: NativePageReadiness
-    @ViewBuilder var content: () -> Content
-    @Environment(\.nativePageVisit) private var visit
-    @Environment(\.nativeInterfaceDensity) private var density
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: density.pageGap) { content() }
-                .padding(.horizontal, density.pageMargin).padding(.top, density.pageGap).padding(.bottom, 44)
-                .frame(maxWidth: 1500, alignment: .leading).frame(maxWidth: .infinity)
-                .nativeEntrance(.page)
-        }.scrollContentBackground(.hidden).background(Theme.bg).foregroundStyle(Theme.ink)
-            .font(Theme.ui(13)).buttonStyle(T3Button(.outline)).tint(Theme.accent).nativeMotionVisibility()
-            .background(alignment: .topLeading) {
-                if let visit, NativeUIReadiness.shared.enabled { NativeReadinessProbe(visit: visit, readiness: readiness).frame(width: 1, height: 1).allowsHitTesting(false).accessibilityHidden(true) }
-            }
+        NativeIcon("ellipsis", size: 14, strokeWidth: 1.75)
+            .foregroundStyle(hovering ? Theme.ink : Theme.muted)
+            .frame(width: 28, height: 28)
+            .background(RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous).fill(hovering ? Theme.hover : .clear))
+            .contentShape(Rectangle())
+            .opacity(enabled ? 1 : 0.4)
+            .onHover { hovering = $0 && enabled }
     }
 }
 
@@ -278,111 +283,110 @@ private func nativeStatsFixed(_ value: Double, digits: Int) -> String {
 }
 func nativeStatsDate(_ ts: Double) -> String { Date(timeIntervalSince1970: ts / 1000).formatted(date: .abbreviated, time: .omitted) }
 
+/// The five token kinds, in the order a request spends them. Each keeps one
+/// series hue on the tape, in its column and on the cache readout.
+private enum NativeStatsKind: String, CaseIterable {
+    case input, output, thinking, cacheWrite, cacheRead
+    var label: String {
+        switch self {
+        case .input: return "Fresh input"; case .output: return "Output"; case .thinking: return "Thinking"
+        case .cacheWrite: return "Cache writes"; case .cacheRead: return "Cache reads"
+        }
+    }
+    var color: Color {
+        switch self {
+        case .input: return Theme.pairPalette[0]; case .output: return Theme.pairPalette[2]; case .thinking: return Theme.pairPalette[4]
+        case .cacheWrite: return Theme.pairPalette[3]; case .cacheRead: return Theme.pairPalette[6]
+        }
+    }
+}
+
+private func nativeStatsPercent(_ part: Double, of whole: Double) -> String {
+    whole > 0 ? String(format: "%.1f%%", part * 100 / whole) : "--"
+}
+private func nativeStatsWhole(_ value: Double) -> String {
+    value.isFinite ? value.formatted(.number.locale(Locale(identifier: "en_US")).precision(.fractionLength(0))) : "--"
+}
+func nativeStatsMoney(_ value: Double) -> String {
+    value > 0 && value < 0.01 ? "<$0.01"
+        : "$" + value.formatted(.number.locale(Locale(identifier: "en_US")).precision(.fractionLength(2)))
+}
+private func nativeStatsPlural(_ count: Int, _ noun: String) -> String { "\(nativeStatsWhole(Double(count))) " + (count == 1 ? noun : noun + "s") }
+
 private struct NativeStatsContents: View {
-    let payload: JSONValue, benchmark: JSONValue, detail: Bool
+    let payload: JSONValue, benchmark: JSONValue, detail: Bool, compact: Bool
+    let progress: NativeStatsReadProgress?
     let selectModel: (String) -> Void
     let selectSource: (String) -> Void
-    let availableWidth: CGFloat
+    @Environment(\.nativeInterfaceDensity) private var density
     private var d: JSONValue { payload["derived"] }
     private var t: JSONValue { d["summary"]["totals"] }
+    private var vacant: Bool {
+        nativeStatsGrand(t) <= 0 && t["messages"].double <= 0 && d["days"].array.isEmpty && d["models"].array.isEmpty && d["projects"].array.isEmpty
+    }
+    private var showsBenchmarks: Bool {
+        (detail || payload["source"].string == "all") && (benchmark["spend"]["calls"].int > 0 || !benchmark["trend"].array.isEmpty)
+    }
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 14) {
-            if payload["source"].string == "all" {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: availableWidth >= 700 ? 3 : 2), spacing: 10) {
-                    ForEach(StatisticsSource.allCases, id: \.rawValue) { s in
-                        let value = payload["sources"][s.rawValue]
-                        let stream = NativeStatsThroughputPresentation.streamingSource(d["throughput"], source: s.rawValue)
-                        let hasUsage = nativeStatsGrand(value) > 0 || value["messages"].double > 0
-                        Button { selectSource(s.rawValue) } label: {
-                            Card(padding: 14) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(nativeStatsSourceName(s.rawValue)).font(Theme.ui(12, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                        Text(value.isNull ? "—" : nativeStatsCount(nativeStatsGrand(value))).font(Theme.mono(18, weight: .semibold)).monospacedDigit().lineLimit(1).nativeStatsNumberTransition(value.isNull ? nil : nativeStatsGrand(value))
-                                        Text(value.isNull ? "No recorded usage" : "tokens").font(Theme.ui(10)).foregroundStyle(Theme.muted)
-                                    }
-                                    if !detail, !value.isNull {
-                                        if hasUsage {
-                                            Text("\(nativeStatsCount(value["output"].double)) output · \(nativeStatsCount(value["cacheRead"].double)) cached").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                                            if let rate = NativeStatsThroughputPresentation.rate(stream) {
-                                                Text(String(format: "%.1f streaming tokens/s", rate)).font(Theme.mono(11)).foregroundStyle(Theme.dim)
-                                                    .help(NativeStatsRateMetric.streaming.timingDetail(stream))
-                                            } else {
-                                                Text(NativeStatsThroughputPresentation.missingClockLabel(source: s.rawValue))
-                                                    .font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                                                    .help("Token totals are available. A streaming rate needs token-arrival timestamps; elapsed tool and response time cannot replace them.")
-                                            }
-                                        } else {
-                                            // Match the populated tile's two detail lines.
-                                            Text("No recorded usage").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                                                .frame(minHeight: 30, alignment: .topLeading)
-                                        }
-                                    }
-                                }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            }
-                        }.buttonStyle(.plain).pointingHand().nativeStatsRowHover(radius: Theme.radius, overlay: true).accessibilityLabel("Open \(nativeStatsSourceName(s.rawValue)) statistics")
-                            .accessibilityValue(hasUsage ? "Streaming tokens per second: " + (NativeStatsThroughputPresentation.rate(stream).map { String(format: "%.1f", $0) } ?? "Unavailable") + ". " + NativeStatsRateMetric.streaming.coverage(stream) : "No recorded usage")
-                    }
+        LazyVStack(alignment: .leading, spacing: density.pageGap) {
+            ForEach(Array(payload["warnings"].array.enumerated()), id: \.offset) { _, warning in
+                Notice(text: warning.string, tone: .warn).accessibilityLabel("Error: " + warning.string)
+            }
+            NativeStatsHero(totals: t, summary: d["summary"], lifetime: d["isLifetime"].bool, progress: progress)
+            if vacant {
+                // Nothing in this scope: one statement, then the apps being watched,
+                // instead of a column of empty sections.
+                Blank(icon: "chart-bar", title: detail ? "This model has no usage here" : (payload["source"].string == "all" ? "Waiting for a first response" : "This app has no usage here"),
+                      detail: payload["source"].string == "all" && !detail
+                          ? "Responses from the coding apps below are counted as soon as one is on disk. A wider range may hold older usage."
+                          : "Try a wider range or another app.")
+                if payload["source"].string == "all" {
+                    NativeStatsSourceBoard(sources: payload["sources"], throughput: d["throughput"], detail: detail, select: selectSource)
                 }
-            }
-            if d["isLifetime"].bool { Text("Lifetime token totals include Claude's cache. Dated charts, responses, projects and speed use available response records; pruned history cannot be reconstructed.").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
-            ForEach(Array(payload["warnings"].array.enumerated()), id: \.offset) { _, warning in NativeError(message: warning.string) }
-            ForEach(NativeStatsPresentationPolicy.excludedNotices(payload, detail: detail), id: \.source) { notice in
-                Text("\(nativeStatsSourceName(notice.source)): \(notice.count) records have no usable usage metadata.").font(Theme.ui(11)).foregroundStyle(Theme.muted)
-            }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: availableWidth >= 600 ? 4 : 2), spacing: 10) {
-                NativeStatsValueTile(label: "Tokens processed", value: nativeStatsGrand(t), detail: "Read + written across \(d["summary"]["models"].int) models\(d["isLifetime"].bool ? " · lifetime" : "")", accent: nativeStatsColor("06b6d4"), format: nativeStatsCount)
-                NativeStatsValueTile(label: "Generated output", value: t["output"].double, detail: "\(nativeStatsCount(t["thinking"].double)) reasoning (inside output)", accent: nativeStatsColor("10b981"), format: nativeStatsCount)
-                NativeStatsValueTile(label: detail ? "Cache efficiency" : "Served from cache", value: prompt > 0 ? t["cacheRead"].double * 100 / prompt : nil, unit: "%", detail: "\(nativeStatsCount(t["cacheRead"].double)) of \(nativeStatsCount(prompt)) prompt tokens", accent: nativeStatsColor("a855f7"), format: { String(format: "%.1f", $0) })
-                if detail {
-                    NativeStatsValueTile(label: "Recorded responses", value: payload["coverage"]["datedTotals"]["messages"].double, detail: "\(d["summary"]["sessions"].int) sessions · \(d["summary"]["projects"].int) projects", format: nativeStatsCount)
-                } else { costTile }
-            }
-            NativeStatsPricing(cost: d["cost"])
-            NativeStatsLedger(totals: t)
-            if detail { NativeStatsThroughput(data: d["throughput"], colors: payload["colors"], availableWidth: availableWidth, modelDetail: true) }
-            if d["days"].array.isEmpty { NativeEmptyState(title: "No dated history in this range", detail: d["isLifetime"].bool ? "Lifetime totals are available, but earlier transcripts are no longer on disk." : "Try another range or source.") }
-            else { NativeStatsDaily(data: d, colors: payload["colors"]); if detail { NativeStatsCumulative(days: d["days"].array) } }
-            if !detail { NativeStatsThroughput(data: d["throughput"], colors: payload["colors"], availableWidth: availableWidth, selectModel: selectModel) }
-            if detail {
-                detailTiles
-                costTile
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: availableWidth >= 600 ? 2 : 1), alignment: .leading, spacing: 14) {
-                    NativeStatsProjectBoard(rows: d["projects"].array, all: detail)
-                    NativeStatsHeat(grid: d["heat"].array)
-                }
-                NativeStatsDrive(summary: payload["datedSummary"])
             } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: availableWidth >= 600 ? 2 : 1), alignment: .leading, spacing: 14) {
-                    NativeStatsModelBoard(models: d["models"].array, lifetime: d["isLifetime"].bool, colors: payload["colors"], select: selectModel)
+                readings
+                if detail { perResponse; NativeStatsPricing(cost: d["cost"], compact: compact) }
+                if d["days"].array.isEmpty {
+                    NativeStatsBand("Per day") {
+                        Blank(icon: "chart-bar", title: "No dated history in this range",
+                              detail: d["isLifetime"].bool ? "Lifetime totals are available, but earlier transcripts are no longer on disk." : "Try another range or source.")
+                    }
+                } else {
+                    NativeStatsDaily(data: d, colors: payload["colors"])
+                    if detail { NativeStatsCumulative(days: d["days"].array) }
+                }
+                if !detail {
+                    NativeStatsModelBoard(models: d["models"].array, lifetime: d["isLifetime"].bool, colors: payload["colors"],
+                                          cost: d["cost"], compact: compact, select: selectModel)
+                }
+                ColumnFlow(minimum: 340, spacing: 32, rowSpacing: density.pageGap, maxColumns: 2) {
+                    if payload["source"].string == "all" {
+                        NativeStatsSourceBoard(sources: payload["sources"], throughput: d["throughput"], detail: detail, select: selectSource)
+                    }
                     NativeStatsProjectBoard(rows: d["projects"].array, all: detail)
                     NativeStatsHeat(grid: d["heat"].array)
-                    NativeStatsDrive(summary: d["summary"])
+                    NativeStatsDrive(summary: detail ? payload["datedSummary"] : d["summary"])
                 }
+                NativeStatsThroughput(data: d["throughput"], colors: payload["colors"], compact: compact, modelDetail: detail,
+                                      selectModel: detail ? nil : selectModel)
             }
-            if !payload["cache"].isNull { NativeCard {
-                NativeChartHeading(title: "Why this disagrees with /stats", caption: "Lifetime history and de-duplicated on-disk records measure different things.")
-                Text("Lifetime \(nativeStatsCount(nativeStatsGrand(payload["cache"]["totals"]))) · raw disk \(nativeStatsCount(payload["scan"]["rawGrand"].double)) · deduplicated disk \(nativeStatsCount(d["onDiskGrand"].double))")
-                Text("\(payload["scan"]["duplicates"].int) repeated blocks; \(payload["dayMatch"]["matched"].int)/\(payload["dayMatch"]["checked"].int) comparable UTC days agree.")
-                DisclosureGroup("How these totals differ") { Text("Claude's lifetime cache includes repeated content blocks and retained pruned history. Dated charts deduplicate response IDs. Only responses on UTC days after the cache watermark are added to the lifetime baseline.") }
-            } }
             // Detail uses an exact model/range-filtered benchmark payload.
             // The unfiltered overview ledger belongs only to All apps.
-            if detail || payload["source"].string == "all" {
-                if detail && (benchmark["spend"]["calls"].int > 0 || !benchmark["trend"].array.isEmpty) {
-                    Rectangle().fill(Theme.border).frame(height: 1).padding(.top, 6)
-                    NativeChartHeading(title: "Benchmarks for this model", caption: "UniApi benchmark records for this exact model and date range, across providers. Separate from coding-app usage.")
-                }
-                NativeStatsBenchmark(data: benchmark)
-            }
-            Text("\(Int(t["messages"].double)) responses · \(d["summary"]["sessions"].int) sessions · \(d["summary"]["projects"].int) projects · \(d["summary"]["models"].int) models · \(d["summary"]["activeDays"].int) active days\(span)\(scanFooter)")
-                .font(Theme.ui(11)).foregroundStyle(Theme.muted).textSelection(.enabled)
-        }.font(Theme.ui(12)).foregroundStyle(Theme.ink)
-            .accessibilityElement(children: .contain)
+            if showsBenchmarks { NativeStatsBenchmark(data: benchmark, detail: detail, compact: compact) }
+            if !payload["cache"].isNull { reconciliation }
+            footer
+        }
+        .accessibilityElement(children: .contain)
     }
+
     private var prompt: Double { t["input"].double + t["cacheRead"].double + t["cacheWrite"].double }
-    private var costTile: some View {
-        NativeStatsValueTile(label: "Estimated API cost", value: d["cost"]["pricedTokens"].double > 0 ? d["cost"]["usd"].double : nil, unit: "USD", detail: costDetail)
+    private var costReading: some View {
+        NativeStatsReadout(label: "Estimated API cost", value: d["cost"]["pricedTokens"].double > 0 ? d["cost"]["usd"].double : nil, unit: "USD", detail: costDetail)
+    }
+    private var cacheReading: some View {
+        NativeStatsReadout(label: detail ? "Cache efficiency" : "Served from cache", value: prompt > 0 ? t["cacheRead"].double * 100 / prompt : nil, unit: "%",
+                           detail: "\(nativeStatsCount(t["cacheRead"].double)) of \(nativeStatsCount(prompt)) prompt tokens",
+                           tint: NativeStatsKind.cacheRead.color, format: { String(format: "%.1f", $0) })
     }
     private var costDetail: String {
         let cost = d["cost"]
@@ -392,111 +396,411 @@ private struct NativeStatsContents: View {
         }
         return cost["unpricedTokens"].double > 0 ? "Prices missing for this usage" : "No usage recorded yet"
     }
-    private var span: String { let first = d["summary"]["first"], last = d["summary"]["last"]; return first.isNull ? "" : " · \(nativeStatsDate(first.double))–\(nativeStatsDate(last.double))" }
-    private var scanFooter: String { detail ? "" : " · \(payload["scan"]["files"].int) files, \(nativeStatsCount(payload["scan"]["bytes"].double)) bytes · scan \(payload["scan"]["elapsedMs"].double.formatted(.number.precision(.fractionLength(0)))) ms" }
-    private var detailTiles: some View {
+    // Four across, or two and two: never three with one left over.
+    private var readings: some View {
+        ViewThatFits(in: .horizontal) {
+            readings(columns: 4)
+            readings(columns: 2)
+        }
+    }
+    private func readings(columns: Int) -> some View {
+        let summary = d["summary"]
+        return ColumnFlow(minimum: 170, spacing: 24, rowSpacing: 22, maxColumns: columns) {
+            costReading
+            if detail {
+                NativeStatsReadout(label: "Recorded responses", value: payload["coverage"]["datedTotals"]["messages"].double,
+                                   detail: nativeStatsPlural(summary["sessions"].int, "session") + " · " + nativeStatsPlural(summary["projects"].int, "project"),
+                                   format: nativeStatsWhole)
+                NativeStatsReadout(label: "Active days", value: summary["activeDays"].double,
+                                   detail: payload["coverage"]["first"].isNull ? "No dated records" : "First recorded \(nativeStatsDate(payload["coverage"]["first"].double))",
+                                   format: nativeStatsWhole)
+            } else {
+                NativeStatsReadout(label: "Responses", value: t["messages"].double,
+                                   detail: nativeStatsPlural(summary["sessions"].int, "session"), format: nativeStatsWhole)
+                NativeStatsReadout(label: "Models", value: summary["models"].double,
+                                   detail: nativeStatsPlural(summary["projects"].int, "project"), format: nativeStatsWhole)
+            }
+            cacheReading
+        }
+    }
+    @ViewBuilder private var perResponse: some View {
         let dated = payload["coverage"]["datedTotals"], messages = dated["messages"].double, days = d["summary"]["activeDays"].double
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: availableWidth >= 600 ? 4 : 2), spacing: 10) {
-            NativeStatsValueTile(label: "Active days", value: days, detail: payload["coverage"]["first"].isNull ? "No dated records" : "First recorded \(nativeStatsDate(payload["coverage"]["first"].double))", format: nativeStatsCount)
-            NativeStatsValueTile(label: "Tokens per response", value: messages > 0 ? nativeStatsGrand(dated) / messages : nil, format: nativeStatsCount)
-            NativeStatsValueTile(label: "Output per response", value: messages > 0 ? dated["output"].double / messages : nil, format: nativeStatsCount)
-            NativeStatsValueTile(label: "Responses / active day", value: days > 0 ? messages / days : nil)
+        ReadoutStrip(minimum: 170) {
+            NativeStatsReadout(label: "Tokens per response", value: messages > 0 ? nativeStatsGrand(dated) / messages : nil, size: .medium, format: nativeStatsCount)
+            NativeStatsReadout(label: "Output per response", value: messages > 0 ? dated["output"].double / messages : nil, size: .medium, format: nativeStatsCount)
+            NativeStatsReadout(label: "Responses per active day", value: days > 0 ? messages / days : nil, size: .medium)
+        }
+    }
+    private var reconciliation: some View {
+        NativeStatsBand("Against /stats", hint: "Lifetime history and de-duplicated disk records measure different things") {
+            VStack(alignment: .leading, spacing: 14) {
+                ReadoutStrip(minimum: 170) {
+                    NativeStatsReadout(label: "Lifetime", value: nativeStatsGrand(payload["cache"]["totals"]), unit: "tokens", size: .medium, format: nativeStatsCount)
+                    NativeStatsReadout(label: "Raw disk", value: payload["scan"]["rawGrand"].double, unit: "tokens", size: .medium, format: nativeStatsCount)
+                    NativeStatsReadout(label: "De-duplicated disk", value: d["onDiskGrand"].double, unit: "tokens", size: .medium, format: nativeStatsCount)
+                }
+                Text("\(payload["scan"]["duplicates"].int) repeated blocks; \(payload["dayMatch"]["matched"].int)/\(payload["dayMatch"]["checked"].int) comparable UTC days agree.")
+                    .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).textSelection(.enabled)
+                NativeStatsDisclosure(title: "How these totals differ") {
+                    Text("Claude's lifetime cache includes repeated content blocks and retained pruned history. Dated charts deduplicate response IDs. Only responses on UTC days after the cache watermark are added to the lifetime baseline.")
+                        .font(Theme.ui(12.5)).foregroundStyle(Theme.dim).lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 620, alignment: .leading)
+                }
+            }
+        }
+    }
+    @ViewBuilder private var footer: some View {
+        let excluded = NativeStatsPresentationPolicy.excludedNotices(payload, detail: detail)
+        if !excluded.isEmpty || !detail {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(excluded, id: \.source) { notice in
+                    Text("\(nativeStatsSourceName(notice.source)): \(notice.count) records have no usable usage metadata.")
+                        .font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
+                }
+                if !detail {
+                    Text("\(payload["scan"]["files"].int) files · \(nativeStatsCount(payload["scan"]["bytes"].double)) bytes · scan \(payload["scan"]["elapsedMs"].double.formatted(.number.precision(.fractionLength(0)))) ms")
+                        .font(Theme.mono(10.5)).foregroundStyle(Theme.faint).textSelection(.enabled)
+                }
+            }
         }
     }
 }
 
-private struct NativeStatsLedger: View {
-    let totals: JSONValue
-    private var rows: [(String, String)] { [("Fresh input", "input"), ("Output", "output"), ("Thinking (inside output)", "thinking"), ("Cache writes", "cacheWrite"), ("Cache reads", "cacheRead")].sorted { totals[$0.1].double > totals[$1.1].double } }
-    var body: some View { NativeCard {
-        NativeChartHeading(title: "Where the tokens go", caption: "Five token kinds. Thinking is counted inside output; its share is measured against output.")
-        ForEach(Array(rows.enumerated()), id: \.element.1) { index, row in
-            let (label, key) = row
-            let denominator = key == "thinking" ? totals["output"].double : nativeStatsGrand(totals)
-            let color = nativeStatsColor(["input": "3b82f6", "output": "10b981", "thinking": "f59e0b", "cacheWrite": "a855f7", "cacheRead": "06b6d4"][key] ?? "06b6d4")
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    StatusDot(color: color, size: 6)
-                    Text(label).font(Theme.ui(12.5, weight: .medium))
-                    Spacer(minLength: 8)
-                    Text(nativeStatsCount(totals[key].double)).font(Theme.mono(12, weight: .medium)).monospacedDigit().lineLimit(1).nativeStatsNumberTransition(totals[key].double).frame(width: 70, alignment: .trailing)
-                    Text((denominator > 0 ? String(format: "%.1f%%", totals[key].double * 100 / denominator) : "—") + (key == "thinking" ? " of output" : "")).font(Theme.mono(10)).foregroundStyle(Theme.muted).frame(width: 96, alignment: .trailing)
-                }
-                NativeGrowBar(fraction: totals[key].double / max(1, denominator), color: color, delay: Double(index) * 0.06)
-            }.help(key == "thinking" ? "Thinking is a subset of generated output; its percentage uses output as the denominator." : totals[key].double.formatted())
+/// The reading the page exists for, and what it is made of.
+private struct NativeStatsHero: View {
+    let totals: JSONValue, summary: JSONValue, lifetime: Bool
+    let progress: NativeStatsReadProgress?
+    private var grand: Double { nativeStatsGrand(totals) }
+    private var span: String {
+        let first = summary["first"], last = summary["last"]
+        var parts: [String] = []
+        if !first.isNull { parts.append("\(nativeStatsDate(first.double)) to \(nativeStatsDate(last.double))") }
+        if summary["activeDays"].int > 0 { parts.append(nativeStatsPlural(summary["activeDays"].int, "active day")) }
+        return parts.isEmpty ? "No usage recorded in this range" : parts.joined(separator: " · ")
+    }
+    private var parts: [NativeStatsTape.Part] {
+        let thinking = min(totals["thinking"].double, totals["output"].double)
+        return [
+            .init(id: "input", value: totals["input"].double, color: NativeStatsKind.input.color),
+            .init(id: "output", value: totals["output"].double - thinking, color: NativeStatsKind.output.color),
+            .init(id: "thinking", value: thinking, color: NativeStatsKind.thinking.color),
+            .init(id: "cacheWrite", value: totals["cacheWrite"].double, color: NativeStatsKind.cacheWrite.color),
+            .init(id: "cacheRead", value: totals["cacheRead"].double, color: NativeStatsKind.cacheRead.color),
+        ]
+    }
+    private func kinds(columns: Int) -> some View {
+        ColumnFlow(minimum: 128, spacing: 24, rowSpacing: 14, maxColumns: columns) {
+            ForEach(NativeStatsKind.allCases, id: \.self) { kind in
+                NativeStatsKindReading(kind: kind, totals: totals)
+            }
         }
-    } }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 12) {
+                MicroLabel(lifetime ? "Tokens processed · lifetime" : "Tokens processed")
+                Spacer(minLength: 8)
+                if let progress { NativeStatsProgressLabel(progress: progress) }
+            }
+            .frame(height: 16)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(nativeStatsCount(grand)).font(Theme.readout(54)).monospacedDigit().lineLimit(1)
+                    .foregroundStyle(grand > 0 ? Theme.ink : Theme.faint)
+                    .nativeStatsNumberTransition(grand)
+                MicroLabel("tokens", size: 11)
+            }
+            .padding(.top, 2)
+            .accessibilityElement(children: .ignore).accessibilityLabel("Tokens processed")
+            .accessibilityValue(nativeStatsCount(grand) + " tokens")
+            Text(span).font(Theme.ui(12.5)).foregroundStyle(Theme.muted).lineLimit(1).padding(.top, 2)
+            if lifetime {
+                Text("Includes Claude's lifetime cache. Charts, responses, projects and speed use the records still on disk; pruned history cannot be rebuilt.")
+                    .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
+            NativeStatsTape(parts: parts).padding(.top, 22)
+            // Five across, or three and two: never four with one left over.
+            ViewThatFits(in: .horizontal) {
+                kinds(columns: 5)
+                kinds(columns: 3)
+            }
+            .padding(.top, 14)
+        }
+    }
 }
 
+private struct NativeStatsKindReading: View {
+    let kind: NativeStatsKind, totals: JSONValue
+    var body: some View {
+        let value = totals[kind.rawValue].double
+        let share = kind == .thinking ? nativeStatsPercent(value, of: totals["output"].double) + " of output"
+            : nativeStatsPercent(value, of: nativeStatsGrand(totals))
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                NativeSeriesTick(color: kind.color, height: 9)
+                MicroLabel(kind.label)
+            }
+            let count = Text(nativeStatsCount(value)).font(Theme.readout(17)).monospacedDigit().foregroundStyle(value > 0 ? Theme.ink : Theme.faint)
+                .lineLimit(1).fixedSize().nativeStatsNumberTransition(value)
+            let part = Text(share).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) { count; part }
+                VStack(alignment: .leading, spacing: 2) { count; part }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help(kind == .thinking ? "Thinking is a subset of generated output; its percentage uses output as the denominator." : value.formatted())
+        .accessibilityElement(children: .ignore).accessibilityLabel(kind.label)
+        .accessibilityValue(nativeStatsCount(value) + " tokens, " + share)
+    }
+}
+
+/// The per-model ledger. A row is the way into that model's own page; the
+/// rates behind the cost column stay folded beneath it.
 private struct NativeStatsModelBoard: View {
-    let models: [JSONValue], lifetime: Bool, colors: JSONValue, select: (String) -> Void
+    let models: [JSONValue], lifetime: Bool, colors: JSONValue, cost: JSONValue, compact: Bool, select: (String) -> Void
     @AppStorage("uniapi.stats.metric") private var metric = "tokens"
     private func value(_ row: JSONValue) -> Double { metric == "tokens" ? nativeStatsGrand(row["totals"]) : row["totals"][metric == "output" ? "output" : "messages"].double }
-    var body: some View { NativeCard {
-        NativeChartHeading(title: "Models", caption: lifetime ? "\(models.count) served lifetime · pruned transcripts retain their totals." : "\(models.count) served this window.")
-        T3Segmented(options: [("tokens", "Tokens"), ("output", "Output")] + (lifetime ? [] : [("messages", "Responses")]), selection: metric) { metric = $0 }
-        ForEach(Array(models.sorted { value($0) > value($1) }.enumerated()), id: \.offset) { index, row in
-            Button { select(row["model"].string) } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(String(format: "%02d", index + 1)).font(Theme.mono(10)).foregroundStyle(Theme.muted).frame(width: 18)
-                        Text(row["model"].string).font(Theme.mono(12, weight: .medium)).fixedSize(horizontal: false, vertical: true).help(row["model"].string)
-                        if row["viaProxy"].bool { Text("proxy").font(Theme.mono(9)).foregroundStyle(Theme.warnFg) }
-                        if row["pruned"].bool { Text("pruned").font(Theme.mono(9)).foregroundStyle(Theme.muted) }
-                        Spacer(minLength: 2)
-                        Text("\(row["days"].int)d · \(row["sessions"].int) sessions").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                        Text(nativeStatsCount(value(row))).font(Theme.mono(12, weight: .medium))
-                        NativeIcon("arrow-up-right", size: 11).foregroundStyle(Theme.muted)
-                    }
-                    NativeGrowBar(fraction: value(row) / max(1, models.map(value).max() ?? 0), color: nativeStatsColor(colors[row["model"].string].string))
+    private var barWidth: CGFloat { compact ? 64 : 200 }
+    private func price(_ row: JSONValue) -> String {
+        guard !row.isNull, !row["usd"].isNull else { return "--" }
+        return nativeStatsMoney(row["usd"].double)
+    }
+    var body: some View {
+        let ranked = models.sorted { value($0) > value($1) }
+        let peak = max(1, ranked.first.map(value) ?? 0)
+        let prices = Dictionary(cost["rows"].array.map { ($0["model"].string, $0) }, uniquingKeysWith: { first, _ in first })
+        NativeStatsBand(title: "Models", hint: lifetime ? "Lifetime totals; pruned transcripts keep theirs" : "", spacing: 0) {
+            Stops(options: [("tokens", "Tokens"), ("output", "Output")] + (lifetime ? [] : [("messages", "Responses")]), selection: metric) { metric = $0 }
+        } content: {
+            LedgerHead {
+                Color.clear.frame(width: 18, height: 1)
+                MicroLabel("Model").frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 15)
+                Color.clear.frame(width: barWidth, height: 1)
+                if !compact {
+                    MicroLabel("Days").frame(width: 40, alignment: .trailing)
+                    MicroLabel("Sessions").frame(width: 76, alignment: .trailing)
                 }
-                .padding(.horizontal, 8).padding(.vertical, 7).contentShape(Rectangle())
-            }.buttonStyle(.plain).pointingHand().help("Open full history for \(row["model"].string)")
+                MicroLabel("Est. cost").frame(width: 72, alignment: .trailing)
+                MicroLabel(metric == "tokens" ? "Tokens" : metric == "output" ? "Output" : "Responses").frame(width: 84, alignment: .trailing)
+                Color.clear.frame(width: 12, height: 1)
+            }
+            .padding(.top, 6)
+            if ranked.isEmpty {
+                Blank(icon: "layers", title: "No models in this range", detail: "Models appear here once a response is recorded.")
+            }
+            ForEach(Array(ranked.enumerated()), id: \.offset) { index, row in
+                let name = row["model"].string, priced = prices[name] ?? .null
+                LedgerRow(action: { select(name) }) {
+                    HStack(spacing: 12) {
+                        Text(String(format: "%02d", index + 1)).font(Theme.mono(10.5)).foregroundStyle(Theme.faint).frame(width: 18, alignment: .leading)
+                        NativeSeriesTick(color: nativeStatsColor(colors[name].string))
+                        HStack(spacing: 6) {
+                            Text(name).font(Theme.mono(12)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                            if row["viaProxy"].bool { Tag("proxy", tone: Theme.warnFg) }
+                            if row["pruned"].bool { Tag("pruned") }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Scale(fraction: value(row) / peak, color: nativeStatsColor(colors[name].string)).frame(width: barWidth)
+                        if !compact {
+                            Text("\(row["days"].int)").font(Theme.mono(11.5)).foregroundStyle(Theme.dim).frame(width: 40, alignment: .trailing)
+                            Text("\(row["sessions"].int)").font(Theme.mono(11.5)).foregroundStyle(Theme.dim).frame(width: 76, alignment: .trailing)
+                        }
+                        Text(price(priced)).font(Theme.mono(11.5)).monospacedDigit()
+                            .foregroundStyle(priced["usd"].isNull ? Theme.faint : Theme.dim).frame(width: 72, alignment: .trailing)
+                        Text(nativeStatsCount(value(row))).font(Theme.readout(17)).monospacedDigit().foregroundStyle(Theme.ink)
+                            .nativeStatsNumberTransition(value(row)).frame(width: 84, alignment: .trailing)
+                        NativeIcon("arrow-up-right", size: 12, strokeWidth: 1.75).foregroundStyle(Theme.muted)
+                    }
+                }
+                .help("Open full history for \(name)")
+            }
+            NativeStatsPricing(cost: cost, compact: compact).padding(.top, 10)
         }
-    }.onChange(of: lifetime) { _, yes in if yes && metric == "messages" { metric = "tokens" } }.onAppear { if lifetime && metric == "messages" { metric = "tokens" } } }
+        .onChange(of: lifetime) { _, yes in if yes && metric == "messages" { metric = "tokens" } }
+        .onAppear { if lifetime && metric == "messages" { metric = "tokens" } }
+    }
+}
+
+/// Each app's share of the total. A row narrows the whole page to that app.
+private struct NativeStatsSourceBoard: View {
+    let sources: JSONValue, throughput: JSONValue, detail: Bool, select: (String) -> Void
+    var body: some View {
+        let peak = max(1, StatisticsSource.allCases.map { nativeStatsGrand(sources[$0.rawValue]) }.max() ?? 0)
+        NativeStatsBand("Apps", spacing: 0) {
+            LedgerHead {
+                MicroLabel("App").frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 15)
+                Color.clear.frame(width: 72, height: 1)
+                if !detail { MicroLabel("Tok/s").frame(width: 56, alignment: .trailing) }
+                MicroLabel("Tokens").frame(width: 64, alignment: .trailing)
+            }
+            .padding(.top, 6)
+            ForEach(StatisticsSource.allCases, id: \.rawValue) { s in
+                NativeStatsSourceRow(source: s.rawValue, value: sources[s.rawValue], peak: peak, detail: detail,
+                                     stream: NativeStatsThroughputPresentation.streamingSource(throughput, source: s.rawValue),
+                                     select: select)
+            }
+        }
+    }
+}
+
+private struct NativeStatsSourceRow: View {
+    let source: String, value: JSONValue, peak: Double, detail: Bool, stream: JSONValue
+    let select: (String) -> Void
+    private var name: String { nativeStatsSourceName(source) }
+    private var grand: Double { nativeStatsGrand(value) }
+    private var hasUsage: Bool { grand > 0 || value["messages"].double > 0 }
+    private var rate: Double? { hasUsage ? NativeStatsThroughputPresentation.rate(stream) : nil }
+    private var rateText: String { rate.map { String(format: "%.1f", $0) } ?? "--" }
+    private var explanation: String {
+        guard hasUsage else { return "No recorded usage" }
+        let split = "\(nativeStatsCount(value["output"].double)) output · \(nativeStatsCount(value["cacheRead"].double)) cached. "
+        guard rate != nil else {
+            return split + NativeStatsThroughputPresentation.missingClockLabel(source: source)
+                + ". A streaming rate needs token-arrival timestamps; elapsed tool and response time cannot replace them."
+        }
+        return split + NativeStatsRateMetric.streaming.timingDetail(stream)
+    }
+    private var spoken: String {
+        guard hasUsage else { return "No recorded usage" }
+        return "Streaming tokens per second: " + (rate == nil ? "Unavailable" : rateText) + ". " + NativeStatsRateMetric.streaming.coverage(stream)
+    }
+    var body: some View {
+        LedgerRow(action: { select(source) }) {
+            HStack(spacing: 12) {
+                NativeSeriesTick(color: hasUsage ? nativeStatsHarnessColor(source) : Theme.track)
+                Text(name).font(Theme.ui(13)).foregroundStyle(hasUsage ? Theme.ink : Theme.muted).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Scale(fraction: grand / peak, color: nativeStatsHarnessColor(source)).frame(width: 72)
+                if !detail {
+                    Text(rateText).font(Theme.mono(11.5)).monospacedDigit()
+                        .foregroundStyle(rate == nil ? Theme.faint : Theme.dim).frame(width: 56, alignment: .trailing)
+                }
+                Text(value.isNull ? "--" : nativeStatsCount(grand)).font(Theme.readout(17)).monospacedDigit()
+                    .foregroundStyle(hasUsage ? Theme.ink : Theme.faint)
+                    .nativeStatsNumberTransition(value.isNull ? nil : grand)
+                    .frame(width: 64, alignment: .trailing)
+            }
+        }
+        .help(explanation)
+        .accessibilityLabel("Open \(name) statistics")
+        .accessibilityValue(spoken)
+    }
 }
 
 private struct NativeStatsProjectBoard: View {
     let rows: [JSONValue], all: Bool
-    var body: some View { NativeCard {
-        NativeChartHeading(title: "Projects", caption: !all && rows.count > 8 ? "Top 8 of \(rows.count) working directories." : "Working directories recorded by the selected apps.")
-        ForEach(Array((all ? rows : Array(rows.prefix(8))).enumerated()), id: \.offset) { index, row in VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) { Text(String(format: "%02d", index + 1)).font(Theme.mono(10)).foregroundStyle(Theme.muted).frame(width: 18); Text(row["name"].string).font(Theme.mono(12, weight: .medium)).lineLimit(1).help(row["path"].string); Spacer(minLength: 2); Text("\(row["sessions"].int) sessions").font(Theme.ui(10.5)).foregroundStyle(Theme.muted); Text(nativeStatsCount(nativeStatsGrand(row["totals"]))).font(Theme.mono(12, weight: .medium)) }
-            NativeGrowBar(fraction: nativeStatsGrand(row["totals"]) / max(1, rows.map { nativeStatsGrand($0["totals"]) }.max() ?? 0), color: Theme.pairColor(row["path"].string))
-        }.padding(.horizontal, 8).padding(.vertical, 7) }
-        if !all && rows.count > 8 { Text("\(rows.count - 8) more projects").foregroundStyle(Theme.muted) }
-    }.frame(maxWidth: .infinity) }
+    @State private var showsAll = false
+    var body: some View {
+        let shown = all || showsAll ? rows : Array(rows.prefix(8))
+        let peak = max(1, rows.map { nativeStatsGrand($0["totals"]) }.max() ?? 0)
+        NativeStatsBand("Projects", spacing: 0) {
+            LedgerHead {
+                MicroLabel("Working directory").frame(maxWidth: .infinity, alignment: .leading)
+                Color.clear.frame(width: 72, height: 1)
+                MicroLabel("Sessions").frame(width: 84, alignment: .trailing)
+                MicroLabel("Tokens").frame(width: 64, alignment: .trailing)
+            }
+            .padding(.top, 6)
+            if rows.isEmpty {
+                Blank(icon: "folder", title: "No projects in this range", detail: "Working directories recorded by the selected apps appear here.")
+            }
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, row in
+                LedgerRow {
+                    HStack(spacing: 12) {
+                        Text(row["name"].string).font(Theme.mono(12)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Scale(fraction: nativeStatsGrand(row["totals"]) / peak).frame(width: 72)
+                        Text("\(row["sessions"].int)").font(Theme.mono(11.5)).monospacedDigit().foregroundStyle(Theme.dim).frame(width: 84, alignment: .trailing)
+                        Text(nativeStatsCount(nativeStatsGrand(row["totals"]))).font(Theme.readout(17)).monospacedDigit().foregroundStyle(Theme.ink)
+                            .nativeStatsNumberTransition(nativeStatsGrand(row["totals"])).frame(width: 64, alignment: .trailing)
+                    }
+                }
+                .help(row["path"].string)
+            }
+            if !all && rows.count > 8 {
+                Button(showsAll ? "Show the top 8" : "Show all \(rows.count) projects") { showsAll.toggle() }
+                    .buttonStyle(Press(.quiet)).padding(.leading, -8).padding(.top, 6)
+            }
+        }
+    }
 }
 
+/// Responses by weekday and hour, on an hour rule. Ink density is the count.
 private struct NativeStatsHeat: View {
     let grid: [JSONValue]
     private var maximum: Double { grid.flatMap(\.array).map(\.double).max() ?? 0 }
-    var body: some View { NativeCard {
-        NativeChartHeading(title: "When you work", caption: "Responses by local weekday and hour, brightest at your busiest hour.")
-        VStack(spacing: 3) {
-        ForEach(0..<min(7, grid.count), id: \.self) { day in HStack(spacing: 3) { Text(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day]).frame(width: 35); ForEach(0..<24, id: \.self) { hour in let value = grid[day].array.count > hour ? grid[day].array[hour].double : 0; RoundedRectangle(cornerRadius: 2).fill(value > 0 ? Theme.accent.opacity(0.2 + 0.8 * value / max(1, maximum)) : Theme.track).frame(minWidth: 5, maxWidth: .infinity, minHeight: 12, maxHeight: 12).help("\(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][day]) \(hour):00: \(Int(value)) responses").accessibilityLabel("Day \(day + 1), hour \(hour), \(Int(value)) responses") } } }
+    private let days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    private let names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    var body: some View {
+        let peak = maximum
+        let hours = (0..<24).map { hour in grid.reduce(0) { $0 + ($1.array.count > hour ? $1.array[hour].double : 0) } }
+        let best = hours.enumerated().max { $0.element < $1.element }
+        NativeStatsBand("Rhythm", hint: "Responses by local weekday and hour") {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(spacing: 2) {
+                    ForEach(0..<min(7, grid.count), id: \.self) { day in
+                        HStack(spacing: 2) {
+                            MicroLabel(days[day]).frame(width: 34, alignment: .leading)
+                            ForEach(0..<24, id: \.self) { hour in
+                                let value = grid[day].array.count > hour ? grid[day].array[hour].double : 0
+                                Rectangle().fill(value > 0 ? Theme.ink.opacity(0.14 + 0.86 * value / max(1, peak)) : Theme.track)
+                                    .frame(minWidth: 5, maxWidth: .infinity, minHeight: 15, maxHeight: 15)
+                                    .help("\(names[day]) \(hour):00: \(Int(value)) responses")
+                                    .accessibilityLabel("Day \(day + 1), hour \(hour), \(Int(value)) responses")
+                            }
+                        }
+                    }
+                }
+                VStack(spacing: 3) {
+                    TickScale(divisions: 24, major: 6, minorHeight: 3, majorHeight: 6).fill(Theme.faint).frame(height: 6)
+                    HStack(spacing: 0) {
+                        Text("00").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("06").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("12").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("18").frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .font(Theme.mono(10.5)).foregroundStyle(Theme.faint)
+                }
+                .padding(.leading, 36).padding(.top, 5).accessibilityHidden(true)
+                Text(peak > 0 ? "Busiest hour \(String(format: "%02d", best?.offset ?? 0)):00 · fullest cell holds \(Int(peak)) responses" : "No dated activity")
+                    .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).padding(.top, 10)
+            }
         }
-        HStack { Text("00"); Spacer(); Text("06"); Spacer(); Text("12"); Spacer(); Text("18"); Spacer(); Text("23") }.font(Theme.mono(10)).foregroundStyle(Theme.muted)
-        let hours = (0..<24).map { hour in grid.reduce(0) { $0 + ($1.array.count > hour ? $1.array[hour].double : 0) } }, best = hours.enumerated().max { $0.element < $1.element }
-        Text("\(maximum > 0 ? "Busiest hour: \(best?.offset ?? 0):00" : "No dated activity") · intensity 0–\(Int(maximum)) responses").foregroundStyle(Theme.muted)
-    }.frame(maxWidth: .infinity) }
+    }
 }
 
 private struct NativeStatsDrive: View {
     let summary: JSONValue
-    var body: some View { NativeCard {
-        NativeChartHeading(title: "How you drive it", caption: "Thinking effort, subagents and server-side tools - the settings behind the numbers above.")
-        ForEach(summary["effort"].object.keys.sorted(), id: \.self) { key in HStack { Text("Effort \(key)"); Spacer(); Text(summary["effort"][key].string).font(Theme.mono(12)) } }
-        Rectangle().fill(Theme.border).frame(height: 1)
-        fact("Subagent turns", value: summary["sidechainMessages"].int, detail: "\(nativeStatsCount(summary["sidechainTokens"].double)) tokens")
-        fact("Through the proxy", value: summary["proxyMessages"].int, detail: "Claude responses from a gateway model")
-        fact("Web searches", value: summary["totals"]["webSearch"].int, detail: "Reported server-side searches")
-        fact("Page fetches", value: summary["totals"]["webFetch"].int, detail: "Reported server-side fetches")
-    } }
+    var body: some View {
+        let efforts = summary["effort"].object.keys.sorted()
+        let total = max(1, efforts.reduce(0) { $0 + summary["effort"][$1].double })
+        NativeStatsBand("How you drive it", spacing: 0) {
+            ForEach(efforts, id: \.self) { key in
+                LedgerRow(minHeight: 28) {
+                    HStack(spacing: 12) {
+                        Text("Effort " + (key.isEmpty ? "unset" : key)).font(Theme.ui(12.5)).foregroundStyle(Theme.ink).lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Scale(fraction: summary["effort"][key].double / total).frame(width: 72)
+                        Text(nativeStatsWhole(summary["effort"][key].double)).font(Theme.mono(12)).monospacedDigit().foregroundStyle(Theme.ink)
+                            .frame(width: 64, alignment: .trailing)
+                    }
+                }
+            }
+            fact("Subagent turns", value: summary["sidechainMessages"].int, detail: "\(nativeStatsCount(summary["sidechainTokens"].double)) tokens")
+            fact("Through the proxy", value: summary["proxyMessages"].int, detail: "Claude responses from a gateway model")
+            fact("Web searches", value: summary["totals"]["webSearch"].int, detail: "Reported server-side searches")
+            fact("Page fetches", value: summary["totals"]["webFetch"].int, detail: "Reported server-side fetches")
+        }
+    }
     private func fact(_ title: String, value: Int, detail: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) { Text(title).font(Theme.ui(12.5, weight: .medium)); Text(detail).font(Theme.ui(10.5)).foregroundStyle(Theme.muted) }
-            Spacer(); Text("\(value)").font(Theme.mono(14, weight: .medium)).foregroundStyle(value == 0 ? Theme.muted : Theme.ink)
+        LedgerRow(minHeight: 28) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title).font(Theme.ui(12.5)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+                Text(detail).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1)
+                Spacer(minLength: 8)
+                Text(nativeStatsWhole(Double(value))).font(Theme.mono(12)).monospacedDigit().foregroundStyle(value == 0 ? Theme.faint : Theme.ink)
+            }
         }
     }
 }
