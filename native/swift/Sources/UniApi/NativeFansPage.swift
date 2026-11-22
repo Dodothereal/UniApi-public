@@ -63,7 +63,7 @@ struct NativeFansPage: View {
             if tab == "timeline" { T3IconButton(system: "download", help: "Export CSV") { exportHistory() }.disabled(history["points"].array.isEmpty) }
             T3IconButton(system: "refresh-cw", help: "Refresh") { Task { await reload(); if ["control", "timeline", "settings"].contains(tab) { await loadHistory() } } }
             if tab == "curve" { applyCurveButton }
-            if !state.isNull, state["supported"].bool, state["installed"].bool, !state["enabled"].bool {
+            if tab != "control", !state.isNull, state["supported"].bool, state["installed"].bool, !state["enabled"].bool {
                 Button(state["daemon"]["installed"].bool ? "Enable controls" : "Enable for this session") { Task { await operation("enable") } }
                     .buttonStyle(T3Button(tab == "curve" ? .ghost : .primary)).disabled(pending || snapshot.isNull || runtime.paths.readOnly)
             }
@@ -131,16 +131,6 @@ struct NativeFansPage: View {
     }
     private var thermal: some View {
         NativeReadoutStrip(minCell: 150) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Mode").font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
-                Text(NativeHardwareDisplayPolicies.fanModeName(state["control"]["mode"].string)).font(Theme.ui(22, weight: .semibold)).tracking(Theme.tracking(22)).lineLimit(1).minimumScaleFactor(0.7).padding(.top, 10)
-                Group {
-                    if !state["control"]["until"].isNull {
-                        if pageActive { TimelineView(.periodic(from: .now, by: 1)) { time in controlCountdown(at: time.date) } }
-                        else { controlCountdown(at: Date()) }
-                    } else { Text(modeDetail).font(Theme.ui(Theme.textXs)).foregroundStyle(snapshot["thermal"].double >= 2 ? Theme.warnFg : Theme.muted) }
-                }.padding(.top, 4)
-            }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             ForEach(["CPU", "GPU", "Battery"], id: \.self) { name in
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 6) {
@@ -157,13 +147,54 @@ struct NativeFansPage: View {
     private func controlCountdown(at date: Date) -> some View {
         Text(countdown(max(0, state["control"]["until"].double - date.timeIntervalSince1970 * 1000)) + " left").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.accent)
     }
+    /// The control first, as one line; then what it acts on.
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            thermal
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 32) { fanDeck.frame(minWidth: 460); profiles.frame(width: 280) }
-                VStack(alignment: .leading, spacing: 24) { fanDeck; profiles }
+        let mode = state["control"]["mode"].string, released = ["automatic", "external"].contains(mode)
+        return VStack(alignment: .leading, spacing: 24) {
+            if !state["enabled"].bool {
+                NativeSetup(steps: [NativeSetupStep(
+                    id: "enable", title: state["daemon"]["installed"].bool ? "Enable controls" : "Enable controls for this session", done: false,
+                    enabled: !(pending || snapshot.isNull || runtime.paths.readOnly), actionTitle: "Enable", actionIcon: "power", action: { Task { await operation("enable") } })])
             }
+            VStack(alignment: .leading, spacing: 8) {
+                NativeRouteLine(tool: "Fans", icon: "fan", stops: {
+                    T3Segmented(options: [("automatic", "Automatic"), ("cooler", "Cooler"), ("curve", "Curve")], selection: mode, enabled: enabled) { choice in
+                        if choice == "curve" { tab = "curve" } else { Task { await command(["command": .string(choice)]) } }
+                    }.accessibilityLabel("Fan profile")
+                    NativeRouteArrow()
+                    HStack(spacing: 6) {
+                        Text("Hold").font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.muted).help(durationDescription)
+                        NativeFanDurationMenu(value: $duration, values: NativeHardwareDisplayPolicies.fanDurations, label: durationLabel)
+                        Button("Set") { if let input = currentDurationCommand { Task { await command(input) } } }.disabled(!enabled || currentDurationCommand == nil)
+                    }
+                }, action: {
+                    HStack(spacing: 6) {
+                        NativeFanDurationMenu(value: $boost, values: NativeHardwareDisplayPolicies.boostDurations, label: durationLabel)
+                        Button("Boost", nativeIcon: "zap") { Task { await command(["command": "boost", "duration": .number(Double(boost))]) } }
+                            .disabled(!enabled).help("Maximum cooling, then back to automatic")
+                    }
+                })
+                HStack(spacing: 10) {
+                    if !["automatic", "cooler", "curve"].contains(mode) {
+                        Text(NativeHardwareDisplayPolicies.fanModeName(mode)).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.dim)
+                    }
+                    if !state["control"]["until"].isNull {
+                        if pageActive { TimelineView(.periodic(from: .now, by: 1)) { time in controlCountdown(at: time.date) } }
+                        else { controlCountdown(at: Date()) }
+                    } else if !modeDetail.isEmpty {
+                        Text(modeDetail).font(Theme.ui(Theme.textXs)).foregroundStyle(snapshot["thermal"].double >= 2 ? Theme.warnFg : Theme.muted)
+                    }
+                    if !state["control"]["message"].string.isEmpty {
+                        Text(state["control"]["message"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(2)
+                    }
+                    Spacer(minLength: 8)
+                    if !released || !state["keep"].isNull {
+                        Button(released ? "Stop keeping" : "Reset to Auto", nativeIcon: "rotate-ccw") { Task { await operation("release") } }.buttonStyle(T3Button(.ghost)).disabled(pending || runtime.paths.readOnly)
+                    }
+                }.padding(.leading, 14)
+            }
+            thermal
+            fanDeck
             if let historyError { NativeError(message: historyError) }
             NativeSection("Last 30 minutes", trailing: {
                 Button("Timeline", nativeIcon: "arrow-right") { tab = "timeline" }.buttonStyle(T3Button(.ghost))
@@ -173,54 +204,19 @@ struct NativeFansPage: View {
         }
     }
     private var fanDeck: some View {
-        let released = ["automatic", "external"].contains(state["control"]["mode"].string)
-        return NativeSection("Fans", trailing: {
-            if !released || !state["keep"].isNull {
-                Button(released ? "Stop keeping" : "Reset to Auto", nativeIcon: "rotate-ccw") { Task { await operation("release") } }.buttonStyle(T3Button(.ghost)).disabled(pending || runtime.paths.readOnly)
-            }
-        }) {
-            VStack(alignment: .leading, spacing: 0) {
-                if snapshot.isNull || snapshot["fans"].array.isEmpty {
-                    Text(snapshot.isNull ? "Waiting for readings" : "This Mac has no controllable fans").font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.muted).padding(16)
-                } else {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: max(1, min(2, snapshot["fans"].array.count))), spacing: 0) {
-                        ForEach(snapshot["fans"].array, id: \.self["id"]) { fan in
-                            NativeFanSpeedCard(fan: fan, enabled: enabled, duration: duration) { rpm in Task { await manual(fan["id"].int, rpm) } }
-                                .overlay(alignment: .trailing) { if snapshot["fans"].array.first?["id"] == fan["id"] && snapshot["fans"].array.count > 1 { Theme.rule.frame(width: 1) } }
-                        }
+        VStack(alignment: .leading, spacing: 0) {
+            Theme.rule.frame(height: 1)
+            if snapshot.isNull || snapshot["fans"].array.isEmpty {
+                Text(snapshot.isNull ? "Waiting for fan readings" : "This Mac has no controllable fans").font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.muted).padding(.vertical, 14)
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: max(1, min(2, snapshot["fans"].array.count))), spacing: 0) {
+                    ForEach(snapshot["fans"].array, id: \.self["id"]) { fan in
+                        NativeFanSpeedCard(fan: fan, enabled: enabled, duration: duration) { rpm in Task { await manual(fan["id"].int, rpm) } }
+                            .overlay(alignment: .trailing) { if snapshot["fans"].array.first?["id"] == fan["id"] && snapshot["fans"].array.count > 1 { Theme.rule.frame(width: 1) } }
                     }
                 }
-                if !state["control"]["message"].string.isEmpty {
-                    Text(state["control"]["message"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 10)
-                        .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
-                }
-            }.background(Theme.surface).clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
-        }
-    }
-    private var profiles: some View {
-        NativeSection("Profile") {
-            VStack(alignment: .leading, spacing: 0) {
-                Theme.rule.frame(height: 1)
-                NativeFanProfileChoice(title: "Automatic", detail: "macOS decides", icon: "shield-check", active: state["control"]["mode"] == "automatic") { Task { await command(["command": "automatic"]) } }.disabled(!enabled)
-                NativeFanProfileChoice(title: "Cooler", detail: "Starts earlier, rises with heat", icon: "snowflake", active: state["control"]["mode"] == "cooler") { Task { await command(["command": "cooler"]) } }.disabled(!enabled)
-                NativeFanProfileChoice(title: "Custom curve", detail: "Four points", icon: "sliders-horizontal", active: state["control"]["mode"] == "curve", opensPage: true) { tab = "curve" }
-                HStack(spacing: 8) {
-                    NativeIcon("zap", size: 14).foregroundStyle(Theme.muted).frame(width: 18)
-                    Text("Boost").font(Theme.ui(Theme.textSm, weight: .medium)).help("Maximum cooling, then back to automatic")
-                    Spacer(minLength: 0)
-                    NativeFanDurationMenu(value: $boost, values: NativeHardwareDisplayPolicies.boostDurations, label: durationLabel)
-                    Button("Start") { Task { await command(["command": "boost", "duration": .number(Double(boost))]) } }.buttonStyle(T3Button(.outline)).disabled(!enabled)
-                }.padding(.vertical, 10).padding(.leading, 12).overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
-                HStack(spacing: 8) {
-                    NativeIcon("hourglass", size: 14).foregroundStyle(Theme.muted).frame(width: 18)
-                    Text("Hold for").font(Theme.ui(Theme.textSm, weight: .medium)).help(durationDescription)
-                    Spacer(minLength: 0)
-                    NativeFanDurationMenu(value: $duration, values: NativeHardwareDisplayPolicies.fanDurations, label: durationLabel)
-                    Button("Set") { if let input = currentDurationCommand { Task { await command(input) } } }.buttonStyle(T3Button(.outline)).disabled(!enabled || currentDurationCommand == nil)
-                }.padding(.vertical, 10).padding(.leading, 12).overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
             }
+            Theme.rule.frame(height: 1)
         }
     }
     private var sensors: some View {
@@ -511,30 +507,6 @@ struct NativeFansPage: View {
             guard response == .OK, let url = panel.url else { return }
             do { try Data(csv.utf8).write(to: url, options: .atomic) } catch { self.error = error.localizedDescription }
         }
-    }
-}
-
-private struct NativeFanProfileChoice: View {
-    let title: String, detail: String, icon: String
-    let active: Bool
-    var opensPage = false
-    let action: () -> Void
-    @State private var hovering = false
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                NativeIcon(icon, size: 14).foregroundStyle(active ? Theme.accent : Theme.muted).frame(width: 18)
-                Text(title).font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(Theme.ink)
-                Text(detail).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1)
-                Spacer(minLength: 0)
-                if opensPage { NativeIcon("chevron-right", size: 12).foregroundStyle(Theme.faint) }
-                else if active { NativeIcon("check", size: 13).foregroundStyle(Theme.accent) }
-            }.padding(.leading, 12).padding(.trailing, 8).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-                .background(active ? Theme.raised : hovering ? Theme.subtle : .clear)
-                .overlay(alignment: .leading) { Theme.accent.frame(width: 2).opacity(active ? 1 : 0) }
-                .overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
-                .contentShape(Rectangle())
-        }.buttonStyle(.plain).pointingHand().onHover { hovering = $0 }.accessibilityAddTraits(active ? [.isSelected] : [])
     }
 }
 
