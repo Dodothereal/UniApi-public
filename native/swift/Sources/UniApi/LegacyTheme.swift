@@ -228,7 +228,8 @@ struct Card<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) { content() }
             .padding(padding * density.cardScale)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .background(Theme.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1) }
     }
 }
 

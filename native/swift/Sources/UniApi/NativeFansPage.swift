@@ -57,19 +57,18 @@ struct NativeFansPage: View {
     }
     var body: some View {
         GeometryReader { viewport in
-        NativePage(title: "Airflow", subtitle: "Your Mac. In balance.", maxWidth: 1500, readiness: pageReadiness, showsHeader: false) {
-            airflowHeader
+        NativePage(title: "Fan Control", maxWidth: 1500, readiness: pageReadiness, actions: { headerActions }) {
             if let statusReadError { statusError(statusReadError) }
             if let error { NativeError(message: error) }
             if !state["error"].string.isEmpty { statusError(state["error"].string) }
             if state.isNull {
                 if error == nil && statusReadError == nil {
-                    ShimmerText(text: "Reading fans and temperature sensors…").padding(.vertical, 40)
+                    ShimmerText(text: "Reading fans").padding(.vertical, 40)
                 }
             } else if !state["supported"].bool {
-                NativeEmptyState(title: "Fan Control is available on macOS", detail: "The other UniApi apps work on this platform.", icon: "monitor")
+                NativeEmptyState(title: "Mac only", detail: "", icon: "monitor")
             } else if !state["installed"].bool {
-                NativeEmptyState(title: "Fan reader is not installed", detail: "Rebuild the UniApi app to install its native fan reader.", icon: "fan")
+                NativeEmptyState(title: "Fan reader is not installed", detail: "Rebuild UniApi to install it.", icon: "fan")
             } else {
                 if contentWidth >= 650 { HStack(spacing: 20) { tabRail; Spacer(minLength: 8); thermalStatus } }
                 else { VStack(alignment: .leading, spacing: 12) { tabRail; thermalStatus } }
@@ -120,31 +119,19 @@ struct NativeFansPage: View {
             Button("Retry") { Task { await reload() } }
         }
     }
-    private var airflowHeader: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 20) { airflowHeading.fixedSize(); Spacer(minLength: 0); headerActions.fixedSize() }
-            VStack(alignment: .leading, spacing: 12) { airflowHeading; headerActions.frame(maxWidth: .infinity, alignment: .trailing) }
-        }
-    }
-    private var airflowHeading: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Airflow").font(Theme.ui(min(44, max(30, (contentWidth + 216 + 2 * density.pageMargin) * 0.04)), weight: .semibold)).tracking(-1.8).accessibilityAddTraits(.isHeader)
-            Text("Your Mac. In balance.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-        }
-    }
     private var headerActions: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 8) { NativeStatusDot(color: snapshot.isNull ? Theme.warnFg : Theme.okFg, pulse: !snapshot.isNull); Text(snapshot.isNull ? "Waiting for readings" : "Live").font(Theme.ui(11)).foregroundStyle(Theme.muted) }
+            if snapshot.isNull, !state.isNull { NativeStatusText(text: "No readings", color: Theme.warnFg) }
             NativeMenuSelect(title: "Temperature unit", selection: Binding(get: { unit }, set: { value in Task { await operation("preferences", ["unit": .string(value)]) } }), options: [("c", "°C"), ("f", "°F")], width: 68)
-            Button { Task { await reload(); if ["control", "timeline", "settings"].contains(tab) { await loadHistory() } } } label: { HStack(spacing: 6) { NativeIcon("refresh-cw", size: 12, strokeWidth: 1.65); Text("Refresh") } }
-            if !state["enabled"].bool { Button(state["daemon"]["installed"].bool ? "Enable controls" : "Enable one-off session") { Task { await operation("enable") } }.buttonStyle(T3Button(.primary)).disabled(pending || snapshot.isNull || runtime.paths.readOnly) }
+            T3IconButton(icon: "refresh-cw", help: "Refresh") { Task { await reload(); if ["control", "timeline", "settings"].contains(tab) { await loadHistory() } } }
+            if !state["enabled"].bool { Button(state["daemon"]["installed"].bool ? "Enable controls" : "Enable for this session") { Task { await operation("enable") } }.buttonStyle(T3Button(.primary)).disabled(pending || snapshot.isNull || runtime.paths.readOnly) }
         }
     }
     private var tabRail: some View {
         HStack(spacing: 0) {
             ForEach(Self.tabs, id: \.self) { value in
                 Button { tab = value } label: {
-                    Text(["control": "Control room", "sensors": "Sensors", "timeline": "Timeline", "curve": "Curve studio", "settings": "Preferences"][value] ?? value)
+                    Text(["control": "Control", "sensors": "Sensors", "timeline": "Timeline", "curve": "Curve", "settings": "Preferences"][value] ?? value)
                         .font(Theme.ui(12)).lineLimit(1).minimumScaleFactor(0.85).padding(.vertical, 7).frame(maxWidth: .infinity)
                         .foregroundStyle(tab == value ? Theme.ink : Theme.muted)
                 }.buttonStyle(.plain).pointingHand().accessibilityAddTraits(tab == value ? [.isSelected] : [])
@@ -161,26 +148,24 @@ struct NativeFansPage: View {
                 }
             }.allowsHitTesting(false).accessibilityHidden(true)
         }
-        .padding(5).frame(width: min(480, max(0, contentWidth))).background(Theme.well, in: RoundedRectangle(cornerRadius: 10)).accessibilityElement(children: .contain).accessibilityLabel("Fan control sections")
+        .padding(3).frame(width: min(440, max(0, contentWidth))).background(Theme.well, in: RoundedRectangle(cornerRadius: 10)).accessibilityElement(children: .contain).accessibilityLabel("Fan control sections")
     }
     private var thermalStatus: some View {
         HStack(spacing: 8) { NativeStatusDot(color: snapshot.isNull || snapshot["thermal"].double >= 2 ? Theme.warnFg : Theme.okFg); Text(snapshot.isNull ? "Telemetry unavailable" : NativeHardwareDisplayPolicies.fanThermalLabel(snapshot)) }.font(Theme.ui(11)).foregroundStyle(Theme.muted)
     }
     private var thermal: some View {
-        Card(padding: 20) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 20) {
-                    thermalSummary.frame(minWidth: 130, maxWidth: .infinity, alignment: .leading)
-                    thermalReadings.fixedSize(horizontal: true, vertical: true)
-                }
-                VStack(alignment: .leading, spacing: 20) { thermalSummary; thermalReadings }
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 20) {
+                thermalSummary.frame(minWidth: 150, maxWidth: .infinity, alignment: .leading)
+                thermalReadings.fixedSize(horizontal: true, vertical: true)
             }
+            VStack(alignment: .leading, spacing: 20) { thermalSummary; thermalReadings }
         }
     }
     private var thermalSummary: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack { Text("Thermal overview").font(Theme.ui(12)).foregroundStyle(Theme.muted); Spacer(minLength: 12); Text("°" + unit.uppercased()).font(Theme.mono(11)).foregroundStyle(Theme.muted) }
-            Text(NativeHardwareDisplayPolicies.fanModeName(state["control"]["mode"].string)).font(Theme.ui(26, weight: .semibold)).tracking(-1)
+            Text("Mode").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+            Text(NativeHardwareDisplayPolicies.fanModeName(state["control"]["mode"].string)).font(Theme.display(44))
             if !state["keep"].isNull { Text("Kept until you change it").font(Theme.ui(12)).foregroundStyle(Theme.muted).padding(.top, 6) }
             if !state["control"]["until"].isNull {
                 if pageActive { TimelineView(.periodic(from: .now, by: 1)) { time in controlCountdown(at: time.date) } }
@@ -197,15 +182,10 @@ struct NativeFansPage: View {
                 HStack(spacing: 0) {
                     Rectangle().fill(Theme.border).frame(width: 1)
                     VStack(alignment: .leading, spacing: 7) {
-                        HStack(spacing: 8) {
-                            NativeIcon(name == "CPU" ? "cpu" : name == "GPU" ? "circuit-board" : "battery", size: 15, strokeWidth: 1.65)
-                                .foregroundStyle(name == "CPU" ? Theme.accent : name == "GPU" ? Theme.pairPalette[6] : Theme.warn)
-                            Text(name).font(Theme.ui(12))
-                        }
-                        NativeNumberText(text: thermalFormat(temperature(name)), font: Theme.ui(36, weight: .medium), isolateLayout: true).fixedSize()
-                        Text(name == "CPU" ? "Die average" : name == "GPU" ? "Hottest sensor" : "Current temperature")
-                            .font(Theme.ui(10)).foregroundStyle(Theme.muted).fixedSize()
-                    }.padding(.leading, 20).frame(minWidth: 140, maxWidth: .infinity, alignment: .leading)
+                        Text(name).font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                        NativeNumberText(text: thermalFormat(temperature(name)), font: Theme.display(44), isolateLayout: true).fixedSize()
+                            .help(name == "CPU" ? "Die average" : name == "GPU" ? "Hottest sensor" : "Battery temperature")
+                    }.padding(.leading, 16).frame(minWidth: 128, maxWidth: .infinity, alignment: .leading)
                 }
             }
         }.fixedSize(horizontal: false, vertical: true)
@@ -218,74 +198,56 @@ struct NativeFansPage: View {
                 VStack(alignment: .leading, spacing: 24) { fanDeck; profiles }
             }
             if let historyError { NativeError(message: historyError) }
-            Card(padding: 26) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("Thermal trace").font(Theme.ui(14, weight: .medium))
-                            Text("CPU, GPU and battery temperatures · last 30 minutes").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                        }
-                        Spacer(minLength: 8)
-                        Button { tab = "timeline" } label: { HStack(spacing: 6) { Text("Explore history"); NativeIcon("arrow-up-right", size: 12, strokeWidth: 1.65) } }.buttonStyle(T3Button(.ghost))
-                    }
-                    NativeLineChart(series: temperatureSeries, height: 190, showPoints: false, includeZero: false, xFormat: { Date(timeIntervalSince1970: $0 / 1000).formatted(date: .omitted, time: .shortened) }, yFormat: { String(format: "%.1f°%@", $0, unit.uppercased()) })
-                }
+            NativeSection("Last 30 minutes", trailing: {
+                Button { tab = "timeline" } label: { HStack(spacing: 6) { Text("Timeline"); NativeIcon("arrow-up-right", size: 12, strokeWidth: 1.65) } }.buttonStyle(T3Button(.ghost))
+            }) {
+                NativeLineChart(series: temperatureSeries, height: 190, showPoints: false, includeZero: false, xFormat: { Date(timeIntervalSince1970: $0 / 1000).formatted(date: .omitted, time: .shortened) }, yFormat: { String(format: "%.1f°%@", $0, unit.uppercased()) })
             }
         }
     }
     private var fanDeck: some View {
-        Card(padding: 0) {
+        VStack(alignment: .leading, spacing: 0) {
+            NativeRule()
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
-                    Text("Fan speeds").font(Theme.ui(15, weight: .medium))
+                    Text("Fans").font(Theme.ui(13, weight: .semibold))
                     if !["automatic", "external"].contains(state["control"]["mode"].string) || !state["keep"].isNull {
                         Button { Task { await operation("release") } } label: { HStack(spacing: 5) { NativeIcon("rotate-ccw", size: 12, strokeWidth: 1.65); Text(["automatic", "external"].contains(state["control"]["mode"].string) ? "Stop keeping" : "Reset to Auto") } }.disabled(pending || runtime.paths.readOnly)
                     }
                     Spacer(minLength: 8)
-                    Text(NativeHardwareDisplayPolicies.fanModeName(state["control"]["mode"].string)).font(Theme.ui(11)).padding(.horizontal, 9).padding(.vertical, 5).background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                }.padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 18)
+                }.frame(minHeight: 30).padding(.vertical, 12)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: max(1, min(2, snapshot["fans"].array.count))), spacing: 18) {
                     ForEach(snapshot["fans"].array, id: \.self["id"]) { fan in
                         NativeFanSpeedCard(fan: fan, enabled: enabled, duration: duration) { rpm in Task { await manual(fan["id"].int, rpm) } }
                             .overlay(alignment: .trailing) { if snapshot["fans"].array.first?["id"] == fan["id"] && snapshot["fans"].array.count > 1 { Rectangle().fill(Theme.border).frame(width: 1) } }
                     }
-                    if snapshot.isNull || snapshot["fans"].array.isEmpty { NativeEmptyState(title: snapshot.isNull ? "Waiting for live fan readings" : "This Mac has no controllable fans.", detail: snapshot.isNull ? "Controls wait for a fresh telemetry snapshot." : "Temperature readings remain available.", icon: "fan") }
+                    if snapshot.isNull || snapshot["fans"].array.isEmpty { NativeEmptyState(title: snapshot.isNull ? "No fan readings" : "No controllable fans", detail: "", icon: "fan") }
                 }.padding(.bottom, 14)
-                Rectangle().fill(Theme.border).frame(height: 1)
-                HStack(alignment: .top, spacing: 8) {
-                    NativeIcon("shield-check", size: 14, strokeWidth: 1.65).foregroundStyle(Theme.okFg).padding(.top, 2)
-                    Text(state["control"]["message"].string).font(Theme.ui(11)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 28).padding(.vertical, 16).background(Theme.well)
+                if !state["control"]["message"].string.isEmpty {
+                    Text(state["control"]["message"].string).font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
     private var profiles: some View {
-        Card(padding: 16) {
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Choose your flow").font(Theme.ui(15, weight: .medium))
-                Text("A little quieter. A little cooler. Your call.").font(Theme.ui(11.5)).foregroundStyle(Theme.muted).padding(.bottom, 9)
-                NativeFanProfileChoice(title: "Automatic", detail: "Let macOS find the balance.", icon: "shield-check", active: state["control"]["mode"] == "automatic") { Task { await command(["command": "automatic"]) } }.disabled(!enabled)
-                NativeFanProfileChoice(title: "Cooler", detail: "Start earlier. Rise with the heat.", icon: "snowflake", active: state["control"]["mode"] == "cooler") { Task { await command(["command": "cooler"]) } }.disabled(!enabled)
-                NativeFanProfileChoice(title: "Custom curve", detail: "Your temperature-to-speed balance.", icon: "sliders-horizontal", active: state["control"]["mode"] == "curve", opensPage: true) { tab = "curve" }
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(spacing: 6) { NativeIcon("zap", size: 13, strokeWidth: 1.65).foregroundStyle(Theme.muted); Text("Quick boost").font(Theme.ui(13, weight: .medium)) }
-                    Text("Maximum cooling, then back to automatic.").font(Theme.ui(11)).foregroundStyle(Theme.muted)
-                    HStack(spacing: 8) {
-                        Spacer(minLength: 0)
-                        NativeFanDurationMenu(value: $boost, values: NativeHardwareDisplayPolicies.boostDurations, label: durationLabel)
-                        Button("Boost") { Task { await command(["command": "boost", "duration": .number(Double(boost))]) } }.disabled(!enabled)
-                    }
-                }.padding(16).frame(maxWidth: .infinity, alignment: .leading).overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, lineWidth: 1) }.padding(.top, 11)
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(spacing: 6) { NativeIcon("hourglass", size: 13, strokeWidth: 1.65).foregroundStyle(Theme.muted); Text("Duration").font(Theme.ui(13, weight: .medium)) }
-                    Text(durationDescription).font(Theme.ui(11)).foregroundStyle(Theme.muted)
-                    HStack(spacing: 8) {
-                        Spacer(minLength: 0)
-                        NativeFanDurationMenu(value: $duration, values: NativeHardwareDisplayPolicies.fanDurations, label: durationLabel)
-                        Button("Set") { if let input = currentDurationCommand { Task { await command(input) } } }.disabled(!enabled || currentDurationCommand == nil)
-                    }
-                }.padding(16).frame(maxWidth: .infinity, alignment: .leading).overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, lineWidth: 1) }.padding(.top, 3)
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            NativeRule()
+            Text("Mode").font(Theme.ui(13, weight: .semibold)).frame(minHeight: 30).padding(.vertical, 12)
+            NativeFanProfileChoice(title: "Automatic", detail: "macOS decides", icon: "shield-check", active: state["control"]["mode"] == "automatic") { Task { await command(["command": "automatic"]) } }.disabled(!enabled)
+            NativeFanProfileChoice(title: "Cooler", detail: "Spins up earlier", icon: "snowflake", active: state["control"]["mode"] == "cooler") { Task { await command(["command": "cooler"]) } }.disabled(!enabled)
+            NativeFanProfileChoice(title: "Curve", detail: "Your temperature-to-speed map", icon: "sliders-horizontal", active: state["control"]["mode"] == "curve", opensPage: true) { tab = "curve" }
+            HStack(spacing: 8) {
+                Text("Boost").font(Theme.ui(13, weight: .medium)).help("Maximum cooling, then back to automatic")
+                Spacer(minLength: 0)
+                NativeFanDurationMenu(value: $boost, values: NativeHardwareDisplayPolicies.boostDurations, label: durationLabel)
+                Button("Boost") { Task { await command(["command": "boost", "duration": .number(Double(boost))]) } }.disabled(!enabled)
+            }.padding(.vertical, 10).overlay(alignment: .top) { NativeRule() }.padding(.top, 8)
+            HStack(spacing: 8) {
+                Text("Hold for").font(Theme.ui(13, weight: .medium)).help(durationDescription)
+                Spacer(minLength: 0)
+                NativeFanDurationMenu(value: $duration, values: NativeHardwareDisplayPolicies.fanDurations, label: durationLabel)
+                Button("Set") { if let input = currentDurationCommand { Task { await command(input) } } }.disabled(!enabled || currentDurationCommand == nil)
+            }.padding(.vertical, 10).overlay(alignment: .top) { NativeRule() }
         }
     }
     private var sensors: some View {
@@ -322,14 +284,14 @@ struct NativeFansPage: View {
                                 .frame(width: 100, alignment: .trailing)
                         }.padding(.horizontal, 18).padding(.vertical, 17)
                     }
-                    if sensorRows.isEmpty { NativeEmptyState(title: "No matching sensors", detail: "Try another group or search term.") }
+                    if sensorRows.isEmpty { NativeEmptyState(title: "No match", detail: "") }
                 }
             }
         }
     }
     private var timeline: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) { Text("Cooling over time").font(Theme.ui(18, weight: .medium)).accessibilityAddTraits(.isHeader); Text("Recent detail. Long-term trends. Peaks preserved.").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
+            VStack(alignment: .leading, spacing: 5) { Text("Cooling over time").font(Theme.ui(18, weight: .medium)).accessibilityAddTraits(.isHeader);Text("").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
             HStack { NativeMenuSelect(title: "History range", selection: $range, options: [("30m", "30 minutes"), ("1h", "1 hour"), ("6h", "6 hours"), ("24h", "24 hours"), ("7d", "7 days"), ("30d", "30 days"), ("90d", "90 days"), ("1y", "1 year"), ("all", "All time"), ("custom", "Custom")], width: 125); T3Segmented(options: [("mean", "Average"), ("max", "Peak"), ("min", "Minimum")], selection: statistic) { statistic = $0 }; Spacer(); Button("Refresh") { Task { await loadHistory() } }; Button("Export CSV") { exportHistory() }.disabled(history["points"].array.isEmpty) }
             if range == "custom" { HStack { DatePicker("From", selection: $from, in: ...through, displayedComponents: .date); DatePicker("Through", selection: $through, in: from...Date(), displayedComponents: .date) } }
             if let historyError { NativeError(message: historyError) }
@@ -389,7 +351,7 @@ struct NativeFansPage: View {
     private var curveIntroduction: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Draw your comfort zone").font(Theme.ui(18, weight: .medium)).accessibilityAddTraits(.isHeader)
-            Text("Drag a point up for more cooling, or sideways to change when it starts. The curve follows the higher of the CPU die average and the hottest GPU sensor.").font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            Text("Follows the hotter of CPU average and hottest GPU sensor.").font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
         }
     }
     private var curveReadout: String {
@@ -597,17 +559,16 @@ private struct NativeFanProfileChoice: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                NativeIcon(icon, size: 16, strokeWidth: 1.65).foregroundStyle(active ? Theme.pairPalette[6] : Theme.muted)
+                NativeIcon(icon, size: 16, strokeWidth: 1.65).foregroundStyle(active ? Theme.accent : Theme.muted)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(Theme.ui(13, weight: .medium))
                     Text(detail).font(Theme.ui(10.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
                 if opensPage { NativeIcon("arrow-up-right", size: 14, strokeWidth: 1.65).foregroundStyle(Theme.muted) }
-                else if active { NativeIcon("check", size: 14, strokeWidth: 1.65).foregroundStyle(Theme.pairPalette[6]) }
+                else if active { NativeIcon("check", size: 14, strokeWidth: 1.65).foregroundStyle(Theme.accent) }
             }.padding(.horizontal, 10).padding(.vertical, 9).frame(maxWidth: .infinity, alignment: .leading)
-                .background(active ? Theme.pairPalette[6].opacity(0.06) : hovering ? Theme.subtle2 : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                .overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(active ? Theme.pairPalette[6].opacity(0.4) : .clear, lineWidth: 1) }
+                .background(active ? Theme.well : hovering ? Theme.subtle2 : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).pointingHand().onHover { hovering = $0 }.accessibilityAddTraits(active ? [.isSelected] : [])
     }

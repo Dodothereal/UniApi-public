@@ -86,17 +86,16 @@ struct NativeEnergyPage: View {
 
     var body: some View {
         GeometryReader { viewport in
-            NativePage(title: "Energy", subtitle: "Real-time power flow, subsystem rail telemetry, and historical consumption.", maxWidth: 1500, readiness: pageReadiness, showsHeader: false) {
-                energyHeader
+            NativePage(title: "Energy", maxWidth: 1500, readiness: pageReadiness, actions: { if state["supported"].bool { headerActions } }) {
                 if let statusReadError { statusError(statusReadError) }
                 if let error { NativeError(message: error) }
                 if !state["error"].string.isEmpty { statusError(state["error"].string) }
                 if state.isNull {
                     if error == nil && statusReadError == nil {
-                        ShimmerText(text: "Reading live power telemetry and electrical rails…").padding(.vertical, 40)
+                        ShimmerText(text: "Reading power").padding(.vertical, 40)
                     }
                 } else if !state["supported"].bool {
-                    NativeEmptyState(title: "Energy telemetry is available on macOS", detail: "The other UniApi apps work on this platform.", icon: "zap")
+                    NativeEmptyState(title: "No power telemetry on this Mac", detail: "", icon: "zap")
                 } else {
                     if contentWidth >= 700 {
                         HStack(spacing: 16) { tabRail; Spacer(minLength: 8); powerSourceBadge }
@@ -155,66 +154,16 @@ struct NativeEnergyPage: View {
 
     // MARK: - Header & Navigation
 
-    private var energyHeader: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 20) {
-                energyHeading.fixedSize()
-                Spacer(minLength: 0)
-                headerActions.fixedSize()
-            }
-            VStack(alignment: .leading, spacing: 12) {
-                energyHeading
-                headerActions.frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-    }
-
-    private var energyHeading: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Energy")
-                .font(Theme.ui(min(42, max(28, (contentWidth + 216 + 2 * density.pageMargin) * 0.038)), weight: .semibold))
-                .tracking(-1.6)
-                .accessibilityAddTraits(.isHeader)
-            Text("Real-time power flow, subsystem rail telemetry, and cumulative consumption.")
-                .font(Theme.ui(12.5))
-                .foregroundStyle(Theme.muted)
-        }
-    }
-
     private var headerActions: some View {
         HStack(spacing: 10) {
-            HStack(spacing: 7) {
-                NativeStatusDot(color: snapshot.isNull ? Theme.warnFg : Theme.okFg, pulse: !snapshot.isNull)
-                Text(snapshot.isNull ? "Waiting for readings" : "Live · 2s")
-                    .font(Theme.mono(11))
-                    .foregroundStyle(Theme.dim)
-            }
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(Theme.well, in: Capsule())
-
-            Button {
-                exportHistory()
-            } label: {
-                HStack(spacing: 6) {
-                    NativeIcon("download", size: 12, strokeWidth: 1.65)
-                    Text("Export CSV")
-                }
-            }
-            .buttonStyle(T3Button(.outline))
-            .disabled(history["points"].array.isEmpty)
-
-            Button {
+            if snapshot.isNull, !state.isNull { NativeStatusText(text: "No readings", color: Theme.warnFg) }
+            T3IconButton(icon: "download", help: "Export CSV") { exportHistory() }.disabled(history["points"].array.isEmpty)
+            T3IconButton(icon: "refresh-cw", help: "Refresh") {
                 Task {
                     await reload(force: true)
                     if ["flow", "history", "settings"].contains(tab) { await loadHistory() }
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    NativeIcon("refresh-cw", size: 12, strokeWidth: 1.65)
-                    Text("Refresh")
-                }
             }
-            .buttonStyle(T3Button(.outline))
         }
     }
 
@@ -359,31 +308,15 @@ struct NativeEnergyPage: View {
         return Card(padding: 22) {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Text("Real-Time Power Pipeline")
-                                .font(Theme.ui(15, weight: .semibold))
-                                .foregroundStyle(Theme.ink)
-                            Text(batteryPresent ? "Laptop AC / Battery Architecture" : "Desktop Direct AC Architecture")
-                                .font(Theme.mono(10, weight: .medium))
-                                .foregroundStyle(Theme.dim)
-                                .padding(.horizontal, 7).padding(.vertical, 2)
-                                .background(Theme.well, in: Capsule())
-                        }
-                        Text(batteryPresent
-                             ? "Live wattage from AC wall estimate through the DC-in regulator into Mac system load and battery pack."
-                             : "Live wattage from AC wall input through the internal power supply into the 12V DC bus and Apple Silicon rails.")
-                            .font(Theme.ui(12))
-                            .foregroundStyle(Theme.muted)
-                    }
+                    Text(batteryPresent ? "Wall to battery" : "Wall to silicon").font(Theme.ui(13, weight: .semibold)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
                     Spacer(minLength: 12)
                     HStack(spacing: 8) {
                         if let eff {
-                            metricPill(label: "PSU Efficiency", value: String(format: "%.1f%%", eff), color: eff >= 85 ? Theme.okFg : Theme.warnFg)
+                            metricPill(label: "Efficiency", value: String(format: "%.1f%%", eff), color: eff >= 85 ? Theme.okFg : Theme.warnFg)
                         }
                         if let budgetW, budgetW > 0 {
                             let pct = min(100, max(0, ((sysInW ?? 0) / budgetW) * 100))
-                            metricPill(label: "Power Headroom", value: String(format: "%.0f / %.0f W (%.0f%%)", sysInW ?? 0, budgetW, pct), color: Theme.accent)
+                            metricPill(label: "Headroom", value: String(format: "%.0f / %.0f W (%.0f%%)", sysInW ?? 0, budgetW, pct), color: Theme.accent)
                         }
                     }
                 }
@@ -451,9 +384,8 @@ struct NativeEnergyPage: View {
 
     private func metricPill(label: String, value: String, color: Color) -> some View {
         HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(label).font(Theme.ui(11)).foregroundStyle(Theme.muted)
-            Text(value).font(Theme.mono(11, weight: .semibold)).foregroundStyle(Theme.ink)
+            Text(label).font(Theme.ui(12)).foregroundStyle(Theme.muted)
+            Text(value).font(Theme.num(12)).foregroundStyle(color == Theme.warnFg ? color : Theme.ink)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
         .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
@@ -462,12 +394,10 @@ struct NativeEnergyPage: View {
     private func pipelineStageCard(step: String, icon: String, title: String, watts: String, primaryMeta: String, secondaryMeta: String, accentColor: Color, fraction: Double?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Text(step).font(Theme.mono(9.5, weight: .semibold)).foregroundStyle(accentColor)
-                Spacer(minLength: 4)
-                NativeIcon(icon, size: 13, strokeWidth: 1.7).foregroundStyle(accentColor)
+                NativeIcon(icon, size: 13, strokeWidth: 1.7).foregroundStyle(Theme.muted)
+                Text(title).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
             }
-            Text(title).font(Theme.ui(12.5, weight: .medium)).foregroundStyle(Theme.dim).lineLimit(1)
-            NativeNumberText(text: watts, font: Theme.ui(28, weight: .semibold), color: Theme.ink, isolateLayout: true)
+            NativeNumberText(text: watts, font: Theme.display(34), color: Theme.ink, isolateLayout: true)
             if let fraction {
                 CapsuleBar(fraction: min(1, max(0.03, fraction)), color: accentColor)
             }
@@ -476,10 +406,9 @@ struct NativeEnergyPage: View {
                 Text(secondaryMeta).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1)
             }
         }
-        .padding(16)
+        .padding(.leading, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-        .overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, lineWidth: 1) }
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.border).frame(width: 1) }
     }
 
     private var energySummaryStrip: some View {
@@ -540,19 +469,11 @@ struct NativeEnergyPage: View {
         Card(padding: 16) {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
-                    Text(eyebrow)
-                        .font(Theme.mono(9.5, weight: .semibold))
-                        .foregroundStyle(Theme.muted)
-                        .lineLimit(1)
+                    Text(title).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
                     Spacer(minLength: 4)
-                    Text(badge)
-                        .font(Theme.mono(10, weight: .medium))
-                        .foregroundStyle(Theme.dim)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+                    Text(badge).font(Theme.num(11.5, weight: .regular)).foregroundStyle(Theme.dim).lineLimit(1)
                 }
-                Text(title).font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim).lineLimit(1)
-                NativeNumberText(text: value, font: Theme.ui(22, weight: .semibold), isolateLayout: true)
+                NativeNumberText(text: value, font: Theme.display(28), isolateLayout: true)
                 Text(subtitle).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1)
             }
         }
@@ -565,12 +486,7 @@ struct NativeEnergyPage: View {
         return Card(padding: 20) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("AppleSMC Subsystem & Regulator Telemetry")
-                            .font(Theme.ui(14, weight: .semibold))
-                        Text("Live power draw across SoC voltage regulators, memory PMIC, core clusters, and I/O rails")
-                            .font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                    }
+                    Text("Rails").font(Theme.ui(13, weight: .semibold)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
                     Spacer()
                     Button { tab = "sensors" } label: {
                         HStack(spacing: 4) {
@@ -618,12 +534,7 @@ struct NativeEnergyPage: View {
         return Card(padding: 20) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Cumulative Energy Ledger")
-                            .font(Theme.ui(14, weight: .semibold))
-                        Text("Integrated Wh and cost across \(rangeDisplayName.lowercased()), hardware boot, and SQLite rollups")
-                            .font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                    }
+                    Text("Totals").font(Theme.ui(13, weight: .semibold)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
                     Spacer()
                 }
                 VStack(spacing: 9) {
@@ -672,16 +583,11 @@ struct NativeEnergyPage: View {
         Card(padding: 22) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Power Draw Timeline (\(rangeDisplayName))")
-                            .font(Theme.ui(14, weight: .semibold))
-                        Text("System load, wall power and DC-in telemetry · \(history["points"].array.count) buckets")
-                            .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                    }
+                    Text(rangeDisplayName).font(Theme.ui(13, weight: .semibold)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
                     Spacer(minLength: 8)
                     Button { tab = "history" } label: {
                         HStack(spacing: 6) {
-                            Text("Inspect bucket table & Wh chart")
+                            Text("History")
                             NativeIcon("arrow-up-right", size: 12, strokeWidth: 1.65)
                         }
                     }.buttonStyle(T3Button(.ghost))
@@ -737,12 +643,7 @@ struct NativeEnergyPage: View {
         return Card(padding: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Recorded History Buckets")
-                            .font(Theme.ui(14, weight: .semibold))
-                        Text("Showing \(recentPoints.count) most recent time buckets in \(rangeDisplayName.lowercased()). Export CSV for full raw & sensor series.")
-                            .font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                    }
+                    Text("Latest \(recentPoints.count) buckets").font(Theme.ui(13, weight: .semibold)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
                     Spacer()
                     Button {
                         exportHistory()
@@ -773,7 +674,7 @@ struct NativeEnergyPage: View {
                 .background(Theme.well)
 
                 if recentPoints.isEmpty {
-                    NativeEmptyState(title: "No buckets recorded in this range yet", detail: "Live power samples are persisted every 10 seconds and rolled up automatically.")
+                    NativeEmptyState(title: "No history in this range", detail: "")
                         .padding(.vertical, 20)
                 } else {
                     ForEach(Array(recentPoints.enumerated()), id: \.offset) { _, pt in
@@ -880,17 +781,11 @@ struct NativeEnergyPage: View {
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Electrical Rails & AppleSMC Channels")
-                        .font(Theme.ui(18, weight: .semibold))
-                        .accessibilityAddTraits(.isHeader)
-                    Text("\(allSensors.count) live hardware channels (\(powerCount) Power W · \(voltCount) Voltage V · \(currCount) Current A)")
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                }
-                Spacer()
+                Text("\(allSensors.count) channels").font(Theme.ui(13, weight: .semibold)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                    Spacer()
             }
             HStack(spacing: 10) {
-                T3Field(placeholder: "Filter by SMC key (PMVR, PSTR, VD0R) or rail description…", text: $query, mono: true, leadingIcon: "search")
+                T3Field(placeholder: "Filter", text: $query, mono: true, leadingIcon: "search")
                 NativeMenuSelect(
                     title: "Sensor category",
                     selection: $group,
@@ -904,7 +799,7 @@ struct NativeEnergyPage: View {
                         Color.clear.frame(width: 22, height: 1)
                         Text("Channel / Description").frame(maxWidth: .infinity, alignment: .leading)
                         Text("Category").frame(width: 130, alignment: .leading)
-                        Text("Live Reading").frame(width: 96, alignment: .trailing)
+                        Text("Now").frame(width: 96, alignment: .trailing)
                         Text("Mean").frame(width: 90, alignment: .trailing)
                         Text("Peak").frame(width: 90, alignment: .trailing)
                     }
@@ -968,7 +863,7 @@ struct NativeEnergyPage: View {
                         .padding(.horizontal, 18).padding(.vertical, 11)
                     }
                     if sensorRows.isEmpty {
-                        NativeEmptyState(title: "No matching electrical sensors", detail: "Try another category or search term.")
+                        NativeEmptyState(title: "No match", detail: "")
                             .padding(.vertical, 20)
                     }
                 }
@@ -985,15 +880,6 @@ struct NativeEnergyPage: View {
 
     private var preferencesTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Energy Preferences")
-                    .font(Theme.ui(20, weight: .semibold))
-                    .accessibilityAddTraits(.isHeader)
-                Text("Configure sidebar live watt badge, electricity tariff for cost calculations, and SQLite retention.")
-                    .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            }
-            .padding(.bottom, 12)
-
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 50, alignment: .topLeading), count: contentWidth >= 700 ? 2 : 1), alignment: .leading, spacing: 0) {
                 settingRow("Sidebar badge metric", "Choose which live watt reading is shown next to Energy in the sidebar.") {
                     NativeMenuSelect(
