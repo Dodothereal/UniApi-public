@@ -205,6 +205,20 @@ func nativeStatsHarnessColor(_ source: String) -> Color {
     let slots = ["claude": 5, "codex": 0, "antigravity": 1, "zcode": 4, "opencode": 3, "dsh": 6]
     return slots[source].map { Theme.pairPalette[$0] } ?? Theme.pairColor(source)
 }
+/// Each key keeps its stable pair hue; when two keys in one plot land on the
+/// same hue, the later one moves to the next free slot so lines stay distinct.
+func nativeStatsDistinctColors(_ keys: [String]) -> [String: Color] {
+    let palette = Theme.pairPalette
+    var taken = Set<Int>(), result: [String: Color] = [:]
+    for key in keys {
+        let home = palette.firstIndex(of: Theme.pairColor(key)) ?? 0
+        var slot = home
+        if taken.count < palette.count { while taken.contains(slot) { slot = (slot + 1) % palette.count } }
+        taken.insert(slot)
+        result[key] = palette[slot]
+    }
+    return result
+}
 private func nativeStatsRate(_ value: Double) -> String { String(format: "%.1f", value) }
 
 struct NativeStatsDaily: View {
@@ -458,12 +472,12 @@ struct NativeStatsThroughput: View {
                 VStack(alignment: .leading, spacing: 24) {
                     ReadoutStrip(minimum: 180) {
                         NativeStatsReadout(label: metric.title, value: NativeStatsThroughputPresentation.rate(summary), unit: "tok/s",
-                                           detail: metric == .streaming ? "Output over matched streaming duration" : "Includes request latency; may be estimated",
+                                           detail: metric == .streaming ? "" : "May be estimated from transcript boundaries",
                                            format: nativeStatsRate)
-                        NativeStatsReadout(label: metric == .streaming ? "Streaming clock coverage" : "Response timing coverage",
+                        NativeStatsReadout(label: metric == .streaming ? "Clock coverage" : "Timing coverage",
                                            value: summary["timedResponses"].isNull ? nil : summary["timedResponses"].double,
                                            unit: "responses", detail: metric.coverage(summary))
-                        NativeStatsReadout(label: metric == .streaming ? "Output with streaming timing" : "Output with response timing",
+                        NativeStatsReadout(label: "Timed output",
                                            value: summary["outputTokens"].isNull ? nil : summary["outputTokens"].double, unit: "tokens",
                                            detail: metric == .streaming ? "Only output matched to streaming clocks" : "\(summary["estimatedResponses"].int) responses timed from transcript boundaries",
                                            format: nativeStatsCount)
@@ -532,7 +546,7 @@ struct NativeStatsThroughput: View {
                             Chart(trend.plot.points) { p in
                                 LineMark(x: .value("Day", p.date), y: .value(metric.title, p.value), series: .value("Series", p.series))
                                     .foregroundStyle(trend.colors[p.series] ?? Theme.muted)
-                                    .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .round)).interpolationMethod(.monotone)
+                                    .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .miter)).interpolationMethod(.linear)
                                 PointMark(x: .value("Day", p.date), y: .value(metric.title, p.value))
                                     .foregroundStyle(trend.colors[p.series] ?? Theme.muted).symbol(.square).symbolSize(14)
                             }
@@ -576,6 +590,7 @@ private struct NativeStatsBenchmarkProjection {
     let plot: NativeStatsPlotProjection
     let keys: [String]
     let labels: [String: String]
+    let colors: [String: Color]
     let isolation: String?
     /// The latency ruler: a padded positive domain with its graduations.
     let domain: ClosedRange<Double>
@@ -604,16 +619,17 @@ struct NativeStatsBenchmark: View {
         for point in data["trend"].array where labels[point["key"].string] == nil && !point["label"].string.isEmpty {
             labels[point["key"].string] = point["label"].string
         }
+        let colors = nativeStatsDistinctColors(keys)
         let plot = NativeStatsPlotProjection(points: points, label: { labels[$0.series] ?? $0.series },
-            value: { String(format: "%.0f ms", $0) }, color: { Theme.pairColor($0.series) })
+            value: { String(format: "%.0f ms", $0) }, color: { colors[$0.series] ?? Theme.pairColor($0.series) })
         let values = points.map(\.value).filter { $0.isFinite && (!logarithmic || $0 > 0) }
         guard logarithmic, let low = values.min(), let high = values.max() else {
-            return NativeStatsBenchmarkProjection(plot: plot, keys: keys, labels: labels, isolation: isolation,
+            return NativeStatsBenchmarkProjection(plot: plot, keys: keys, labels: labels, colors: colors, isolation: isolation,
                                                   domain: plot.yDomain, majors: plot.yMajors, minors: plot.yMinors)
         }
         let domain = (low / 1.25)...(high * 1.25)
         let ruler = NativeChartMath.logTicks(domain)
-        return NativeStatsBenchmarkProjection(plot: plot, keys: keys, labels: labels, isolation: isolation,
+        return NativeStatsBenchmarkProjection(plot: plot, keys: keys, labels: labels, colors: colors, isolation: isolation,
                                               domain: domain, majors: ruler.majors, minors: ruler.minors)
     }
     private func milliseconds(_ value: Double) -> String { NativeNumberFormat.compact(value) + " ms" }
@@ -629,8 +645,8 @@ struct NativeStatsBenchmark: View {
     }
 
     private func trendBand(_ chart: NativeStatsBenchmarkProjection) -> some View {
-        let legend = chart.keys.map { NativeLegendEntry(id: $0, label: chart.labels[$0] ?? $0, color: Theme.pairColor($0)) }
-        let palette = chart.keys.map { Theme.pairColor($0) }
+        let palette = chart.keys.map { chart.colors[$0] ?? Theme.pairColor($0) }
+        let legend = zip(chart.keys, palette).map { NativeLegendEntry(id: $0, label: chart.labels[$0] ?? $0, color: $1) }
         return NativeStatsBand(title: detail && data["spend"]["calls"].int == 0 ? "Benchmarks for this model" : "First token",
                     hint: "Median successful latency per provider, model and run; a rising line is a provider getting slower") {
             Stops(options: [(true, "Log"), (false, "Linear")], selection: logarithmic) { logarithmic = $0 }
@@ -674,7 +690,7 @@ private struct NativeStatsBenchmarkSpend: View {
                     NativeStatsReadout(label: "Benchmark tokens", value: tokens, unit: "tokens",
                                        detail: "Input \(nativeStatsCount(spend["input"].double)) · output \(nativeStatsCount(spend["output"].double)) · reasoning \(nativeStatsCount(spend["reasoning"].double)) · cached \(nativeStatsCount(spend["cached"].double))",
                                        format: nativeStatsCount)
-                    NativeStatsReadout(label: "Calls", value: calls, detail: "\(spend["runs"].int) runs · \(spend["pairs"].array.count) targets",
+                    NativeStatsReadout(label: "Calls", value: calls, detail: "\(spend["runs"].int) \(spend["runs"].int == 1 ? "run" : "runs") · \(spend["pairs"].array.count) \(spend["pairs"].array.count == 1 ? "target" : "targets")",
                                        format: nativeStatsCount)
                     NativeStatsReadout(label: "Estimated coverage", value: coverage, unit: "%",
                                        detail: "Calls whose token counts are estimates", format: nativeStatsRate)

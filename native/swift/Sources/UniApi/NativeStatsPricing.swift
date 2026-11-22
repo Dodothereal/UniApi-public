@@ -22,6 +22,7 @@ struct NativeStatsPricing: View {
         }
         return "Based on current API rates"
     }
+    private func width(_ field: String) -> CGFloat { field.hasPrefix("cache") ? 96 : 70 }
     var body: some View {
         NativeStatsDisclosure(title: "Rates and assumptions", summary: summary,
                               openLabel: "View model prices and unknown costs", closeLabel: "Hide model prices") {
@@ -32,7 +33,7 @@ struct NativeStatsPricing: View {
                     LedgerHead {
                         MicroLabel("Model").frame(maxWidth: .infinity, alignment: .leading)
                         if !compact {
-                            ForEach(fields, id: \.0) { field in MicroLabel(field.1).frame(width: 78, alignment: .trailing) }
+                            ForEach(fields, id: \.0) { field in MicroLabel(field.1).fixedSize().frame(width: width(field.0), alignment: .trailing) }
                         }
                         MicroLabel("Estimate").frame(width: 84, alignment: .trailing)
                     }
@@ -65,7 +66,7 @@ private struct NativeStatsPriceRow: View {
                         let value = row["rates"][field.0]
                         Text(value.isNull ? "--" : rate(value)).font(Theme.mono(11.5)).monospacedDigit()
                             .foregroundStyle(value.isNull ? Theme.faint : Theme.dim)
-                            .frame(width: 78, alignment: .trailing)
+                            .frame(width: field.0.hasPrefix("cache") ? 96 : 70, alignment: .trailing)
                     }
                 }
                 Text(money(row["usd"])).font(Theme.mono(12, weight: .medium)).monospacedDigit()
@@ -93,7 +94,7 @@ private struct NativeStatsPriceRow: View {
                         Text("Official pricing")
                         NativeIcon("external-link", size: 11, strokeWidth: 1.75)
                     }.font(Theme.ui(11.5)).foregroundStyle(Theme.link)
-                }.pointingHand()
+                }.buttonStyle(.plain).pointingHand().padding(.top, 1)
             }
         }
         .padding(.vertical, 10)

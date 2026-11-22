@@ -122,6 +122,16 @@ enum NativeChartMath {
                 if digit == 1 || (!wide && (digit == 2 || digit == 5)) { majors.append(value) } else { minors.append(value) }
             }
         }
+        // A span inside one decade leaves too few labelled graduations: label 3 and 7 as well, or fall back to an even ruler.
+        if majors.count < 3 {
+            let promoted = minors.filter { value in
+                let digit = (value / pow(10, floor(log10(value)))).rounded()
+                return digit == 3 || digit == 7
+            }
+            majors = (majors + promoted).sorted()
+            minors.removeAll(where: promoted.contains)
+        }
+        if majors.count < 3 { majors = ticks(domain).filter(domain.contains); minors = [] }
         return (majors, minors)
     }
 

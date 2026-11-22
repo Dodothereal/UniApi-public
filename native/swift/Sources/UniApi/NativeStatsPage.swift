@@ -321,6 +321,9 @@ private struct NativeStatsContents: View {
     @Environment(\.nativeInterfaceDensity) private var density
     private var d: JSONValue { payload["derived"] }
     private var t: JSONValue { d["summary"]["totals"] }
+    private var vacant: Bool {
+        nativeStatsGrand(t) <= 0 && t["messages"].double <= 0 && d["days"].array.isEmpty && d["models"].array.isEmpty && d["projects"].array.isEmpty
+    }
     private var showsBenchmarks: Bool {
         (detail || payload["source"].string == "all") && (benchmark["spend"]["calls"].int > 0 || !benchmark["trend"].array.isEmpty)
     }
@@ -330,31 +333,43 @@ private struct NativeStatsContents: View {
                 Notice(text: warning.string, tone: .warn).accessibilityLabel("Error: " + warning.string)
             }
             NativeStatsHero(totals: t, summary: d["summary"], lifetime: d["isLifetime"].bool, progress: progress)
-            readings
-            if detail { perResponse; NativeStatsPricing(cost: d["cost"], compact: compact) }
-            if d["days"].array.isEmpty {
-                NativeStatsBand("Per day") {
-                    Blank(icon: "chart-bar", title: "No dated history in this range",
-                          detail: d["isLifetime"].bool ? "Lifetime totals are available, but earlier transcripts are no longer on disk." : "Try another range or source.")
-                }
-            } else {
-                NativeStatsDaily(data: d, colors: payload["colors"])
-                if detail { NativeStatsCumulative(days: d["days"].array) }
-            }
-            if !detail {
-                NativeStatsModelBoard(models: d["models"].array, lifetime: d["isLifetime"].bool, colors: payload["colors"],
-                                      cost: d["cost"], compact: compact, select: selectModel)
-            }
-            ColumnFlow(minimum: 340, spacing: 32, rowSpacing: density.pageGap, maxColumns: 2) {
+            if vacant {
+                // Nothing in this scope: one statement, then the apps being watched,
+                // instead of a column of empty sections.
+                Blank(icon: "chart-bar", title: detail ? "This model has no usage here" : (payload["source"].string == "all" ? "Waiting for a first response" : "This app has no usage here"),
+                      detail: payload["source"].string == "all" && !detail
+                          ? "Responses from the coding apps below are counted as soon as one is on disk. A wider range may hold older usage."
+                          : "Try a wider range or another app.")
                 if payload["source"].string == "all" {
                     NativeStatsSourceBoard(sources: payload["sources"], throughput: d["throughput"], detail: detail, select: selectSource)
                 }
-                NativeStatsProjectBoard(rows: d["projects"].array, all: detail)
-                NativeStatsHeat(grid: d["heat"].array)
-                NativeStatsDrive(summary: detail ? payload["datedSummary"] : d["summary"])
+            } else {
+                readings
+                if detail { perResponse; NativeStatsPricing(cost: d["cost"], compact: compact) }
+                if d["days"].array.isEmpty {
+                    NativeStatsBand("Per day") {
+                        Blank(icon: "chart-bar", title: "No dated history in this range",
+                              detail: d["isLifetime"].bool ? "Lifetime totals are available, but earlier transcripts are no longer on disk." : "Try another range or source.")
+                    }
+                } else {
+                    NativeStatsDaily(data: d, colors: payload["colors"])
+                    if detail { NativeStatsCumulative(days: d["days"].array) }
+                }
+                if !detail {
+                    NativeStatsModelBoard(models: d["models"].array, lifetime: d["isLifetime"].bool, colors: payload["colors"],
+                                          cost: d["cost"], compact: compact, select: selectModel)
+                }
+                ColumnFlow(minimum: 340, spacing: 32, rowSpacing: density.pageGap, maxColumns: 2) {
+                    if payload["source"].string == "all" {
+                        NativeStatsSourceBoard(sources: payload["sources"], throughput: d["throughput"], detail: detail, select: selectSource)
+                    }
+                    NativeStatsProjectBoard(rows: d["projects"].array, all: detail)
+                    NativeStatsHeat(grid: d["heat"].array)
+                    NativeStatsDrive(summary: detail ? payload["datedSummary"] : d["summary"])
+                }
+                NativeStatsThroughput(data: d["throughput"], colors: payload["colors"], compact: compact, modelDetail: detail,
+                                      selectModel: detail ? nil : selectModel)
             }
-            NativeStatsThroughput(data: d["throughput"], colors: payload["colors"], compact: compact, modelDetail: detail,
-                                  selectModel: detail ? nil : selectModel)
             // Detail uses an exact model/range-filtered benchmark payload.
             // The unfiltered overview ledger belongs only to All apps.
             if showsBenchmarks { NativeStatsBenchmark(data: benchmark, detail: detail, compact: compact) }
@@ -381,9 +396,16 @@ private struct NativeStatsContents: View {
         }
         return cost["unpricedTokens"].double > 0 ? "Prices missing for this usage" : "No usage recorded yet"
     }
-    @ViewBuilder private var readings: some View {
+    // Four across, or two and two: never three with one left over.
+    private var readings: some View {
+        ViewThatFits(in: .horizontal) {
+            readings(columns: 4)
+            readings(columns: 2)
+        }
+    }
+    private func readings(columns: Int) -> some View {
         let summary = d["summary"]
-        ReadoutStrip(minimum: 170) {
+        return ColumnFlow(minimum: 170, spacing: 24, rowSpacing: 22, maxColumns: columns) {
             costReading
             if detail {
                 NativeStatsReadout(label: "Recorded responses", value: payload["coverage"]["datedTotals"]["messages"].double,
@@ -466,6 +488,13 @@ private struct NativeStatsHero: View {
             .init(id: "cacheRead", value: totals["cacheRead"].double, color: NativeStatsKind.cacheRead.color),
         ]
     }
+    private func kinds(columns: Int) -> some View {
+        ColumnFlow(minimum: 128, spacing: 24, rowSpacing: 14, maxColumns: columns) {
+            ForEach(NativeStatsKind.allCases, id: \.self) { kind in
+                NativeStatsKindReading(kind: kind, totals: totals)
+            }
+        }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
@@ -490,10 +519,10 @@ private struct NativeStatsHero: View {
                     .padding(.top, 4)
             }
             NativeStatsTape(parts: parts).padding(.top, 22)
-            ColumnFlow(minimum: 128, spacing: 24, rowSpacing: 14, maxColumns: 5) {
-                ForEach(NativeStatsKind.allCases, id: \.self) { kind in
-                    NativeStatsKindReading(kind: kind, totals: totals)
-                }
+            // Five across, or three and two: never four with one left over.
+            ViewThatFits(in: .horizontal) {
+                kinds(columns: 5)
+                kinds(columns: 3)
             }
             .padding(.top, 14)
         }
@@ -511,10 +540,12 @@ private struct NativeStatsKindReading: View {
                 NativeSeriesTick(color: kind.color, height: 9)
                 MicroLabel(kind.label)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(nativeStatsCount(value)).font(Theme.readout(17)).monospacedDigit().foregroundStyle(value > 0 ? Theme.ink : Theme.faint)
-                    .nativeStatsNumberTransition(value)
-                Text(share).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1)
+            let count = Text(nativeStatsCount(value)).font(Theme.readout(17)).monospacedDigit().foregroundStyle(value > 0 ? Theme.ink : Theme.faint)
+                .lineLimit(1).fixedSize().nativeStatsNumberTransition(value)
+            let part = Text(share).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) { count; part }
+                VStack(alignment: .leading, spacing: 2) { count; part }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
