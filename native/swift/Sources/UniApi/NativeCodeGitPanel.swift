@@ -18,36 +18,36 @@ struct NativeCodeGitPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 NativeIcon("git-branch", size: 14).foregroundStyle(Theme.muted)
-                Text(git.isNull ? "Reading Git status…" : git["git"].bool ? git["branch"].string : "Not a Git repository")
-                    .font(Theme.ui(12.5, weight: .medium)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                Text(git.isNull ? "Loading…" : git["git"].bool ? git["branch"].string : "Not a Git repository")
+                    .font(git["git"].bool ? Theme.mono(Theme.textXs, weight: .medium) : Theme.ui(Theme.textXs, weight: .medium)).lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
                     .help(git["branch"].string)
                 if git["git"].bool {
-                    Text("\(git["files"].array.count) changed").font(Theme.ui(11)).foregroundStyle(Theme.muted).fixedSize()
+                    Text("\(git["files"].array.count)").font(Theme.num(11, weight: .medium)).foregroundStyle(git["files"].array.isEmpty ? Theme.faint : Theme.ink).fixedSize().help("\(git["files"].array.count) changed files")
                 }
-                T3IconButton(system: "rotate-cw", help: "Refresh Git status", size: 13) { Task { await refresh() } }
+                T3IconButton(system: "refresh-cw", help: "Refresh", size: 13) { Task { await refresh() } }
                 T3IconButton(system: "x", help: "Close changes", size: 14, action: close)
-            }.padding(.horizontal, 14).frame(height: 48)
+            }.padding(.leading, 16).padding(.trailing, 10).frame(height: Theme.barHeight)
             Rectangle().fill(Theme.border).frame(height: 1).accessibilityHidden(true)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if !error.isEmpty { NativeError(message: error).padding(12) }
                     if !git["diffStat"].string.isEmpty {
-                        DisclosureGroup("Diff summary") {
+                        NativeDisclosure("Summary", tone: Theme.muted) {
                             ScrollView(.horizontal) {
                                 Text(git["diffStat"].string).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).textSelection(.enabled)
                                     .fixedSize(horizontal: true, vertical: true).padding(.vertical, 6)
                             }
-                        }.font(Theme.ui(11)).foregroundStyle(Theme.muted).padding(.horizontal, 14).padding(.vertical, 6)
+                        }.padding(.horizontal, 16).padding(.vertical, 6)
                     }
                     if git["git"].bool && git["files"].array.isEmpty {
-                        Text("Working tree clean").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                            .frame(maxWidth: .infinity).padding(.horizontal, 12).padding(.vertical, 32)
+                        Text("No changes").font(Theme.ui(12)).foregroundStyle(Theme.faint)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 14)
                     }
                     LazyVStack(spacing: 0) {
                         ForEach(git["files"].array, id: \.self) { file in
                             NativeGitFileRow(file: file, selected: selection.file == file["path"].string) { Task { await open(file["path"].string) } }
                         }
-                    }.padding(.horizontal, 6)
+                    }
                     if selection.file != nil {
                         Rectangle().fill(Theme.border).frame(height: 1).padding(.top, 4).accessibilityHidden(true)
                         ScrollView(.horizontal) {
@@ -58,7 +58,7 @@ struct NativeCodeGitPanel: View {
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.frame(minWidth: 250, idealWidth: 380, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Theme.bg).foregroundStyle(Theme.ink)
+            .background(Theme.sunken.opacity(0.55)).background(Theme.bg).foregroundStyle(Theme.ink)
             .nativePageTask(id: Load(context: context, revision: revision)) { await refresh() }
             .nativePageActivity(reads: reads)
     }
@@ -117,8 +117,9 @@ private struct NativeGitFileRow: View {
                     .frame(width: 20, alignment: .leading)
                 Text(file["path"].string).foregroundStyle(Theme.dim).lineLimit(1).truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }.font(Theme.mono(11.5)).padding(.horizontal, 8).padding(.vertical, 6).contentShape(Rectangle())
-                .background(selected ? Theme.subtle2 : hovering ? Theme.subtle : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
+            }.font(Theme.mono(11.5)).padding(.horizontal, 16).padding(.vertical, 7).contentShape(Rectangle())
+                .background(selected ? Theme.raised : hovering ? Theme.subtle : .clear)
+                .overlay(alignment: .leading) { Theme.accent.frame(width: 2).opacity(selected ? 1 : 0) }
         }.buttonStyle(.plain).pointingHand().onHover { hovering = $0 }
             .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
             .help(file["path"].string).accessibilityAddTraits(selected ? [.isSelected] : [])

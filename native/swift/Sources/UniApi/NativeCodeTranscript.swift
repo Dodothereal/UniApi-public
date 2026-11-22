@@ -84,7 +84,7 @@ struct NativeCodeLiveView: View {
     private var results: [String: JSONValue] { var output: [String: JSONValue] = [:]; for event in events where event["type"].string == "tool_result" { for block in event["payload"]["content"].array { output[block["tool_use_id"].string] = block } }; return output }
     var body: some View { VStack(alignment: .leading, spacing: 8) { ForEach(live.remaining(events: events)) { block in
         if block.type == "text" { NativeMarkdown(text: block.text) }
-        else if block.type == "thinking" { DisclosureGroup(block.done ? "Thinking" : "Thinking…") { NativeMarkdown(text: block.text).foregroundStyle(Theme.muted) }.font(Theme.ui(12)); if !block.done { ShimmerText(text: "Thinking") } }
+        else if block.type == "thinking" { NativeDisclosure(block.done ? "Thinking" : "Thinking…", tone: Theme.muted) { NativeMarkdown(text: block.text).foregroundStyle(Theme.muted) }.font(Theme.ui(12)); if !block.done { ShimmerText(text: "Thinking") } }
         else if block.type == "tool_use" { NativeCodeToolView(block: block.tool, result: results[block.toolID], pending: !block.done, nested: 0) }
     } } }
 }
