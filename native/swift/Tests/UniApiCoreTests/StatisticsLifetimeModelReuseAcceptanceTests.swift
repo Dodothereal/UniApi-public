@@ -120,7 +120,7 @@ final class StatisticsLifetimeModelReuseAcceptanceTests: XCTestCase {
             totals[item.rawValue] = detail.flatMap { $0["derived"]["events"].int > 0 || $0["coverage"]["lifetime"].bool ? $0["derived"]["summary"]["totals"] : nil } ?? .null
         }
         value["loaded"] = true; value["scanning"] = false; value["model"] = .string(model); value["source"] = .string(source); value["range"] = .number(Double(range))
-        value["colors"] = .object([cacheOnly: "#3b82f6", shared: "#f97316"]); value["sources"] = .object(totals); value["bench"] = bench(model)
+        value["colors"] = .object([cacheOnly: "#e2512e", shared: "#2e8a86"]); value["sources"] = .object(totals); value["bench"] = bench(model)
         return value
     }
     @discardableResult
