@@ -1,34 +1,58 @@
 # Native interface conventions
 
-The native interface uses the shared components in `NativeComponents.swift`,
-the `Theme` tokens and `T3Button` styles in `LegacyTheme.swift`, and the bundled
-Lucide icon renderer in `NativeIcon.swift`. Use these components for typography,
-color, button sizing, hover states, radii and borders. Theme overrides and the
-Light/Dark variants are described in [Settings](SETTINGS.md).
+The native interface is built from the `Theme` tokens and `T3Button` styles in
+`LegacyTheme.swift`, the page furniture in `NativeComponents.swift`, the layout
+vocabulary in `NativeDesign.swift` and the bundled Lucide icon renderer in
+`NativeIcon.swift`. Theme overrides and the Light/Dark variants are described
+in [Settings](SETTINGS.md).
 
-Normal pages use `NativePage` and its finite scrolling viewport. Keep header
-actions in that page's normal flow. Workbenches can use their existing frame
-when a transcript, project rail or inspector needs the available height. Review
-the complete page at wide and narrow sizes; a small isolated component can hide
-container sizing problems.
+## Principles
+
+- **Canvas, not cards.** Content sits directly on the page. Structure comes
+  from one alignment grid, hairline rules (`NativeRule`) and type scale. Filled
+  surfaces are for things you type into and things that float.
+- **Numbers are the interface.** Measured values use `Theme.display` (condensed,
+  tabular digits) through `NativeFigure` or `NativeNumberText`. Monospace is for
+  literal IDs, paths, keys and model identifiers only.
+- **Warm graphite and paper.** One vermilion accent marks selection, primary
+  focus and live data. Success, warning and failure colours describe status and
+  nothing else.
+- **No filler text.** Pages have no subtitle. Do not add captions that restate
+  a heading, "Live" pills, decorative eyebrows or instructions for self-evident
+  controls. Put a necessary explanation in `.help` or behind a disclosure.
+- **Absence collapses.** Zero-value items are left out or summarised in one
+  line; they are not drawn as empty tiles.
+
+## Page structure
+
+Normal pages use `NativePage`: a centered column under one pinned
+`NativePageBar` holding the title and the page's actions. Reload, export and
+similar secondary actions are `T3IconButton`s with a `.help` label; the bar has
+at most one filled primary button. Workbenches (Code) can use their own frame
+when a transcript, project rail or inspector needs the available height.
+
+Inside a page use:
+
+- `NativeSection` for a titled group with a hairline and optional trailing
+  controls.
+- `NativeLedgerRow` for lists of things. Rows are separated by rules, not
+  boxed; the selected row carries an accent rail.
+- `NativeFigure` / `NativeFigureRow` for headline readings.
+- `NativeGutterGroup` for settings: the group name sits in a left gutter and
+  every control aligns in one right column.
+- `NativeStatusText` for a status that is not normal. Normal states are silent.
+
+The shell provides Command-K (jump to any page, including pages hidden from the
+sidebar) and Command-B (sidebar). The sidebar selection is one marker that
+moves between rows.
 
 ## Empty states
 
-Keep the explanation and its next action in one centered group. `NativeEmptyState`
-accepts an optional action title, icon and closure, with the action separated
-from the explanatory text by 16 points. Its button remains a separate accessible
-control. Do not place an action after the empty state's outer padding; that
-makes it look unrelated to the explanation.
-
-Speed's provider setup and Results' Benchmark navigation use this group. The
-free-test action has secondary emphasis and is unavailable when no providers
-are configured. Code omits its project rail after a successful read returns
-no projects; the full workspace then offers Add project. Loading, read failures
-and existing projects keep their normal project rail.
-
-Home's destination grid reserves at least 140 points plus its density-scaled
-horizontal padding per card. It uses one, two or four columns as that space is
-available, so destination names do not break mid-word to fit a four-column row.
+`NativeEmptyState` states what is absent in the display face, left-aligned on
+the page grid, with at most one primary action directly below it. Leave
+`detail` empty unless the user needs a fact they cannot infer. Code omits its
+project rail after a successful read returns no projects; the workspace then
+offers Add project.
 
 ## Review scope
 

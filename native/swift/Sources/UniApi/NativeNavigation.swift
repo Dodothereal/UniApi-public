@@ -313,7 +313,8 @@ struct NativeShell: View {
                     }
                 }.padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 10)
             }
-            VStack(spacing: 1) { navigationRow(.jobs); navigationRow(.settings) }.padding(.horizontal, 8).padding(.bottom, 8)
+            NativeRule().padding(.horizontal, 8)
+            VStack(spacing: 1) { navigationRow(.jobs); navigationRow(.settings) }.padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 8)
             footer.padding(.horizontal, 18).padding(.bottom, 14)
         }.background(Theme.sidebarBG)
     }
