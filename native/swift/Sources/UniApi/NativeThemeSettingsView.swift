@@ -134,10 +134,10 @@ private struct NativeThemeResolvedColors {
 
     func hex(_ token: NativeThemePreferences.Token) -> String { preferences.hex(token, variant) }
     func sidebarText() -> String {
-        preferences.colorOverride(.text, variant) ?? (variant == .dark ? "F1F3F7" : "18181B")
+        preferences.colorOverride(.text, variant) ?? (variant == .dark ? "F0EDE6" : "1A1917")
     }
     func sidebarMuted() -> String {
-        preferences.colorOverride(.mutedText, variant) ?? (variant == .dark ? "A3A3A3" : "71717B")
+        preferences.colorOverride(.mutedText, variant) ?? (variant == .dark ? "8F8A80" : "6F6A61")
     }
     func statusDot(_ token: NativeThemePreferences.Token) -> String {
         if let value = preferences.colorOverride(token, variant) { return value }

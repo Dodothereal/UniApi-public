@@ -43,7 +43,7 @@ final class NativeThemePreferencesTests: XCTestCase {
         XCTAssertEqual(partial.colorOverride(.accent, .light), "AABBCC")
         XCTAssertNil(partial.colorOverride(.text, .light))
         XCTAssertNil(partial.colorOverride(.accent, .dark))
-        XCTAssertEqual(partial.hex(.text, .light), "18181B")
+        XCTAssertEqual(partial.hex(.text, .light), "1A1917")
     }
 
     func testContrastUsesSrgbLuminance() {
