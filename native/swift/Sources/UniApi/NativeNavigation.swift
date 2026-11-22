@@ -574,14 +574,12 @@ private struct NativeRouteButton: View {
                     .foregroundStyle(warning.isEmpty ? Theme.sidebarMuted : failing ? Theme.failFg : Theme.warnFg)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.sidebarInk)
-                        .lineLimit(1).truncationMode(.middle)
+                        .lineLimit(1).truncationMode(.tail)
                     Text(warning.isEmpty ? model : warning).font(warning.isEmpty ? Theme.mono(10.5) : Theme.ui(11))
                         .foregroundStyle(warning.isEmpty ? Theme.sidebarMuted : failing ? Theme.failFg : Theme.warnFg)
                         .lineLimit(1).truncationMode(.middle)
                 }
                 Spacer(minLength: 0)
-                NativeIcon("arrow-up-right", size: 12).foregroundStyle(Theme.sidebarMuted)
-                    .opacity(hovering ? 1 : 0).offset(x: hovering ? 0 : -3, y: hovering ? 0 : 3)
             }
             .padding(.horizontal, 9).padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).fill(hovering ? Theme.subtle : .clear))

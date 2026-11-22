@@ -221,6 +221,10 @@ struct NativeRouteLine<Stops: View, Action: View>: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) { lead; Spacer(minLength: 8); action() }
+                HStack(spacing: 10) { stops() }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) { lead; Spacer(minLength: 8); action() }
                 stops()
             }.environment(\.nativeRouteStacked, true)
         }
