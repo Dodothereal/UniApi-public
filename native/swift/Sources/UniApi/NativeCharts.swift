@@ -103,14 +103,9 @@ struct NativeChartHeading: View {
     var title: String
     var caption: String = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink)
-                .accessibilityAddTraits(.isHeader)
-            if !caption.isEmpty {
-                Text(caption).font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
+        Text(title).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink)
+            .accessibilityAddTraits(.isHeader)
+            .help(caption)
     }
 }
 

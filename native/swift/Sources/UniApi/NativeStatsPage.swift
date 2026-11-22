@@ -283,9 +283,9 @@ private struct NativeStatsContents: View {
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 14) {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: availableWidth >= 600 ? 4 : 2), spacing: 24) {
-                NativeStatsValueTile(label: "Tokens processed", value: nativeStatsGrand(t), detail: "Read + written across \(d["summary"]["models"].int) models\(d["isLifetime"].bool ? " · lifetime" : "")", accent: nativeStatsColor("06b6d4"), format: nativeStatsCount)
-                NativeStatsValueTile(label: "Generated output", value: t["output"].double, detail: "\(nativeStatsCount(t["thinking"].double)) reasoning (inside output)", accent: nativeStatsColor("10b981"), format: nativeStatsCount)
-                NativeStatsValueTile(label: detail ? "Cache efficiency" : "Served from cache", value: prompt > 0 ? t["cacheRead"].double * 100 / prompt : nil, unit: "%", detail: "\(nativeStatsCount(t["cacheRead"].double)) of \(nativeStatsCount(prompt)) prompt tokens", accent: nativeStatsColor("a855f7"), format: { String(format: "%.1f", $0) })
+                NativeStatsValueTile(label: "Tokens processed", value: nativeStatsGrand(t), detail: "\(d["summary"]["models"].int) models\(d["isLifetime"].bool ? " · lifetime" : "")", format: nativeStatsCount)
+                NativeStatsValueTile(label: "Generated output", value: t["output"].double, detail: "\(nativeStatsCount(t["thinking"].double)) reasoning", format: nativeStatsCount)
+                NativeStatsValueTile(label: detail ? "Cache efficiency" : "Served from cache", value: prompt > 0 ? t["cacheRead"].double * 100 / prompt : nil, unit: "%", detail: "\(nativeStatsCount(t["cacheRead"].double)) of \(nativeStatsCount(prompt)) prompt tokens", format: { String(format: "%.1f", $0) })
                 if detail {
                     NativeStatsValueTile(label: "Recorded responses", value: payload["coverage"]["datedTotals"]["messages"].double, detail: "\(d["summary"]["sessions"].int) sessions · \(d["summary"]["projects"].int) projects", format: nativeStatsCount)
                 } else { costTile }
@@ -378,7 +378,7 @@ private struct NativeStatsContents: View {
         let cost = d["cost"]
         if cost.isNull { return "Prices not available yet" }
         if cost["pricedTokens"].double > 0 {
-            return cost["unpricedTokens"].double > 0 ? "Partial estimate · unknown costs excluded" : "Based on current API rates"
+            return cost["unpricedTokens"].double > 0 ? "Partial · unknown costs excluded" : "At current API rates"
         }
         return cost["unpricedTokens"].double > 0 ? "Prices missing for this usage" : "No usage recorded yet"
     }
@@ -397,23 +397,21 @@ private struct NativeStatsContents: View {
 
 private struct NativeStatsLedger: View {
     let totals: JSONValue
-    private var rows: [(String, String)] { [("Fresh input", "input"), ("Output", "output"), ("Thinking (inside output)", "thinking"), ("Cache writes", "cacheWrite"), ("Cache reads", "cacheRead")].sorted { totals[$0.1].double > totals[$1.1].double } }
+    private var rows: [(String, String)] { [("Fresh input", "input"), ("Output", "output"), ("Thinking", "thinking"), ("Cache writes", "cacheWrite"), ("Cache reads", "cacheRead")].sorted { totals[$0.1].double > totals[$1.1].double } }
     var body: some View { NativeCard {
         NativeChartHeading(title: "Token kinds")
         ForEach(Array(rows.enumerated()), id: \.element.1) { index, row in
             let (label, key) = row
             let denominator = key == "thinking" ? totals["output"].double : nativeStatsGrand(totals)
-            let color = nativeStatsColor(["input": "3b82f6", "output": "10b981", "thinking": "f59e0b", "cacheWrite": "a855f7", "cacheRead": "06b6d4"][key] ?? "06b6d4")
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    StatusDot(color: color, size: 6)
-                    Text(label).font(Theme.ui(12.5, weight: .medium))
-                    Spacer(minLength: 8)
-                    Text(nativeStatsCount(totals[key].double)).font(Theme.mono(12, weight: .medium)).monospacedDigit().lineLimit(1).nativeStatsNumberTransition(totals[key].double).frame(width: 70, alignment: .trailing)
-                    Text((denominator > 0 ? String(format: "%.1f%%", totals[key].double * 100 / denominator) : "—") + (key == "thinking" ? " of output" : "")).font(Theme.mono(10)).foregroundStyle(Theme.muted).frame(width: 96, alignment: .trailing)
-                }
-                NativeGrowBar(fraction: totals[key].double / max(1, denominator), color: color, delay: Double(index) * 0.06)
-            }.help(key == "thinking" ? "Thinking is a subset of generated output; its percentage uses output as the denominator." : totals[key].double.formatted())
+            let color = nativeStatsColor(["input": "4f7fb0", "output": "e2512e", "thinking": "d39a2a", "cacheWrite": "8a62a6", "cacheRead": "2e8a86"][key] ?? "2e8a86")
+            HStack(alignment: .center, spacing: 12) {
+                Text(label).font(Theme.ui(13, weight: .medium)).lineLimit(1).frame(width: 140, alignment: .leading)
+                NativeGrowBar(fraction: totals[key].double / max(1, denominator), color: color, delay: Double(index) * 0.06).frame(minWidth: 40, maxWidth: .infinity)
+                Text((denominator > 0 ? String(format: "%.1f%%", totals[key].double * 100 / denominator) : "-") + (key == "thinking" ? " of output" : "")).font(Theme.num(12, weight: .regular)).foregroundStyle(Theme.muted).frame(width: 96, alignment: .trailing)
+                Text(nativeStatsCount(totals[key].double)).font(Theme.num(14)).lineLimit(1).nativeStatsNumberTransition(totals[key].double).frame(width: 72, alignment: .trailing)
+            }
+            .frame(height: 30)
+            .help(key == "thinking" ? "Thinking is a subset of generated output; its percentage uses output as the denominator." : totals[key].double.formatted())
         }
     } }
 }
@@ -452,7 +450,7 @@ private struct NativeStatsProjectBoard: View {
         NativeChartHeading(title: "Projects", caption: !all && rows.count > 8 ? "Top 8 of \(rows.count) working directories." : "")
         ForEach(Array((all ? rows : Array(rows.prefix(8))).enumerated()), id: \.offset) { index, row in VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) { Text(String(format: "%02d", index + 1)).font(Theme.mono(10)).foregroundStyle(Theme.muted).frame(width: 18); Text(row["name"].string).font(Theme.mono(12, weight: .medium)).lineLimit(1).help(row["path"].string); Spacer(minLength: 2); Text("\(row["sessions"].int) sessions").font(Theme.ui(10.5)).foregroundStyle(Theme.muted); Text(nativeStatsCount(nativeStatsGrand(row["totals"]))).font(Theme.mono(12, weight: .medium)) }
-            NativeGrowBar(fraction: nativeStatsGrand(row["totals"]) / max(1, rows.map { nativeStatsGrand($0["totals"]) }.max() ?? 0), color: Theme.pairColor(row["path"].string))
+            NativeGrowBar(fraction: nativeStatsGrand(row["totals"]) / max(1, rows.map { nativeStatsGrand($0["totals"]) }.max() ?? 0), color: Theme.muted)
         }.padding(.horizontal, 8).padding(.vertical, 7) }
         if !all && rows.count > 8 { Text("\(rows.count - 8) more projects").foregroundStyle(Theme.muted) }
     }.frame(maxWidth: .infinity) }

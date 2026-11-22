@@ -193,8 +193,8 @@ private struct NativeStatsLegend: View {
     }
 }
 private func nativeStatsHarnessColor(_ source: String) -> Color {
-    let palette = ["claude": "ec4899", "codex": "3b82f6", "antigravity": "f97316", "zcode": "f59e0b", "opencode": "a855f7", "dsh": "06b6d4"]
-    return nativeStatsColor(palette[source] ?? "346bf1")
+    let palette = ["claude": "e2512e", "codex": "4f7fb0", "antigravity": "d39a2a", "zcode": "7f9a3c", "opencode": "8a62a6", "dsh": "2e8a86"]
+    return nativeStatsColor(palette[source] ?? "8d8779")
 }
 func nativeStatsColor(_ hex: String) -> Color {
     let text = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
@@ -237,7 +237,7 @@ struct NativeStatsDaily: View {
         NativeStatsChartInspection(index: chart.index) {
             Chart(chart.points) { p in BarMark(x: .value("Date", p.date, unit: .day), y: .value("Usage", p.value)).foregroundStyle(by: .value("Model", p.series)) }
                 .chartForegroundStyleScale(domain: series, range: series.map { $0 == "other" ? Theme.muted : nativeStatsColor(colors[$0].string) })
-                .chartLegend(.hidden).chartYAxis { AxisMarks(position: .trailing) }.frame(height: 225)
+                .chartLegend(.hidden).chartYAxis { AxisMarks(position: .trailing) { value in AxisGridLine(); AxisValueLabel { if let v = value.as(Double.self) { Text(nativeStatsCount(v)) } } } }.frame(height: 225)
                 .chartPlotStyle { plot in plot.nativeEntrance(.growVertical) }
                 .accessibilityLabel("Daily \(measure) by model, dated records only")
         }
@@ -269,7 +269,7 @@ struct NativeStatsCumulative: View {
         }
         NativeStatsChartInspection(index: chart.index, readingFont: Theme.ui(13)) {
             Chart(chart.points) { p in LineMark(x: .value("Day", p.date), y: .value("Cumulative", p.value)).foregroundStyle(Theme.accent) }
-                .chartYAxis { AxisMarks(position: .trailing) }.frame(height: 225)
+                .chartYAxis { AxisMarks(position: .trailing) { value in AxisGridLine(); AxisValueLabel { if let v = value.as(Double.self) { Text(nativeStatsCount(v)) } } } }.frame(height: 225)
                 .chartPlotStyle { plot in plot.nativeEntrance(.fade) }
         }
     } }
@@ -457,7 +457,7 @@ struct NativeStatsThroughput: View {
                     LineMark(x: .value("Day", p.date), y: .value(metric.title, p.value), series: .value("Series", p.series)).foregroundStyle(trend.colors[p.series] ?? Theme.accent).lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)).interpolationMethod(.monotone)
                     PointMark(x: .value("Day", p.date), y: .value(metric.title, p.value)).foregroundStyle(trend.colors[p.series] ?? Theme.accent).symbolSize(12)
                 }
-                .chartLegend(.hidden).chartYAxis { AxisMarks(position: .trailing) }.frame(height: 225)
+                .chartLegend(.hidden).chartYAxis { AxisMarks(position: .trailing) { value in AxisGridLine(); AxisValueLabel { if let v = value.as(Double.self) { Text(nativeStatsCount(v)) } } } }.frame(height: 225)
                 .chartPlotStyle { plot in plot.nativeEntrance(.fade) }
                 .accessibilityLabel("Daily " + metric.title + " for " + trend.names.filter { trend.isolation == nil || $0 == trend.isolation }.map(trendLabel).joined(separator: ", "))
             }
@@ -529,7 +529,7 @@ struct NativeStatsBenchmark: View {
             NativeStatsChartInspection(index: chart.plot.index) {
                 Chart(chart.plot.points) { p in LineMark(x: .value("Date", p.date), y: .value("Median ms", p.value)).foregroundStyle(by: .value("Provider / model", p.series)); PointMark(x: .value("Date", p.date), y: .value("Median ms", p.value)).foregroundStyle(by: .value("Provider / model", p.series)) }
                     .chartForegroundStyleScale(domain: chart.keys, range: chart.keys.map { Theme.pairColor($0) })
-                    .chartYScale(type: logarithmic ? .log : .linear).chartLegend(.hidden).chartYAxis { AxisMarks(position: .trailing) }.frame(height: 225)
+                    .chartYScale(type: logarithmic ? .log : .linear).chartLegend(.hidden).chartYAxis { AxisMarks(position: .trailing) { value in AxisGridLine(); AxisValueLabel { if let v = value.as(Double.self) { Text(nativeStatsCount(v)) } } } }.frame(height: 225)
                     .chartPlotStyle { plot in plot.nativeEntrance(.fade) }
             }
             ScrollView(.horizontal) { HStack { ForEach(chart.keys, id: \.self) { key in

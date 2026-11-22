@@ -694,7 +694,7 @@ public actor NativeStatisticsService {
         let nextDocument = try? NativeFile.readJSON(runtime.paths.home.appendingPathComponent(".claude/stats-cache.json"))
         let nextCache = nextDocument.flatMap(StatisticsCache.parse)
         var weights: [String: Double] = [:]; for e in nextEvents { weights[e.model, default: 0] += e.grand }; for (name, total) in nextCache?.perModel ?? [:] where weights[name] == nil { weights[name] = total.grand }
-        let palette = ["#3b82f6", "#f97316", "#10b981", "#a855f7", "#f59e0b", "#ec4899", "#06b6d4", "#84cc16", "#ef4444", "#6366f1", "#d946ef", "#eab308"]
+        let palette = ["#e2512e", "#2e8a86", "#d39a2a", "#8a62a6", "#7f9a3c", "#c0577a", "#4f7fb0", "#a9703f", "#5fa37a", "#6a6fb5", "#b3a23c", "#8d8779"]
         let nextColors = JSONValue.object(Dictionary(uniqueKeysWithValues: weights.keys.sorted { weights[$0] == weights[$1] ? $0 < $1 : weights[$0]! > weights[$1]! }.enumerated().map { ($0.element, .string(palette[$0.offset % palette.count])) }))
         var nextScan: JSONValue = ["files": .number(Double(files.count)), "bytes": .number(files.reduce(0) { $0 + $1.size }), "elapsedMs": .number(clock() - begin), "scannedAt": .number(clock()), "rawGrand": .number(rawGrand), "duplicates": .number(Double(duplicates)), "records": .number(Double(recordCount)), "claudeFiles": .number(Double(files.filter { $0.source == "claude" }.count)), "parsedFiles": .number(Double(todo.count))]
         nextScan["scanId"] = progress["scanId"]

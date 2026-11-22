@@ -156,9 +156,7 @@ struct NativeJobRow: View {
                 }.padding(.horizontal, 14).padding(.vertical, 10).background(Theme.well)
             }
         }
-        .background(compact ? Theme.surface : .clear)
-        .clipShape(RoundedRectangle(cornerRadius: compact ? Theme.radiusMd : 0))
-        .overlay { if compact { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, lineWidth: 1) } }
+        .overlay(alignment: .bottom) { if compact { NativeRule() } }
     }
     private var errorText: some View {
         Text(value["error"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.failFg)

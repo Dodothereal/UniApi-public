@@ -99,7 +99,7 @@ struct NativePromptsPage: View {
             if prompts.isEmpty {
                 if catalog.isNull && error == nil { ShimmerText(text: "Loading prompts …") }
                 else {
-                    NativePromptEmptyState(icon: "file-text", title: error == nil ? "No prompts yet" : "Could not load prompts", detail: "")
+                    NativeEmptyState(title: error == nil ? "No prompts" : "Could not load prompts", detail: "")
                 }
             }
             else {

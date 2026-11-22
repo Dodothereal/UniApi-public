@@ -19,15 +19,17 @@ struct NativeStatsPricing: View {
             let missing = models > 0 ? "Cost unknown for \(models) " + (models == 1 ? "model" : "models") : "Some usage is unpriced"
             return priced > 0 ? "\(coverage)% of tokens priced · " + missing.lowercased() : missing
         }
-        return "Based on current API rates"
+        return ""
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Model costs").font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink)
-                    Text(summary).font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if !summary.isEmpty {
+                        Text(summary).font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer(minLength: 8)
                 Button {
