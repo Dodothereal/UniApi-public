@@ -14,37 +14,41 @@ struct NativeArtifactPreview: View {
     let preview: JSONValue
     @Environment(\.dismiss) private var dismiss
     @State private var error: String?
+    private var size: String { ByteCountFormatter.string(fromByteCount: Int64(preview["size"].double), countStyle: .file) }
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text(preview["fileName"].string).font(Theme.ui(16, weight: .semibold)).lineLimit(1)
-                Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+        BenchSheet(title: preview["fileName"].string, detail: size, width: 880, height: 660) {
+            VStack(alignment: .leading, spacing: 12) {
+                content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.well)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusWell, style: .continuous))
+                if let error { BenchFailure(message: error) }
             }
-            content.frame(maxWidth: .infinity, maxHeight: .infinity)
-            if preview["truncated"].bool { Text("This text or byte preview is bounded; save or open the original for the whole file.").font(Theme.ui(11)).foregroundStyle(Theme.muted) }
-            if let error { NativeError(message: error) }
-            HStack {
-                Text(ByteCountFormatter.string(fromByteCount: Int64(preview["size"].double), countStyle: .file)).font(Theme.mono(11)).foregroundStyle(Theme.muted)
-                Spacer()
-                Button("Save original") { save() }
-                Button("Open") { open() }
-            }
-        }.padding(20).frame(width: 850, height: 640).background(Theme.bg).foregroundStyle(Theme.ink)
+        } note: {
+            if preview["truncated"].bool { Text("Preview is bounded. Save or open the original for the whole file.") }
+        } actions: {
+            Button("Save original", nativeIcon: "download") { save() }.buttonStyle(Press(.quiet))
+            Button("Open", nativeIcon: "external-link") { open() }
+            Button("Done") { dismiss() }.buttonStyle(Press(.primary)).keyboardShortcut(.cancelAction)
+        }
     }
     @ViewBuilder private var content: some View {
         let url = URL(fileURLWithPath: preview["path"].string)
         switch preview["kind"].string {
         case "html": NativeDocumentWebPreview(url: url, mime: preview["mimeType"].string)
-        case "pdf": NativePDFPreview(url: url).background(Color.white)
+        case "pdf": NativePDFPreview(url: url)
         case "audio", "video": NativeFileMediaPlayer(url: url)
         case "image":
             if preview["mimeType"].string == "image/svg+xml" { NativeDocumentWebPreview(url: url, mime: "image/svg+xml") }
-            else if let image = thumbnail(url) { Image(decorative: image, scale: 1).resizable().scaledToFit() }
-            else { NativeEmptyState(title: "Image preview unavailable", detail: "Save or open the original with a compatible application.") }
+            else if let image = thumbnail(url) { Image(decorative: image, scale: 1).resizable().scaledToFit().padding(16) }
+            else {
+                Blank(icon: "file", title: "Image preview unavailable", detail: "Save or open the original with a compatible application.")
+                    .padding(.horizontal, 20).frame(maxHeight: .infinity, alignment: .top)
+            }
         default:
             ScrollView([.horizontal, .vertical]) {
-                Text(preview["text"].string).font(Theme.mono(12)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .topLeading).padding(12)
-            }.background(Theme.surface)
+                Text(preview["text"].string).font(Theme.mono(12)).foregroundStyle(Theme.ink).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .topLeading).padding(16)
+            }
         }
     }
     private func thumbnail(_ url: URL) -> CGImage? {
@@ -65,6 +69,101 @@ struct NativeArtifactPreview: View {
             return
         }
         NSWorkspace.shared.open(URL(fileURLWithPath: preview["path"].string))
+    }
+}
+
+/// The sheet shape Prompts and Arena share: a name on a tick rule (optionally
+/// typed in place), the content, then a note on the left and the actions on
+/// the right with the one primary last.
+struct BenchSheet<Content: View, Note: View, Actions: View>: View {
+    var eyebrow = ""
+    var title: String
+    var detail = ""
+    var editing: Binding<String>? = nil
+    var placeholder = ""
+    var titleLabel = ""
+    var focusTitle = false
+    var width: CGFloat
+    var height: CGFloat? = nil
+    @ViewBuilder var content: () -> Content
+    @ViewBuilder var note: () -> Note
+    @ViewBuilder var actions: () -> Actions
+    @FocusState private var titleFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !eyebrow.isEmpty { MicroLabel(eyebrow).padding(.bottom, 8) }
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                if let editing {
+                    TextField(placeholder, text: editing).textFieldStyle(.plain).font(Theme.display(17))
+                        .foregroundStyle(Theme.ink).focused($titleFocused).accessibilityLabel(titleLabel)
+                        .onAppear { if focusTitle { titleFocused = true } }
+                } else {
+                    Text(title).font(Theme.display(17)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 0)
+                }
+                if !detail.isEmpty {
+                    Text(detail).font(Theme.mono(11)).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
+                }
+            }
+            ZStack(alignment: .topLeading) {
+                TickRule(span: 72)
+                if editing != nil && titleFocused { Theme.signal.frame(width: 2, height: 7) }
+            }.padding(.top, 12)
+            content().padding(.top, 20)
+                .frame(maxWidth: .infinity, maxHeight: height == nil ? nil : .infinity, alignment: .topLeading)
+            HStack(alignment: .center, spacing: 8) {
+                note().font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+                actions()
+            }.padding(.top, 20)
+        }
+        .padding(24)
+        .frame(width: width, height: height)
+        .background(Theme.canvas).foregroundStyle(Theme.ink).font(Theme.ui(13))
+        .buttonStyle(Press(.secondary)).tint(Theme.signal)
+    }
+}
+
+/// A failed command or read, said inline where it happened.
+struct BenchFailure: View {
+    var message: String
+    var body: some View { Notice(text: message, tone: .fail).accessibilityLabel("Error: " + message) }
+}
+
+/// Engraved caption above a field inside a sheet.
+struct BenchField<Content: View>: View {
+    var label: String
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            MicroLabel(label)
+            content()
+        }
+    }
+}
+
+/// A multi-line editor on a well, with a hint where the text will go.
+struct BenchEditor: View {
+    @Binding var text: String
+    var placeholder: String
+    var label: String
+    var height: CGFloat? = nil
+    var body: some View {
+        TextEditor(text: $text).font(Theme.ui(13)).lineSpacing(3).foregroundStyle(Theme.ink)
+            .scrollContentBackground(.hidden)
+            .padding(.horizontal, 11).padding(.vertical, 14)
+            .frame(height: height).frame(maxHeight: height == nil ? .infinity : nil)
+            .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.radiusWell, style: .continuous))
+            .overlay(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text(placeholder).font(Theme.ui(13)).foregroundStyle(Theme.faint)
+                        .padding(.horizontal, 16).padding(.vertical, 14)
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
+            }
+            .accessibilityLabel(label)
     }
 }
 
