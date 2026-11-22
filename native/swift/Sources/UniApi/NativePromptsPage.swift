@@ -41,39 +41,59 @@ struct NativePromptsPage: View {
     @State private var deleteAction: JSONValue = .null
     @State private var initializedPromptDialog: UUID?
     @State private var initializedResultDialog: UUID?
+    @State private var filter = ""
+    @State private var expandedPrompt: String?
     @Environment(\.nativeInterfaceDensity) private var density
+    @Environment(\.nativeReducedMotion) private var reduceMotion
     private var editingPrompt: JSONValue { promptEditor?.value ?? .null }
     private var editingResult: JSONValue { resultEditor?.value ?? .null }
     private var pageError: String? { error ?? mediaReads.detailError ?? mediaReads.previewError }
+    /// The list already holds the title and text, so a newly chosen prompt
+    /// reads at once; only its results wait for the detail read.
+    private var current: JSONValue {
+        if !detail.isNull, detail["prompt"]["id"].string == selected { return detail["prompt"] }
+        return prompts.first { $0["id"].string == selected } ?? .null
+    }
+    private var shownPrompts: [JSONValue] {
+        let terms = filter.lowercased().split(separator: " ")
+        guard !terms.isEmpty else { return prompts }
+        return prompts.filter { prompt in
+            let haystack = (prompt["title"].string + " " + prompt["text"].string).lowercased()
+            return terms.allSatisfy { haystack.contains($0) }
+        }
+    }
+    private var resultTotal: Int { prompts.reduce(0) { $0 + $1["resultCount"].int } }
+    private var waiting: Int { prompts.filter { $0["resultCount"].int == 0 }.count }
+
     var body: some View {
         GeometryReader { geometry in
-        let contentWidth = min(1500, geometry.size.width) - 2 * density.pageMargin
-        NativePage(title: "Prompts & Results", subtitle: "Keep full prompts and compare the files models made for them.", maxWidth: 1500, readiness: pageError != nil ? .failed : catalog.isNull || selected != nil && detail.isNull ? .pending : .ready, actions: {
-            Button { Task { await reload() } } label: {
-                HStack(spacing: 6) { NativeIcon("rotate-cw", size: 14); Text("Reload") }
-            }.buttonStyle(T3Button(.outline))
-            Button { error = nil; promptEditor = NativePresentedValue(value: .null) } label: {
-                HStack(spacing: 6) { NativeIcon("plus", size: 14); Text("New prompt") }
-            }.buttonStyle(T3Button(.primary))
+        let contentWidth = min(960, geometry.size.width) - 2 * density.pageMargin
+        NativePage(title: "Prompts", eyebrow: "Benchmark library", readiness: pageError != nil ? .failed : catalog.isNull || selected != nil && detail.isNull ? .pending : .ready, actions: {
+            IconPress(icon: "rotate-cw", help: "Reload") { Task { await reload() } }
+            Button("New prompt", nativeIcon: "plus") { error = nil; promptEditor = NativePresentedValue(value: .null) }
+                .buttonStyle(Press(.primary))
         }) {
-            if let pageError { NativeError(message: pageError) }
-            if cleanupPending { Text("Removed. Managed file cleanup will retry in the background.").font(Theme.ui(12)).foregroundStyle(Theme.warnFg) }
-            if prompts.isEmpty { promptList }
-            else {
-                VStack(alignment: .leading, spacing: 24) {
-                    if contentWidth >= 760 {
-                        HStack(alignment: .top, spacing: 24) {
-                            promptList.frame(width: 280)
-                            promptDetail.frame(maxWidth: .infinity, alignment: .topLeading)
-                        }
-                    } else {
-                        promptList
-                        promptDetail
-                    }
-                }.frame(maxWidth: .infinity)
+            if let pageError { BenchFailure(message: pageError) }
+            if cleanupPending { Notice(text: "Removed. Managed file cleanup will retry in the background.", tone: .warn) }
+            reading(split: contentWidth >= 700)
+            if prompts.isEmpty { emptyLibrary }
+            else if contentWidth >= 700 {
+                HStack(alignment: .top, spacing: 32) {
+                    promptIndex.frame(width: 272)
+                    promptDetail.frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            } else {
+                Pick(title: "Prompt", selection: Binding(get: { selected ?? "" }, set: { choose($0) }),
+                     options: prompts.map { (value: $0["id"].string, label: $0["title"].string) }, width: max(120, contentWidth))
+                promptDetail
             }
         }
-        .overlay { if dragTarget { RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 2, dash: [8, 5])).padding(12).allowsHitTesting(false) } }
+        .overlay {
+            if dragTarget {
+                RoundedRectangle(cornerRadius: Theme.radiusWell, style: .continuous)
+                    .strokeBorder(Theme.signal, style: StrokeStyle(lineWidth: 2, dash: [8, 5])).padding(12).allowsHitTesting(false)
+            }
+        }
         .onDrop(of: [UTType.fileURL], isTargeted: $dragTarget) { providers in acceptFiles(providers) }
         .sheet(item: $promptEditor) { item in promptForm(item) }
         .sheet(item: $resultEditor, onDismiss: cancelPendingDrops) { item in resultForm(item) }
@@ -96,236 +116,306 @@ struct NativePromptsPage: View {
         }
         .nativePageActivity(reads: reads, suspended: { cancelPendingDrops(); dragTarget = false })
     }
-    private var promptList: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if prompts.isEmpty {
-                if catalog.isNull && error == nil { ShimmerText(text: "Loading prompts …") }
-                else {
-                    NativePromptEmptyState(icon: "file-text", title: error == nil ? "No prompts yet" : "Could not load prompts", detail: error == nil ? "Create a prompt to start collecting results." : "Try reloading your saved prompts.")
+
+    // ---- reading ---------------------------------------------------------
+    @ViewBuilder private func reading(split: Bool) -> some View {
+        if catalog.isNull && prompts.isEmpty {
+            if error == nil { Text("Reading saved prompts").font(Theme.ui(12.5)).foregroundStyle(Theme.muted) }
+        } else {
+            let library = Readout(label: "Library", value: String(prompts.count), unit: prompts.count == 1 ? "prompt" : "prompts", size: .hero)
+            let collected = Readout(label: "Results collected", value: String(resultTotal), unit: resultTotal == 1 ? "file or link" : "files and links",
+                                    detail: prompts.isEmpty ? "" : "Across " + PromptsText.count(prompts.count - waiting, "prompt"))
+            let empty = Readout(label: "Still empty", value: String(waiting), unit: waiting == 1 ? "prompt" : "prompts",
+                                detail: prompts.isEmpty ? "" : waiting == 0 ? "Every prompt has a result" : "Drop files on one to fill it",
+                                color: waiting == 0 ? Theme.faint : Theme.ink)
+            if split {
+                // The readings sit on the same two columns as the index and the detail below.
+                HStack(alignment: .top, spacing: 32) {
+                    library.frame(width: 272)
+                    ReadoutStrip(minimum: 170) { collected; empty }
                 }
+            } else {
+                ReadoutStrip(minimum: 170) { library; collected; empty }
             }
-            else {
-                SectionLabel(text: "Prompts") {
-                    NativeNumberText(text: "\(prompts.count) \(prompts.count == 1 ? "prompt" : "prompts")", font: Theme.ui(12), color: Theme.muted)
+        }
+    }
+    @ViewBuilder private var emptyLibrary: some View {
+        if !catalog.isNull || error != nil {
+            Band("Library", spacing: 0) {
+                LedgerHead {
+                    MicroLabel("Prompt"); Spacer(minLength: 0); MicroLabel("Results")
                 }
-                LazyVStack(spacing: 8) {
-                    ForEach(prompts, id: \.self["id"]) { prompt in
-                        NativePromptListRow(prompt: prompt, selected: selected == prompt["id"].string, onSelect: {
-                            selected = prompt["id"].string; detail = .null
-                            Task { await loadDetail() }
-                        }, onCopy: { copy(prompt["text"].string) })
-                    }
+                if error == nil {
+                    Blank(icon: "file-text", title: "No prompts yet", detail: "Keep the full task text here, then collect what each model made for it.",
+                          actionTitle: "New prompt", primary: false) { error = nil; promptEditor = NativePresentedValue(value: .null) }
+                } else {
+                    Blank(icon: "file-text", title: "Could not load prompts", detail: "Try reloading your saved prompts.",
+                          actionTitle: "Reload", actionIcon: "rotate-cw", primary: false) { Task { await reload() } }
                 }
             }
         }
     }
-    private var promptDetail: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if detail.isNull {
-                if mediaReads.detailError != nil {
-                    NativeReadFailureState(icon: "file-text", title: "Could not load results", detail: "Try loading this prompt again.", retryTitle: "Reload results") {
-                        Task { await loadDetail() }
-                    }
-                } else { ShimmerText(text: "Loading prompt and results …") }
+
+    // ---- index -----------------------------------------------------------
+    private func choose(_ id: String) {
+        selected = id; detail = .null
+        Task { await loadDetail() }
+    }
+    private var promptIndex: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if prompts.count > 7 {
+                Entry(placeholder: "Filter prompts", text: $filter, icon: "search").accessibilityLabel("Filter prompts")
+                    .padding(.bottom, 10)
             }
-            else {
+            LedgerHead {
+                MicroLabel("Prompt"); Spacer(minLength: 0); MicroLabel("Results")
+            }
+            LazyVStack(spacing: 0) {
+                ForEach(shownPrompts, id: \.self["id"]) { prompt in
+                    PromptIndexRow(prompt: prompt, selected: selected == prompt["id"].string,
+                                   onSelect: { choose(prompt["id"].string) }, onCopy: { copy(prompt["text"].string) })
+                }
+            }
+            if shownPrompts.isEmpty {
+                Text("No prompt matches the filter").font(Theme.ui(12.5)).foregroundStyle(Theme.muted).padding(.vertical, 16)
+            }
+        }
+    }
+
+    // ---- detail ----------------------------------------------------------
+    @ViewBuilder private var promptDetail: some View {
+        let prompt = current
+        if prompt.isNull {
+            if mediaReads.detailError != nil {
+                NativeReadFailureState(icon: "file-text", title: "Could not load results", detail: "Try loading this prompt again.", retryTitle: "Reload results") {
+                    Task { await loadDetail() }
+                }
+            } else { Text("Reading prompt").font(Theme.ui(12.5)).foregroundStyle(Theme.muted) }
+        } else {
+            VStack(alignment: .leading, spacing: 24) {
+                promptText(prompt)
+                Band(title: "Results") {
+                    if !detail.isNull, !resultsHint.isEmpty {
+                        Text(resultsHint).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
+                    }
+                    Button("Add result", nativeIcon: "plus") { beginResult() }.fixedSize()
+                } content: { results }
+            }
+        }
+    }
+    private var resultsHint: String {
+        let count = detail["results"].array.count
+        return count == 0 ? "" : count == 1 ? "1 collected" : "\(count) · best first"
+    }
+    private func promptText(_ prompt: JSONValue) -> some View {
+        let body = prompt["text"].string
+        let long = body.count > 620 || body.filter { $0 == "\n" }.count > 9
+        let open = expandedPrompt == prompt["id"].string
+        return VStack(alignment: .leading, spacing: 0) {
+            ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(detail["prompt"]["title"].string).font(Theme.ui(18, weight: .semibold)).accessibilityAddTraits(.isHeader)
-                            .fixedSize(horizontal: false, vertical: true)
-                        HStack(spacing: 4) {
-                            Text("Created")
-                            Text(Date(timeIntervalSince1970: detail["prompt"]["createdAt"].double / 1000), style: .date)
-                        }.font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                    promptActions(detail["prompt"])
+                    promptTitle(prompt).frame(maxWidth: .infinity, alignment: .leading)
+                    promptActions(prompt)
                 }
-                Card {
-                    Text(detail["prompt"]["text"].string).font(Theme.ui(12.5)).foregroundStyle(Theme.dim).lineSpacing(6)
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                }
-                HStack(spacing: 12) {
-                    SectionLabel(text: "Results") {
-                        NativeNumberText(text: "\(detail["results"].array.count) \(detail["results"].array.count == 1 ? "result" : "results")", font: Theme.ui(12), color: Theme.muted)
-                    }
-                    Button { beginResult() } label: {
-                        HStack(spacing: 6) { NativeIcon("plus", size: 14); Text("Add result") }
-                    }.buttonStyle(T3Button(.primary)).fixedSize()
-                }
-                Text("Drop files anywhere on this page to add them to \(detail["prompt"]["title"].string). All file types · 50 MiB per file.")
-                    .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                if detail["results"].array.isEmpty {
-                    NativePromptEmptyState(icon: "file-code-2", title: "No results yet", detail: "Drop files here or add a URL for a model response.")
-                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
-                } else {
-                    LazyVStack(spacing: 8) {
-                        ForEach(Array(detail["results"].array.enumerated()), id: \.element["id"]) { index, result in
-                            Card(padding: 12) {
-                                ViewThatFits(in: .horizontal) {
-                                    HStack(spacing: 12) { resultMetadata(result, index: index); resultActions(result, index: index) }
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        resultMetadata(result, index: index)
-                                        HStack { Spacer(minLength: 0); resultActions(result, index: index) }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                VStack(alignment: .leading, spacing: 10) { promptTitle(prompt); promptActions(prompt).padding(.leading, -1) }
             }
+            Rule().padding(.top, 14)
+            Text(body).font(Theme.ui(13)).foregroundStyle(Theme.dim).lineSpacing(5)
+                .lineLimit(long && !open ? 10 : nil)
+                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 14)
+            if long {
+                Button {
+                    let next = open ? nil : prompt["id"].string
+                    if reduceMotion { expandedPrompt = next } else { withAnimation(NativeMotion.toggle) { expandedPrompt = next } }
+                } label: {
+                    HStack(spacing: 6) {
+                        NativeIcon(open ? "chevron-up" : "chevron-down", size: 13, strokeWidth: 1.75)
+                        Text(open ? "Show less" : "Show the whole prompt")
+                    }
+                }.buttonStyle(Press(.quiet)).padding(.leading, -8).padding(.top, 6)
+                    .accessibilityValue(open ? "Expanded" : "Collapsed")
+            }
+        }
+    }
+    private func promptTitle(_ prompt: JSONValue) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(prompt["title"].string).font(Theme.display(17)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("created " + PromptsText.day(prompt["createdAt"].double) + " · " + PromptsText.count(prompt["text"].string.count, "character"))
+                .font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1)
         }
     }
     private func promptActions(_ prompt: JSONValue) -> some View {
-        HStack(spacing: 1) {
-            promptIcon("clipboard", help: "Copy prompt") { copy(prompt["text"].string) }
-            promptIcon("pencil", help: "Edit prompt") { error = nil; promptEditor = NativePresentedValue(value: prompt) }
-            promptIcon("trash-2", help: "Delete prompt") { deleteAction = ["kind": "prompt", "id": prompt["id"]] }
-        }
-    }
-    private func resultMetadata(_ result: JSONValue, index: Int) -> some View {
-        HStack(spacing: 12) {
-            Text(String(index + 1)).font(Theme.mono(12)).foregroundStyle(Theme.muted).frame(width: 24)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(result["model"].string).font(Theme.mono(12.5, weight: .medium)).lineLimit(1).textSelection(.enabled).help(result["model"].string)
-                Text(resultDescription(result)).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1).textSelection(.enabled)
-                    .help(result["kind"].string == "url" ? result["url"].string : result["fileName"].string)
-            }.frame(minWidth: 150, maxWidth: .infinity, alignment: .leading)
-        }
-    }
-    private func resultDescription(_ result: JSONValue) -> String {
-        let provider = !result["providerName"].string.isEmpty ? result["providerName"].string : !result["providerId"].string.isEmpty ? result["providerId"].string : "Unspecified provider"
-        let source = result["kind"].string == "url" ? "URL" : result["fileName"].string.isEmpty ? "File" : result["fileName"].string
-        let size = result["fileSize"].isNull ? "" : " · " + ByteCountFormatter.string(fromByteCount: Int64(result["fileSize"].double), countStyle: .file)
-        return provider + " · " + source + size
-    }
-    private func resultActions(_ result: JSONValue, index: Int) -> some View {
-        HStack(spacing: 1) {
-            promptIcon("arrow-up", help: "Rank higher") { Task { await reorder(index, -1) } }.disabled(ordering || index == 0)
-            promptIcon("arrow-down", help: "Rank lower") { Task { await reorder(index, 1) } }.disabled(ordering || index == detail["results"].array.count - 1)
-            if result["kind"].string == "upload" {
-                promptIcon("eye", help: "Preview result") {
-                    guard let owner = mediaReads.beginPreview() else { return }
-                    Task { await previewResult(result, owner: owner) }
-                }
-                promptIcon("download", help: "Save result") { Task { await saveResult(result) } }
-            }
-            promptIcon("external-link", help: "Open result") {
-                let owner = mediaReads.beginPreview()
-                Task { await openResult(result, owner: owner) }
-            }
-            promptIcon("pencil", help: "Edit result") { beginResult(result) }
-            promptIcon("trash-2", help: "Delete result") { deleteAction = ["kind": "result", "id": result["id"]] }
+        HStack(spacing: 2) {
+            Button("Copy prompt", nativeIcon: "clipboard") { copy(prompt["text"].string) }.padding(.trailing, 4)
+            IconPress(icon: "pencil", help: "Edit prompt") { error = nil; promptEditor = NativePresentedValue(value: prompt) }
+            IconPress(icon: "trash-2", help: "Delete prompt") { deleteAction = ["kind": "prompt", "id": prompt["id"]] }
         }.fixedSize()
     }
-    private func promptIcon(_ name: String, help: String, action: @escaping () -> Void) -> some View {
-        NativePromptIconButton(name: name, title: help, action: action)
+    @ViewBuilder private var results: some View {
+        if detail.isNull {
+            if mediaReads.detailError != nil {
+                NativeReadFailureState(icon: "file-text", title: "Could not load results", detail: "Try loading this prompt again.", retryTitle: "Reload results") {
+                    Task { await loadDetail() }
+                }
+            } else { Text("Reading results").font(Theme.ui(12.5)).foregroundStyle(Theme.muted).padding(.vertical, 8) }
+        } else if detail["results"].array.isEmpty {
+            Well(padding: 4) {
+                Blank(icon: "upload", title: "No results yet", detail: "Drop files here, or add a link to a model response. Any file type, 50 MiB per file.")
+                    .padding(.horizontal, 16)
+            }
+        } else {
+            let rows = detail["results"].array
+            VStack(alignment: .leading, spacing: 0) {
+                LedgerHead {
+                    MicroLabel("Rank").frame(width: 44, alignment: .leading)
+                    MicroLabel("Model")
+                    Spacer(minLength: 0)
+                    MicroLabel("Size").frame(width: 64, alignment: .trailing)
+                    Color.clear.frame(width: 88, height: 1)
+                }
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.element["id"]) { index, result in
+                        PromptResultRow(result: result, rank: index + 1, source: resultSource(result),
+                                        open: { activate(result) }) { resultActions(result, index: index, last: index == rows.count - 1) }
+                    }
+                }
+                Text("Drop files anywhere on this page to add results. Any file type, 50 MiB per file.")
+                    .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
+            }
+        }
     }
+    private func resultSource(_ result: JSONValue) -> String {
+        let provider = !result["providerName"].string.isEmpty ? result["providerName"].string : !result["providerId"].string.isEmpty ? result["providerId"].string : "Unspecified provider"
+        let source = result["kind"].string == "url" ? result["url"].string.isEmpty ? "URL" : result["url"].string : result["fileName"].string.isEmpty ? "File" : result["fileName"].string
+        return provider + " · " + source
+    }
+    /// A row opens what it holds: an upload in the preview, a link in the browser.
+    private func activate(_ result: JSONValue) {
+        let owner = mediaReads.beginPreview()
+        if result["kind"].string == "upload" {
+            guard let owner else { return }
+            Task { await previewResult(result, owner: owner) }
+        } else { Task { await openResult(result, owner: owner) } }
+    }
+    private func resultActions(_ result: JSONValue, index: Int, last: Bool) -> some View {
+        HStack(spacing: 2) {
+            IconPress(icon: "arrow-up", help: "Rank higher") { Task { await reorder(index, -1) } }.disabled(ordering || index == 0)
+            IconPress(icon: "arrow-down", help: "Rank lower") { Task { await reorder(index, 1) } }.disabled(ordering || last)
+            Menu {
+                if result["kind"].string == "upload" {
+                    Button("Preview result") {
+                        guard let owner = mediaReads.beginPreview() else { return }
+                        Task { await previewResult(result, owner: owner) }
+                    }
+                    Button("Save result…") { Task { await saveResult(result) } }
+                }
+                Button("Open result") {
+                    let owner = mediaReads.beginPreview()
+                    Task { await openResult(result, owner: owner) }
+                }
+                Button("Edit result…") { beginResult(result) }
+                Divider()
+                Button("Delete result…", role: .destructive) { deleteAction = ["kind": "result", "id": result["id"]] }
+            } label: {
+                NativeIcon("ellipsis", size: 14, strokeWidth: 1.75).foregroundStyle(Theme.muted)
+                    .frame(width: 28, height: 28).contentShape(Rectangle())
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().pointingHand()
+            .accessibilityLabel("More for " + result["model"].string).help("Preview, save, open, edit or delete")
+        }.fixedSize()
+    }
+
+    // ---- sheets ----------------------------------------------------------
     private func promptForm(_ item: NativePresentedValue) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(item.value.isNull ? "New prompt" : "Edit prompt").font(Theme.ui(18, weight: .semibold))
-                Text("Keep the full task text here so you can reuse it across models.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+        BenchSheet(eyebrow: item.value.isNull ? "New prompt" : "Edit prompt", title: title, editing: $title,
+                   placeholder: "Name this task", titleLabel: "Prompt title", focusTitle: item.value.isNull, width: 680) {
+            VStack(alignment: .leading, spacing: 12) {
+                BenchEditor(text: $text, placeholder: "The full task text, exactly as every model should receive it", label: "Prompt text", height: 320)
+                if let error { BenchFailure(message: error) }
             }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Title").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-                T3Field(placeholder: "A short name for this task", text: $title).accessibilityLabel("Prompt title")
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Prompt text").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-                TextEditor(text: $text).font(Theme.ui(12.5)).scrollContentBackground(.hidden)
-                    .padding(8).frame(height: 250).background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1)).accessibilityLabel("Prompt text")
-            }
-            if let error { NativeError(message: error) }
-            HStack(spacing: 8) {
-                Spacer()
-                Button("Cancel") { promptEditor = nil }.buttonStyle(T3Button(.ghost)).keyboardShortcut(.cancelAction)
-                Button(saving ? "Saving…" : item.value.isNull ? "Create prompt" : "Save changes") { Task { await savePrompt() } }
-                    .buttonStyle(T3Button(.primary)).disabled(saving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
-            }
-        }.padding(24).frame(width: 680).background(Theme.bg).foregroundStyle(Theme.ink).disabled(saving).interactiveDismissDisabled(saving)
-            .onAppear { if initializedPromptDialog != item.id { title = item.value["title"].string; text = item.value["text"].string; initializedPromptDialog = item.id } }
+        } note: {
+            Text(PromptsText.count(text.count, "character")).font(Theme.mono(10.5))
+        } actions: {
+            Button("Cancel") { promptEditor = nil }.buttonStyle(Press(.quiet)).keyboardShortcut(.cancelAction)
+            Button(saving ? "Saving…" : item.value.isNull ? "Create prompt" : "Save changes") { Task { await savePrompt() } }
+                .buttonStyle(Press(.primary)).disabled(saving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
+        }
+        .disabled(saving).interactiveDismissDisabled(saving)
+        .onAppear { if initializedPromptDialog != item.id { title = item.value["title"].string; text = item.value["text"].string; initializedPromptDialog = item.id } }
     }
     private func resultForm(_ item: NativePresentedValue) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(item.value.isNull ? "Add result" : "Edit result").font(Theme.ui(18, weight: .semibold))
-                Text(item.value.isNull ? "Add files of any type or a web page for this prompt." : "Update the model and source details.")
-                    .font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-            }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Model").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-                        T3Field(placeholder: "Choose a suggestion or type a model ID", text: $model, mono: true).accessibilityLabel("Model label or custom ID")
-                        modelSuggestions
-                        Text("You can type a model that is not in the catalog.").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
+        BenchSheet(eyebrow: current["title"].string, title: item.value.isNull ? "Add result" : "Edit result", width: 620) {
+            VStack(alignment: .leading, spacing: 20) {
+                if editingResult.isNull {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Stops(options: [(value: false, label: "Files"), (value: true, label: "Link")], selection: useLink,
+                              icons: [false: "upload", true: "link-2"]) { choice in
+                            guard choice != useLink else { return }
+                            cancelPendingDrops(); useLink = choice
+                        }.accessibilityLabel("Result source")
+                        if useLink { linkField } else { fileWell }
                     }
-                    HStack {
-                        Text("Provider").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-                        Spacer()
-                        providerMenu(item.value)
-                    }
-                    if useLink {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("HTTP or HTTPS URL").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-                            T3Field(placeholder: "https://example.com/result", text: $link, mono: true).accessibilityLabel("HTTP or HTTPS URL")
-                        }
-                    } else if editingResult.isNull {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack(spacing: 12) {
-                                Button(action: chooseFiles) {
-                                    HStack(spacing: 6) { NativeIcon("upload", size: 14); Text("Choose files") }
-                                }.buttonStyle(T3Button(.outline))
-                                Text("or drag and drop here").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                            }
-                            Text("All file types · 50 MiB per file. Each file becomes a result with this model label.")
-                                .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                            ForEach(files, id: \.self) { url in
-                                HStack(spacing: 8) {
-                                    Text(url.lastPathComponent).font(Theme.ui(12)).foregroundStyle(Theme.dim).lineLimit(1)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    NativePendingPromptFileSize(url: url).fixedSize()
-                                    promptIcon("trash-2", help: "Remove " + url.lastPathComponent) { cancelPendingDrops(); files.removeAll { $0 == url } }
-                                }
-                            }
-                        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
-                    } else {
-                        Text(editingResult["fileName"].string + " stays attached to this result.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                    }
-                    if pendingDrops > 0 { ShimmerText(text: "Reading \(pendingDrops) dropped files …") }
-                    if editingResult.isNull {
-                        Button { cancelPendingDrops(); useLink.toggle() } label: {
-                            HStack(spacing: 6) {
-                                NativeIcon(useLink ? "upload" : "link-2", size: 14)
-                                Text(useLink ? "Use files instead" : "Use a URL instead")
-                            }
-                        }.buttonStyle(T3Button(.ghost))
-                    }
+                } else if useLink {
+                    linkField
+                } else {
+                    Text(editingResult["fileName"].string + " stays attached to this result.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
                 }
-            }.frame(maxHeight: 430)
-            if let error { NativeError(message: error) }
-            HStack(spacing: 8) {
-                Spacer()
-                Button("Cancel") { cancelPendingDrops(); resultEditor = nil }.buttonStyle(T3Button(.ghost)).disabled(saving).keyboardShortcut(.cancelAction)
-                Button(saving ? "Saving…" : item.value.isNull ? (files.count > 1 && !useLink ? "Add \(files.count) results" : "Add result") : "Save changes") { Task { await saveResults() } }
-                    .buttonStyle(T3Button(.primary)).disabled(saving || pendingDrops > 0 || model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (editingResult.isNull && (useLink ? link.isEmpty : files.isEmpty))).keyboardShortcut(.defaultAction)
+                HStack(alignment: .top, spacing: 16) {
+                    BenchField(label: "Model") {
+                        Entry(placeholder: "Choose a suggestion or type a model ID", text: $model, mono: true).accessibilityLabel("Model label or custom ID")
+                    }.frame(maxWidth: .infinity)
+                    BenchField(label: "Provider") { providerMenu(item.value) }
+                }
+                modelSuggestions
+                if let error { BenchFailure(message: error) }
             }
-        }.padding(24).frame(width: 610).background(Theme.bg).foregroundStyle(Theme.ink).disabled(saving).interactiveDismissDisabled(saving)
-            .overlay {
-                if resultDragTarget && !saving && editingResult.isNull {
-                    RoundedRectangle(cornerRadius: Theme.radiusMd).fill(Theme.bg.opacity(0.9))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.accent.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [5, 4])))
-                        .overlay {
-                            Text("Drop files to add results").font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.accent).padding(24)
-                        }.allowsHitTesting(false)
+        } note: {
+            if pendingDrops > 0 { Text("Reading \(pendingDrops) dropped files") }
+        } actions: {
+            Button("Cancel") { cancelPendingDrops(); resultEditor = nil }.buttonStyle(Press(.quiet)).disabled(saving).keyboardShortcut(.cancelAction)
+            Button(saving ? "Saving…" : item.value.isNull ? (files.count > 1 && !useLink ? "Add \(files.count) results" : "Add result") : "Save changes") { Task { await saveResults() } }
+                .buttonStyle(Press(.primary)).disabled(saving || pendingDrops > 0 || model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (editingResult.isNull && (useLink ? link.isEmpty : files.isEmpty))).keyboardShortcut(.defaultAction)
+        }
+        .disabled(saving).interactiveDismissDisabled(saving)
+        .overlay {
+            if resultDragTarget && !saving && editingResult.isNull {
+                RoundedRectangle(cornerRadius: Theme.radiusWell, style: .continuous).fill(Theme.canvas.opacity(0.92))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusWell, style: .continuous).strokeBorder(Theme.signal, style: StrokeStyle(lineWidth: 2, dash: [8, 5])))
+                    .overlay { Text("Drop files to add results").font(Theme.display(17)).foregroundStyle(Theme.ink) }
+                    .padding(12).allowsHitTesting(false)
+            }
+        }
+        .onAppear { if initializedResultDialog != item.id { model = item.value["model"].string; providerID = item.value["providerId"].string; link = item.value["url"].string; useLink = item.value["kind"].string == "url"; initializedResultDialog = item.id } }
+        .onDisappear { resultDragTarget = false }
+        .onDrop(of: [UTType.fileURL], isTargeted: $resultDragTarget) { acceptFiles($0) }
+    }
+    private var linkField: some View {
+        Entry(placeholder: "https://example.com/result", text: $link, mono: true, icon: "link-2").accessibilityLabel("HTTP or HTTPS URL")
+    }
+    private var fileWell: some View {
+        Well(padding: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    Button("Choose files", nativeIcon: "upload", action: chooseFiles)
+                    Text(files.isEmpty ? "or drop them here. Any type, 50 MiB per file." : "Each file becomes a result with the model below.")
+                        .font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Spacer(minLength: 0)
+                }.padding(14)
+                ForEach(files, id: \.self) { url in
+                    HStack(spacing: 10) {
+                        NativeIcon("file", size: 13, strokeWidth: 1.75).foregroundStyle(Theme.muted)
+                        Text(url.lastPathComponent).font(Theme.mono(11.5)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        NativePendingPromptFileSize(url: url).fixedSize()
+                        IconPress(icon: "x", help: "Remove " + url.lastPathComponent, size: 13) { cancelPendingDrops(); files.removeAll { $0 == url } }
+                    }
+                    .padding(.leading, 14).padding(.trailing, 8).frame(minHeight: 34)
+                    .overlay(alignment: .top) { Rule() }
                 }
             }
-            .onAppear { if initializedResultDialog != item.id { model = item.value["model"].string; providerID = item.value["providerId"].string; link = item.value["url"].string; useLink = item.value["kind"].string == "url"; initializedResultDialog = item.id } }
-            .onDisappear { resultDragTarget = false }
-            .onDrop(of: [UTType.fileURL], isTargeted: $resultDragTarget) { acceptFiles($0) }
+        }
     }
     @ViewBuilder private var modelSuggestions: some View {
         let suggestions = catalog["providers"].array.filter { providerID.isEmpty || $0["id"].string == providerID }.map { p -> JSONValue in
@@ -336,43 +426,39 @@ struct NativePromptsPage: View {
         }.filter { !$0["models"].array.isEmpty }
         if !suggestions.isEmpty {
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(suggestions, id: \.self["id"]) { p in
-                        Text(p["name"].string).font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).padding(.horizontal, 8).padding(.vertical, 4)
+                        MicroLabel(p["name"].string).frame(height: 24).padding(.top, 4)
                         ForEach(p["models"].array, id: \.self["id"]) { m in
-                            Button { providerID = p["id"].string; model = m["id"].string } label: {
+                            LedgerRow(selected: model == m["id"].string && providerID == p["id"].string, minHeight: 28, ruled: false,
+                                      action: { providerID = p["id"].string; model = m["id"].string }) {
                                 HStack(spacing: 8) {
-                                    Text(m["name"].string.isEmpty ? m["id"].string : m["name"].string).lineLimit(1)
+                                    Text(m["name"].string.isEmpty ? m["id"].string : m["name"].string).font(Theme.mono(12)).foregroundStyle(Theme.ink).lineLimit(1)
                                     Spacer(minLength: 0)
                                     if !m["name"].string.isEmpty && m["name"].string != m["id"].string {
-                                        Text(m["id"].string).font(Theme.mono(10)).foregroundStyle(Theme.muted).lineLimit(1)
+                                        Text(m["id"].string).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1)
                                     }
-                                }.font(Theme.mono(12)).frame(maxWidth: .infinity, alignment: .leading)
-                            }.buttonStyle(T3Button(.ghost, full: true))
-                                .background(model == m["id"].string && providerID == p["id"].string ? Theme.subtle : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+                                }
+                            }
                         }
                     }
-                }.padding(4)
-            }.frame(height: 150).background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.input, lineWidth: 1)).accessibilityLabel("Model suggestions")
+                }.padding(.horizontal, 8)
+            }
+            .frame(height: 150).padding(.horizontal, -8)
+            .overlay(alignment: .top) { Rule().padding(.horizontal, 0) }
+            .overlay(alignment: .bottom) { Rule() }
+            .padding(.top, -8)
+            .accessibilityLabel("Model suggestions")
         }
     }
     private func providerMenu(_ result: JSONValue) -> some View {
-        Menu {
-            Button("Unspecified provider") { providerID = "" }
-            ForEach(catalog["providers"].array, id: \.self["id"]) { p in Button(p["name"].string) { providerID = p["id"].string } }
-            if !result["providerId"].string.isEmpty, !catalog["providers"].array.contains(where: { $0["id"] == result["providerId"] }) {
-                Button(result["providerName"].string.isEmpty ? result["providerId"].string : result["providerName"].string) { providerID = result["providerId"].string }
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Text(providerID.isEmpty ? "Unspecified provider" : catalog["providers"].array.first(where: { $0["id"].string == providerID })?["name"].string ?? (result["providerName"].string.isEmpty ? providerID : result["providerName"].string)).lineLimit(1)
-                Spacer(minLength: 0)
-                NativeIcon("chevron-down", size: 12)
-            }.font(Theme.ui(12)).foregroundStyle(Theme.dim).padding(.horizontal, 11).frame(width: 220, height: 30)
-                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.input, lineWidth: 1))
-        }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().pointingHand().accessibilityLabel("Provider for this model")
+        var options: [(value: String, label: String)] = [(value: "", label: "Unspecified provider")]
+        options += catalog["providers"].array.map { (value: $0["id"].string, label: $0["name"].string) }
+        if !result["providerId"].string.isEmpty, !catalog["providers"].array.contains(where: { $0["id"] == result["providerId"] }) {
+            options.append((value: result["providerId"].string, label: result["providerName"].string.isEmpty ? result["providerId"].string : result["providerName"].string))
+        }
+        if !options.contains(where: { $0.value == providerID }) { options.append((value: providerID, label: providerID)) }
+        return Pick(title: "Provider for this model", selection: $providerID, options: options, width: 210)
     }
     private func reload() async {
         guard let service, let ticket = reads.begin("list") else { return }
@@ -538,64 +624,88 @@ private struct NativePendingPromptFileSize: View {
     }
 }
 
-private struct NativePromptListRow: View {
+private enum PromptsText {
+    static func count(_ value: Int, _ noun: String) -> String {
+        value.formatted(.number.locale(Locale(identifier: "en_US"))) + " " + (value == 1 ? noun : noun + "s")
+    }
+    static func day(_ milliseconds: Double) -> String {
+        Date(timeIntervalSince1970: milliseconds / 1000).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+/// One prompt in the index: its name, the first line of the task and how many
+/// results it holds. Hovering trades the count for a copy button.
+private struct PromptIndexRow: View {
     let prompt: JSONValue
     let selected: Bool
     let onSelect: () -> Void
     let onCopy: () -> Void
     @State private var hovering = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 1) {
-            Button(action: onSelect) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(prompt["title"].string).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text(prompt["text"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineSpacing(3).lineLimit(2)
-                    HStack(spacing: 4) {
-                        Text("\(prompt["resultCount"].int) \(prompt["resultCount"].int == 1 ? "result" : "results") ·")
-                        Text(Date(timeIntervalSince1970: prompt["updatedAt"].double / 1000), style: .date)
-                    }.font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1).padding(.top, 4)
-                }.padding(.horizontal, 10).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain).pointingHand().accessibilityAddTraits(selected ? [.isSelected] : [])
-            NativePromptIconButton(name: "clipboard", title: "Copy prompt: " + prompt["title"].string, action: onCopy)
-                .padding(.top, 4)
-        }.padding(4)
-            .background(selected ? Theme.accent.opacity(0.09) : hovering ? Theme.subtle : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(selected ? Theme.accent.opacity(0.35) : Theme.border, lineWidth: 1))
-            .onHover { hovering = $0 }
-    }
-}
-
-private struct NativePromptIconButton: View {
-    let name: String
-    let title: String
-    let action: () -> Void
-    @State private var hovering = false
-    @Environment(\.isEnabled) private var enabled
     @Environment(\.nativeReducedMotion) private var reduceMotion
 
     var body: some View {
-        Button(action: action) {
-            NativeIcon(name, size: 14)
-                .foregroundStyle(hovering && name == "trash-2" ? Theme.failFg : hovering ? Theme.ink : Theme.muted)
-                .frame(width: 28, height: 28)
-                .background(hovering ? Theme.subtle : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                .contentShape(Rectangle())
-        }.buttonStyle(.plain).opacity(enabled ? 1 : 0.45).pointingHand(enabled)
-            .onHover { hovering = $0 && enabled }.animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
-            .help(title).accessibilityLabel(title)
+        let count = prompt["resultCount"].int
+        LedgerRow(selected: selected, minHeight: 50, action: onSelect) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(prompt["title"].string).font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(prompt["text"].string.replacingOccurrences(of: "\n", with: " ")).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Text(String(count)).font(Theme.readout(17)).foregroundStyle(count == 0 ? Theme.faint : Theme.ink)
+                    .frame(width: 28, alignment: .trailing).opacity(hovering ? 0 : 1)
+                    .accessibilityLabel("\(count) \(count == 1 ? "result" : "results")")
+            }
+        }
+        .overlay(alignment: .trailing) {
+            IconPress(icon: "clipboard", help: "Copy prompt: " + prompt["title"].string, action: onCopy)
+                .opacity(hovering ? 1 : 0).offset(x: 6)
+        }
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
     }
 }
 
-private struct NativePromptEmptyState: View {
-    let icon: String
-    let title: String
-    let detail: String
+/// One collected result. The row itself opens the result; ranking and the
+/// rarely used commands sit on the right, outside the row's button.
+private struct PromptResultRow<Actions: View>: View {
+    let result: JSONValue
+    let rank: Int
+    let source: String
+    let open: () -> Void
+    @ViewBuilder var actions: () -> Actions
+    @State private var hovering = false
+    @Environment(\.nativeReducedMotion) private var reduceMotion
+
     var body: some View {
-        VStack(spacing: 8) {
-            NativeIcon(icon, size: 24).foregroundStyle(Theme.muted).accessibilityHidden(true)
-            Text(title).font(Theme.ui(14, weight: .medium))
-            Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-        }.frame(maxWidth: .infinity).padding(.horizontal, 16).padding(.vertical, 48).accessibilityElement(children: .combine)
+        HStack(spacing: 12) {
+            Button(action: open) {
+                HStack(spacing: 12) {
+                    Text(String(rank)).font(Theme.readout(17)).foregroundStyle(rank == 1 ? Theme.ink : Theme.muted)
+                        .frame(width: 44, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(result["model"].string).font(Theme.mono(12, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                        HStack(spacing: 6) {
+                            NativeIcon(result["kind"].string == "url" ? "link-2" : "file", size: 11, strokeWidth: 1.75)
+                            Text(source).lineLimit(1).truncationMode(.middle)
+                        }.font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    Text(result["fileSize"].isNull ? "" : ByteCountFormatter.string(fromByteCount: Int64(result["fileSize"].double), countStyle: .file))
+                        .font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1).frame(width: 64, alignment: .trailing)
+                }
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).pointingHand()
+            .accessibilityLabel((result["kind"].string == "url" ? "Open " : "Preview ") + result["model"].string)
+            .accessibilityValue("Rank \(rank). " + source)
+            .help(result["kind"].string == "url" ? result["url"].string : result["fileName"].string)
+            actions().frame(width: 88, alignment: .trailing)
+        }
+        .background {
+            RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous)
+                .fill(hovering ? Theme.hover : .clear).padding(.horizontal, -8)
+        }
+        .overlay(alignment: .bottom) { Rule() }
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
     }
 }
