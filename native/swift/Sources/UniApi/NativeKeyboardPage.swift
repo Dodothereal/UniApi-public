@@ -581,8 +581,8 @@ struct NativeKeyboardPage: View {
                 Flip(isOn: Binding(get: { enabled }, set: { value in Task { await operation("set-enabled", ["enabled": .bool(value)]) } }), enabled: !locked)
                     .accessibilityLabel("Record keyboard statistics")
             }
-            OptionRow(title: confirmingReset ? "Delete every recorded keyboard counter?" : "Reset statistics",
-                      detail: confirmingReset ? "This cannot be undone." : "Counters are kept until you delete them.", ruled: false) {
+            OptionRow(title: confirmingReset ? "Delete every recorded keyboard counter?" : "Recorded counters",
+                      detail: confirmingReset ? "This cannot be undone." : "Kept on this Mac until you delete them.", ruled: false) {
                 if confirmingReset {
                     HStack(spacing: 8) {
                         Button("Cancel") { confirmingReset = false }

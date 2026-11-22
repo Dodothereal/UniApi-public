@@ -10,6 +10,8 @@ struct NativeTranscribePage: View {
     @AppStorage("uniapi.transcribe.lang") private var language = ""
     @AppStorage("uniapi.transcribe.notify") private var notify = false
     @State private var source = ""
+    @FocusState private var sourceFocused: Bool
+    @Environment(\.nativeReducedMotion) private var reduceMotion
     @StateObject private var mediaReads = NativeMediaPageReads()
     @Environment(\.nativePageActive) private var pageActive
     @State private var rows: [JSONValue] = []
@@ -52,7 +54,7 @@ struct NativeTranscribePage: View {
             if let pageError { Notice(text: pageError, tone: .fail).accessibilityLabel("Error: " + pageError) }
             if selected == nil {
                 composer
-                tally
+                if !rows.isEmpty { tally }
                 history
                 if !status.isNull && !needsSetup { Band("On-device model", spacing: 0) { modelRow } }
             } else { transcript }
@@ -60,15 +62,7 @@ struct NativeTranscribePage: View {
         .overlay { if dropTarget { RoundedRectangle(cornerRadius: Theme.radiusWell, style: .continuous).strokeBorder(Theme.signal, style: StrokeStyle(lineWidth: 2, dash: [8, 5])).padding(12).allowsHitTesting(false) } }
         .onDrop(of: [UTType.fileURL], isTargeted: $dropTarget) { providers in acceptFiles(providers) }
         .sheet(isPresented: $rename) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Rename transcript").font(Theme.display(17)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-                Entry(placeholder: "Title", text: $title, autoFocus: true).accessibilityLabel("Transcript title")
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    Button("Cancel") { rename = false }.buttonStyle(Press(.quiet)).keyboardShortcut(.cancelAction)
-                    Button("Save") { Task { await renameTranscript() } }.buttonStyle(Press(.primary)).disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
-                }
-            }.padding(24).frame(width: 440).background(Theme.popover)
+            NativeTranscriptRenameSheet(title: $title, cancel: { rename = false }, save: { Task { await renameTranscript() } })
         }
         .alert("Delete transcript?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Cancel", role: .cancel) { deleting = nil }
@@ -101,28 +95,29 @@ struct NativeTranscribePage: View {
     /// choices that apply to the next transcription. Files can be dropped anywhere.
     private var composer: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if needsSetup { modelRow }
-            if !status.isNull && !status["ytdlp"].bool {
-                Notice(text: "Links need the optional yt-dlp. Local WAV, MP3 and M4A files use the built-in decoder; other formats may need ffmpeg.")
-            }
-            Well(padding: 16) {
-                VStack(alignment: .leading, spacing: 14) {
+            // One surface: the well is the field, so nothing is boxed inside it.
+            Well(padding: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 8) { sourceField; sourceActions }
-                        VStack(alignment: .leading, spacing: 8) { sourceField; HStack(spacing: 8) { sourceActions } }
-                    }
+                        VStack(alignment: .leading, spacing: 0) { sourceField; HStack(spacing: 8) { sourceActions }.padding(.bottom, 12) }
+                    }.padding(.leading, 16).padding(.trailing, 12)
                     Rule()
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 24) { dropHint; Spacer(minLength: 0); sourceOptions }
-                        VStack(alignment: .leading, spacing: 12) { dropHint; HStack(spacing: 24) { sourceOptions } }
-                    }
+                        VStack(alignment: .leading, spacing: 10) { dropHint; HStack(spacing: 24) { sourceOptions } }
+                    }.padding(.leading, 16).padding(.trailing, 12).padding(.vertical, 10)
                 }
             }
             .overlay {
-                if dropTarget {
-                    RoundedRectangle(cornerRadius: Theme.radiusWell, style: .continuous)
-                        .strokeBorder(Theme.signal, style: StrokeStyle(lineWidth: 1, dash: [4, 3])).allowsHitTesting(false)
-                }
+                RoundedRectangle(cornerRadius: Theme.radiusWell, style: .continuous)
+                    .strokeBorder(Theme.signal, style: StrokeStyle(lineWidth: 1, dash: dropTarget ? [4, 3] : []))
+                    .opacity(dropTarget || sourceFocused ? 1 : 0).allowsHitTesting(false)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: sourceFocused)
+            }
+            if needsSetup { modelRow }
+            if !status.isNull && !status["ytdlp"].bool {
+                Notice(text: "Links need the optional yt-dlp. Local WAV, MP3 and M4A files use the built-in decoder; other formats may need ffmpeg.")
             }
         }
     }
@@ -145,17 +140,17 @@ struct NativeTranscribePage: View {
         }.help("One ping per transcript. Configure and enable Telegram delivery in Settings first.")
     }
     private var sourceField: some View {
-        NativeTranscribeSourceField(source: $source) { Task { await submit(source, upload: false) } }
+        NativeTranscribeSourceField(source: $source, focused: $sourceFocused) { Task { await submit(source, upload: false) } }
     }
     @ViewBuilder private var sourceActions: some View {
         Button(action: chooseFiles) {
             HStack(spacing: 6) { NativeIcon("folder-open", size: 14, strokeWidth: 1.75); Text("Files") }
-        }.buttonStyle(Press(.secondary, height: 34)).accessibilityLabel("Choose files")
+        }.buttonStyle(Press(.secondary)).accessibilityLabel("Choose files")
         // One primary at a time: while the model is missing, installing it is the action.
         Button { Task { await submit(source, upload: false) } } label: {
             HStack(spacing: 6) { NativeIcon("mic", size: 14, strokeWidth: 1.75); Text(submitting ? "Starting…" : "Transcribe") }
                 .frame(minWidth: 93)
-        }.buttonStyle(Press(needsSetup && !modelReady ? .secondary : .primary, height: 34))
+        }.buttonStyle(Press(needsSetup && !modelReady ? .secondary : .primary))
             .disabled(submitting || source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !status["localReady"].bool)
     }
 
@@ -208,7 +203,7 @@ struct NativeTranscribePage: View {
         let audio: (String, String) = seconds >= 3600 ? (String(format: "%.1f", seconds / 3600), "h") : (String(format: "%.0f", seconds / 60), "min")
         return ReadoutStrip(minimum: 130) {
             Readout(label: "Transcripts", value: known ? String(rows.count) : "--", size: .medium, color: known ? Theme.ink : Theme.faint)
-            Readout(label: "Audio transcribed", value: known ? audio.0 : "--", unit: known ? audio.1 : "", size: .medium, color: known ? Theme.ink : Theme.faint)
+            Readout(label: "Audio", value: known ? audio.0 : "--", unit: known ? audio.1 : "", size: .medium, color: known ? Theme.ink : Theme.faint)
             Readout(label: "Words", value: known ? NativeNumberFormat.compact(words) : "--", size: .medium, color: known ? Theme.ink : Theme.faint)
             Readout(label: "In progress", value: known ? String(working) : "--", size: .medium, tint: working > 0 ? Theme.signal : nil, color: known ? Theme.ink : Theme.faint)
         }
@@ -434,6 +429,26 @@ struct NativeTranscribePage: View {
     private func duration(_ seconds: Double) -> String { NativeListTimeFormat.duration(seconds * 1000) }
 }
 
+/// Its own view, so Save follows the title as it is typed: state read only
+/// inside a sheet closure does not refresh the sheet.
+private struct NativeTranscriptRenameSheet: View {
+    @Binding var title: String
+    let cancel: () -> Void
+    let save: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename transcript").font(Theme.display(17)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+            Entry(placeholder: "Title", text: $title, autoFocus: true).accessibilityLabel("Transcript title")
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button("Cancel", action: cancel).buttonStyle(Press(.quiet)).keyboardShortcut(.cancelAction)
+                Button("Save", action: save).buttonStyle(Press(.primary))
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
+            }
+        }.padding(24).frame(width: 440).background(Theme.popover)
+    }
+}
+
 /// What a transcript is called: its title, else the file's name or the link.
 /// The whole source stays in the tooltip and beside an open transcript.
 private func nativeTranscriptName(_ row: JSONValue) -> String {
@@ -442,23 +457,21 @@ private func nativeTranscriptName(_ row: JSONValue) -> String {
     return row["source_kind"].string == "file" && source.contains("/") ? URL(fileURLWithPath: source).lastPathComponent : source
 }
 
-/// The page's main input. It keeps its own accessibility label, which the
-/// kit's `Entry` has no slot for, and stands as tall as the buttons beside it.
+/// The page's main input: a bare line of text that takes the composer well
+/// as its field. It carries its own accessibility label, which the kit's
+/// `Entry` has no slot for.
 private struct NativeTranscribeSourceField: View {
     @Binding var source: String
+    var focused: FocusState<Bool>.Binding
     let onSubmit: () -> Void
-    @FocusState private var focused: Bool
-    @Environment(\.nativeReducedMotion) private var reduceMotion
     var body: some View {
-        HStack(spacing: 8) {
-            NativeIcon("link", size: 13, strokeWidth: 1.75).foregroundStyle(Theme.muted).accessibilityHidden(true)
-            TextField("Paste an HTTP(S) link or file path", text: $source)
-                .textFieldStyle(.plain).font(Theme.mono(12)).foregroundStyle(Theme.ink).accessibilityLabel("Transcription source")
-                .focused($focused).onSubmit(onSubmit)
-        }.padding(.horizontal, 10).frame(minWidth: 180, maxWidth: .infinity).frame(height: 34)
-            .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous).strokeBorder(focused ? Theme.signal : Theme.ruleStrong, lineWidth: 1))
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: focused)
+        HStack(spacing: 10) {
+            NativeIcon("link", size: 14, strokeWidth: 1.75).foregroundStyle(focused.wrappedValue ? Theme.ink : Theme.muted).accessibilityHidden(true)
+            TextField("Paste a link or a file path", text: $source)
+                .textFieldStyle(.plain).font(Theme.ui(13)).foregroundStyle(Theme.ink).accessibilityLabel("Transcription source")
+                .focused(focused).onSubmit(onSubmit)
+        }.frame(minWidth: 180, maxWidth: .infinity).frame(height: 58).contentShape(Rectangle())
+            .onTapGesture { focused.wrappedValue = true }
     }
 }
 

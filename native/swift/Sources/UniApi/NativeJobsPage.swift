@@ -209,7 +209,7 @@ private enum JobColumn {
     static let started: CGFloat = 76
     static let took: CGFloat = 68
     /// Width below which the App column gives its room to the title.
-    static let wide: CGFloat = lead + 220 + app + status + started + took + 48
+    static let wide: CGFloat = lead + 320 + app + status + started + took + 48
 }
 
 private struct NativeJobLedgerHead: View {
@@ -309,9 +309,9 @@ struct NativeJobRow: View {
     }
     private var liveLine: some View {
         HStack(spacing: 10) {
-            Text(title).font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-            Tag(value["app"].string)
-            if !running { statusTag }
+            Text(title).font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1).layoutPriority(1)
+            Tag(value["app"].string).fixedSize().layoutPriority(1)
+            if !running { statusTag.fixedSize().layoutPriority(1) }
             Spacer(minLength: 8)
             progressText
             if !took.isEmpty { Text(took).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).fixedSize() }
