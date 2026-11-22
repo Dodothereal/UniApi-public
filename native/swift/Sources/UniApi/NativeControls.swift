@@ -465,7 +465,7 @@ struct NativeStatus: View {
     var tone: Tone
     var body: some View {
         HStack(spacing: 5) {
-            NativeIcon(tone == .ok ? "check" : tone == .warn ? "triangle-alert" : tone == .fail ? "circle-alert" : "minus", size: 12)
+            NativeIcon(tone == .ok ? "check" : tone == .warn ? "triangle-alert" : tone == .fail ? "circle-alert" : "circle-minus", size: 12)
             Text(text).font(Theme.ui(Theme.textXs, weight: .medium)).lineLimit(1)
         }
         .foregroundStyle(tone == .ok ? Theme.okFg : tone == .warn ? Theme.warnFg : tone == .fail ? Theme.failFg : Theme.muted)
