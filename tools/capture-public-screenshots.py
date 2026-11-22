@@ -57,12 +57,13 @@ DETAIL_LABEL = "Offscreen native Settings page, empty fixture; capture-only expa
 COMBINED_DEFAULT_LABEL = "Offscreen native page, empty fixture; capture-only session and Settings-state instrumentation"
 
 # Each replacement is admitted exactly once and recorded with its copied
-# source hash. These changes initialize real production disclosures and mark
-# their existing location; they do not replace any content or page container.
+# source hash. These changes select the real Settings category, initialize
+# production disclosures and mark their existing location; they do not replace
+# any content or page container.
 DETAIL_TRANSFORMS = {
     "NativeSettingsPage.swift": [
-        ('NativeDisclosure("Customize colors") {',
-         'NativeDisclosure("Customize colors", isExpanded: .constant(ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"]?.hasPrefix("theme-") == true)) {'),
+        ('@AppStorage("uniapi-settings-category") private var category = "appearance"',
+         '@State private var category = { () -> String in let section = ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] ?? ""; return section.hasPrefix("theme-") ? "colors" : section.isEmpty ? "appearance" : section }()'),
         ('NativeThemeSettingsView()',
          'NativeThemeSettingsView().background(PublicCaptureAnchor("theme-common"))'),
         ('NativeSidebarSettingsView()',
