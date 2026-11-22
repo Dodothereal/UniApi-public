@@ -72,8 +72,9 @@ the guide opens again at the next launch.
 
 Once in the app, start with whichever part is useful:
 
-1. **Home** gives you an overview and shortcuts. Explore without connecting a
-   provider or installing a transcription model.
+1. **Home** reads out the current coding route, the last benchmark and what is
+   running in the background. Explore without connecting a provider or
+   installing a transcription model.
 2. **Switcher** is where you can configure your own provider endpoint, model
    and credentials, or manage an optional coding-tool route.
 3. **Statistics** reads supported local coding-tool usage stores; configure
@@ -158,13 +159,20 @@ page navigation and Statistics Reload. It saves timing and process counters
 locally, without prompts, model names or credentials. See
 [recording scope and limits](docs/SETTINGS.md#performance-recording).
 
-Settings includes Light/Dark palettes with Original, Ocean, Forest and Plum
-presets, plus color pickers and hex fields for text, highlights, surfaces and
-other roles. Common colors appear first; advanced controls and contrast checks
-are available without leaving the page. Spacing and motion are also adjustable.
+Every page opens with the one reading it exists for, puts its main action at
+the top right and lists detail below in ruled ledgers. Command-K opens a jump
+palette for pages and commands, Command-B folds the sidebar to an icon rail and
+Command-1 to Command-9 open the first nine pages. See the
+[design language](docs/DESIGN.md).
+
+Settings includes the Graphite (dark) and Paper (light) looks with Meter, Ocean,
+Forest and Plum presets, plus color pickers and hex fields for text, highlights,
+surfaces and other roles. Common colors appear first; advanced controls and
+contrast checks are available without leaving the page. Spacing and motion are
+also adjustable.
 
 Choose the launch page, restore the last visited page, and customize sidebar
-visibility, order, width and badges. The sidebar editor supports drag targets
+visibility, order, width and readings. The sidebar editor supports drag targets
 and a keyboard-accessible Move menu. Telegram setup walks through creating a
 bot, explicitly finding destination chats, and saving optional delivery.
 Home, Jobs and Settings stay available in the sidebar. See
@@ -174,7 +182,7 @@ Home, Jobs and Settings stay available in the sidebar. See
 
 | Page | What it does |
 | --- | --- |
-| Home | Overview and shortcuts |
+| Home | Current route, last benchmark and background work at a glance |
 | Speed, Results, Prompts | Benchmark providers, compare history and manage prompts |
 | Arena | Blind model comparisons and rankings |
 | Switcher, Code | Configure providers and coding tools; work in coding sessions |
@@ -232,14 +240,14 @@ not an operator's usage or billed spend.
 
 **Results — sample comparison, Dark**
 
-![Native Results with two synthetic models, an inline winner and aligned headline cards](assets/screenshots/results-dark.png)
+![Native Results with two synthetic models, a leading winner readout and a ranking ledger](assets/screenshots/results-dark.png)
 
 [Results — Light](assets/screenshots/results-light.png) ·
 [Home — Dark](assets/screenshots/home-dark.png) ·
 [Home — Light](assets/screenshots/home-light.png)
 
 The comparison uses invented measurements, not provider performance claims.
-The Home illustrations use empty dashboard summaries.
+The Home illustrations use empty readings.
 
 **Transcribe — Dark**
 

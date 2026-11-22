@@ -54,7 +54,7 @@ struct NativeFansPage: View {
         return .ready
     }
     var body: some View {
-        NativePage(title: "Fan Control", readiness: pageReadiness) {
+        NativePage(title: "Fan Control", eyebrow: "Cooling and thermals", readiness: pageReadiness) {
             headerActions
         } content: {
             if let statusReadError { statusError(statusReadError) }

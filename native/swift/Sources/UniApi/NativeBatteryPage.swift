@@ -70,7 +70,7 @@ struct NativeBatteryPage: View {
     /// The limit most people want next: the usual 80 percent cap, or a full charge.
     private var quickTarget: Int { target == 100 ? (levels.first { $0 >= 80 && $0 < 100 } ?? levels.first ?? 100) : 100 }
     var body: some View {
-        NativePage(title: "Battery", readiness: state.error != nil ? .failed : state.status.isNull ? .pending : .ready) {
+        NativePage(title: "Battery", eyebrow: "Charge and limit", readiness: state.error != nil ? .failed : state.status.isNull ? .pending : .ready) {
             IconPress(icon: "refresh-cw", help: "Refresh") { refresh() }
             if status["supported"].bool {
                 Button(target == 100 ? "Limit to \(quickTarget)%" : "Charge to full", nativeIcon: target == 100 ? "shield-check" : "battery-charging") {
