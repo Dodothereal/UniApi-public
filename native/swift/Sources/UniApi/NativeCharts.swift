@@ -91,6 +91,40 @@ enum NativeChartMath {
         return result.isEmpty ? endpoints(domain) : result
     }
 
+    /// Unlabelled graduations between the labelled ticks of a ruler axis.
+    static func minorTicks(_ majors: [Double], in domain: ClosedRange<Double>, divisions: Int = 5) -> [Double] {
+        guard majors.count >= 2, divisions > 1 else { return [] }
+        let step = (majors[1] - majors[0]) / Double(divisions)
+        guard step.isFinite, step > 0 else { return [] }
+        let below = ((majors[0] - domain.lowerBound) / step).rounded(.down)
+        let above = ((domain.upperBound - majors[0]) / step).rounded(.down)
+        guard below.isFinite, above.isFinite, below + above < 400 else { return [] }
+        var result: [Double] = []
+        for index in Int(-below)...Int(above) where index % divisions != 0 {
+            result.append(majors[0] + Double(index) * step)
+        }
+        return result
+    }
+
+    /// A logarithmic ruler: 1, 2 and 5 of each decade carry labels (only the
+    /// decades themselves across a wide span); the other digits graduate it.
+    static func logTicks(_ domain: ClosedRange<Double>) -> (majors: [Double], minors: [Double]) {
+        guard domain.lowerBound > 0, domain.upperBound.isFinite, domain.upperBound > domain.lowerBound else { return ([], []) }
+        let first = floor(log10(domain.lowerBound)), last = ceil(log10(domain.upperBound))
+        guard first.isFinite, last.isFinite, last - first <= 24 else { return ([], []) }
+        let wide = last - first > 2
+        var majors: [Double] = [], minors: [Double] = []
+        for exponent in Int(first)...Int(last) {
+            let decade = pow(10, Double(exponent))
+            for digit in 1...9 {
+                let value = decade * Double(digit)
+                guard domain.contains(value) else { continue }
+                if digit == 1 || (!wide && (digit == 2 || digit == 5)) { majors.append(value) } else { minors.append(value) }
+            }
+        }
+        return (majors, minors)
+    }
+
     private static func endpoints(_ domain: ClosedRange<Double>) -> [Double] {
         var result = [domain.lowerBound]
         if domain.lowerBound < 0 && domain.upperBound > 0 { result.append(0) }
@@ -99,15 +133,16 @@ enum NativeChartMath {
     }
 }
 
+/// A plot's name and one line saying how to read it.
 struct NativeChartHeading: View {
     var title: String
     var caption: String = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(Theme.heading()).foregroundStyle(Theme.ink)
                 .accessibilityAddTraits(.isHeader)
             if !caption.isEmpty {
-                Text(caption).font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                Text(caption).font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -116,40 +151,113 @@ struct NativeChartHeading: View {
 
 typealias ChartHeading = NativeChartHeading
 
+/// The mark that ties a row, a legend entry or a tooltip line to its series.
+struct NativeSeriesTick: View {
+    var color: Color
+    var height: CGFloat = 10
+    var body: some View {
+        Rectangle().fill(color).frame(width: 3, height: height).accessibilityHidden(true)
+    }
+}
+
+/// Left-aligned items that wrap onto further lines instead of scrolling away.
+struct NativeChartFlow: Layout {
+    var spacing: CGFloat = 6
+    var rowSpacing: CGFloat = 6
+
+    private func rows(_ width: CGFloat, _ subviews: Subviews) -> [(range: Range<Int>, height: CGFloat)] {
+        var result: [(range: Range<Int>, height: CGFloat)] = []
+        var start = 0, x: CGFloat = 0, height: CGFloat = 0
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            if index > start, x + size.width > width {
+                result.append((start..<index, height)); start = index; x = 0; height = 0
+            }
+            x += size.width + spacing; height = max(height, size.height)
+        }
+        if start < subviews.count { result.append((start..<subviews.count, height)) }
+        return result
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? .greatestFiniteMagnitude
+        let lines = rows(width, subviews)
+        let height = lines.reduce(0) { $0 + $1.height } + rowSpacing * CGFloat(max(0, lines.count - 1))
+        let widest = lines.map { line in
+            line.range.reduce(-spacing) { $0 + subviews[$1].sizeThatFits(.unspecified).width + spacing }
+        }.max() ?? 0
+        return CGSize(width: proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? max(0, widest), height: height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for line in rows(bounds.width, subviews) {
+            var x = bounds.minX
+            for index in line.range {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y + (line.height - size.height) / 2), anchor: .topLeading,
+                                      proposal: ProposedViewSize(width: min(size.width, bounds.width), height: size.height))
+                x += size.width + spacing
+            }
+            y += line.height + rowSpacing
+        }
+    }
+}
+
 struct NativeLegendEntry: Identifiable {
     var id: String
     var label: String
     var color: Color
 }
 
+/// The legend is a line of tags. Choosing one isolates its series and marks it
+/// with the signal tick; choosing it again shows every series.
 struct NativeChartLegend: View {
     var entries: [NativeLegendEntry]
     @Binding var selection: String?
     @Environment(\.nativeReducedMotion) private var reduceMotion
+    @Environment(\.nativeMotionVisible) private var visible
     var body: some View {
-        NativeScrollRail {
+        NativeChartFlow {
             ForEach(entries) { entry in
                 let selected = selection == entry.id
-                let included = selection == nil || selected
-                Button { selection = selected ? nil : entry.id } label: {
-                    HStack(spacing: 6) {
-                        Capsule().fill(entry.color).frame(width: 10, height: 3)
-                        Text(entry.label).font(Theme.mono(10)).lineLimit(1)
-                    }
-                    .foregroundStyle(included ? Theme.dim : Theme.muted)
-                    .padding(.horizontal, 7).padding(.vertical, 4)
-                    .background(selected ? Theme.subtle2 : .clear,
-                                in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm)
-                        .strokeBorder(selected ? Theme.input : .clear))
-                    .opacity(included ? 1 : 0.4)
+                NativeLegendTag(entry: entry, selected: selected, included: selection == nil || selected) {
+                    selection = selected ? nil : entry.id
                 }
-                .buttonStyle(.plain).pointingHand()
-                .accessibilityAddTraits(selected ? [.isSelected] : [])
-                .help(selected ? "Show every series" : "Show only " + entry.label)
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: selection)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(reduceMotion || !visible ? nil : NativeMotion.isolation, value: selection)
+    }
+}
+
+private struct NativeLegendTag: View {
+    let entry: NativeLegendEntry
+    let selected: Bool
+    let included: Bool
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.nativeReducedMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                NativeSeriesTick(color: entry.color)
+                Text(entry.label).font(Theme.mono(10.5)).lineLimit(1).truncationMode(.middle)
+            }
+            .foregroundStyle(selected || hovering ? Theme.ink : Theme.dim)
+            .padding(.horizontal, 6).frame(height: 20).frame(maxWidth: 260)
+            .background(RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(selected ? Theme.pressed : hovering ? Theme.pressed : Theme.hover))
+            .overlay(alignment: .bottom) { if selected { Theme.signal.frame(height: 2) } }
+            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+            .opacity(included ? 1 : 0.4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointingHand(enabled)
+        .onHover { hovering = $0 && enabled }
+        .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .help(selected ? "Show every series" : "Show only " + entry.label)
     }
 }
 
@@ -159,33 +267,114 @@ struct NativeTooltipLine {
     var color: Color
 }
 
+/// A ruled popover: the position on the rule above, one line per series below.
 struct NativeChartTooltip: View {
     var title: String
     var lines: [NativeTooltipLine]
     var width: CGFloat = 276
+    var detail: String = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(Theme.mono(10, weight: .medium)).foregroundStyle(Theme.muted)
-            ForEach(Array(lines.prefix(6).enumerated()), id: \.offset) { _, line in
-                HStack(spacing: 6) {
-                    StatusDot(color: line.color, size: 5)
-                    Text(line.label).font(Theme.mono(10)).foregroundStyle(Theme.dim)
-                        .lineLimit(1).truncationMode(.middle)
-                    Spacer(minLength: 8)
-                    Text(line.value).font(Theme.mono(10, weight: .medium)).foregroundStyle(Theme.ink)
-                        .lineLimit(1)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                Theme.signal.frame(width: 2, height: 9)
+                Text(title).font(Theme.mono(10.5, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                Spacer(minLength: 8)
+                if !detail.isEmpty {
+                    Text(detail).font(Theme.mono(10.5, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
                 }
             }
-            if lines.count > 6 {
-                Text("\(lines.count - 6) more series").font(Theme.ui(10)).foregroundStyle(Theme.muted)
+            .padding(.horizontal, 10).frame(height: 26)
+            if !lines.isEmpty {
+                Rule()
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(Array(lines.prefix(6).enumerated()), id: \.offset) { _, line in
+                        HStack(spacing: 7) {
+                            NativeSeriesTick(color: line.color, height: 9)
+                            Text(line.label).font(Theme.mono(10.5)).foregroundStyle(Theme.dim)
+                                .lineLimit(1).truncationMode(.middle)
+                            Spacer(minLength: 8)
+                            Text(line.value).font(Theme.mono(10.5, weight: .medium)).foregroundStyle(Theme.ink)
+                                .lineLimit(1)
+                        }
+                    }
+                    if lines.count > 6 {
+                        Text("\(lines.count - 6) more series").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
+                    }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
             }
         }
-        .padding(.horizontal, 9).padding(.vertical, 7)
         .frame(width: max(0, width), alignment: .leading)
-        .background(Theme.popover, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-        .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input))
-        .shadow(color: Theme.shadow, radius: 12, y: 4)
+        .background(Theme.popover, in: RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous).strokeBorder(Theme.ruleStrong))
+        .shadow(color: Theme.shadow, radius: 10, y: 4)
         .allowsHitTesting(false)
+    }
+}
+
+/// Where a tooltip goes: beside the crosshair, on whichever side has room.
+enum NativeChartTooltipPlacement {
+    static func x(anchor: CGFloat, width: CGFloat, container: CGFloat) -> CGFloat {
+        let right = anchor + 12
+        if right + width <= container { return max(0, right) }
+        let left = anchor - 12 - width
+        return left >= 0 ? left : max(0, container - width)
+    }
+}
+
+/// Ruler axes. Short ticks graduate the edge, long ticks carry the labels, and
+/// the plot keeps a hairline spine instead of a grid.
+enum NativeChartAxis {
+    static let tick = StrokeStyle(lineWidth: 1)
+
+    @AxisContentBuilder
+    static func numeric(_ majors: [Double], minors: [Double], position: AxisMarkPosition,
+                        format: @escaping (Double) -> String) -> some AxisContent {
+        AxisMarks(position: position, values: minors) { _ in
+            AxisTick(length: 3, stroke: tick).foregroundStyle(Theme.faint)
+        }
+        AxisMarks(position: position, values: majors) { value in
+            AxisTick(length: 6, stroke: tick).foregroundStyle(Theme.muted)
+            AxisValueLabel {
+                if let number = value.as(Double.self) {
+                    Text(format(number)).font(Theme.mono(10.5)).foregroundStyle(Theme.muted)
+                }
+            }
+        }
+    }
+
+    /// Calendar axis: one short tick per `minor` unit, labelled long ticks at
+    /// whatever spacing the width allows.
+    @AxisContentBuilder
+    static func dates(minor: Calendar.Component, labels: Int = 6) -> some AxisContent {
+        AxisMarks(values: .stride(by: minor)) { _ in
+            AxisTick(length: 3, stroke: tick).foregroundStyle(Theme.faint)
+        }
+        AxisMarks(values: .automatic(desiredCount: labels)) { _ in
+            AxisTick(length: 6, stroke: tick).foregroundStyle(Theme.muted)
+            AxisValueLabel().font(Theme.mono(10.5)).foregroundStyle(Theme.muted)
+        }
+    }
+
+    /// Labelled ticks at positions the chart chooses (logarithmic scales).
+    @AxisContentBuilder
+    static func automatic(position: AxisMarkPosition, format: @escaping (Double) -> String) -> some AxisContent {
+        AxisMarks(position: position) { value in
+            AxisTick(length: 6, stroke: tick).foregroundStyle(Theme.muted)
+            AxisValueLabel {
+                if let number = value.as(Double.self) {
+                    Text(format(number)).font(Theme.mono(10.5)).foregroundStyle(Theme.muted)
+                }
+            }
+        }
+    }
+}
+
+extension View {
+    /// The plot's spine: a hairline along the bottom and along the value axis.
+    func nativePlotSpine(trailing: Bool = true) -> some View {
+        overlay(alignment: .bottom) { Theme.baseline.frame(height: 1).allowsHitTesting(false) }
+            .overlay(alignment: trailing ? .trailing : .leading) { Theme.baseline.frame(width: 1).allowsHitTesting(false) }
     }
 }
 
@@ -194,6 +383,7 @@ struct NativeChartTooltip: View {
 private struct NativeChartOverlay: View {
     var proxy: ChartProxy
     var samples: [NativeChartSample]
+    var markers: Bool
     var xFormat: (Double) -> String
     var yFormat: (Double) -> String
     @State private var cursor: Double?
@@ -207,28 +397,43 @@ private struct NativeChartOverlay: View {
         GeometryReader { geometry in
             if let plotFrame = proxy.plotFrame {
                 let plot = geometry[plotFrame]
+                let hovered = nearest
                 ZStack(alignment: .topLeading) {
-                    if let sample = nearest.first, let x = proxy.position(forX: sample.x) {
-                        Rectangle().fill(Theme.crosshair).frame(width: 1, height: plot.height)
+                    if let sample = hovered.first, let x = proxy.position(forX: sample.x) {
+                        Rectangle().fill(Theme.signal).frame(width: 1, height: plot.height)
                             .offset(x: plot.minX + x, y: plot.minY)
+                        if markers {
+                            ForEach(hovered) { point in
+                                if let y = proxy.position(forY: point.y) {
+                                    Rectangle().fill(Theme.well).frame(width: 7, height: 7)
+                                        .overlay(Rectangle().strokeBorder(point.color, lineWidth: 1.5))
+                                        .offset(x: plot.minX + x - 3, y: plot.minY + y - 3.5)
+                                }
+                            }
+                        }
                         let width = min(276, geometry.size.width)
-                        NativeChartTooltip(title: xFormat(sample.x), lines: nearest.map {
+                        NativeChartTooltip(title: xFormat(sample.x), lines: hovered.map {
                             NativeTooltipLine(label: $0.label, value: yFormat($0.y), color: $0.color)
                         }, width: width)
-                        .offset(x: min(max(0, plot.minX + x + 12), max(0, geometry.size.width - width)),
+                        .offset(x: NativeChartTooltipPlacement.x(anchor: plot.minX + x, width: width, container: geometry.size.width),
                                 y: plot.minY + 6)
                     }
                     Rectangle().fill(.clear).contentShape(Rectangle())
                         .onContinuousHover { phase in
+                            let next: Double?
                             switch phase {
                             case .active(let location):
-                                cursor = plot.contains(location) ? proxy.value(atX: location.x - plot.minX) : nil
-                            case .ended: cursor = nil
+                                next = plot.contains(location) ? proxy.value(atX: location.x - plot.minX) : nil
+                            case .ended: next = nil
                             }
+                            if next != cursor { cursor = next }
                         }
                 }
             }
         }
+        // The readout follows the pointer at once, whatever transaction an
+        // ancestor happens to be in.
+        .transaction { $0.animation = nil }
         .onChange(of: samples) { cursor = nil }
     }
 }
@@ -253,9 +458,9 @@ struct NativeLineChart: View {
 
     var body: some View {
         let points = samples
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             if points.isEmpty {
-                NativeEmptyState(title: "No measured points", detail: "Measurements appear here when they are available.", icon: "chart.xyaxis.line")
+                Blank(icon: "chart-line", title: "No measured points", detail: "Measurements appear here when they are available.")
             } else {
                 chart(points)
             }
@@ -268,42 +473,35 @@ struct NativeLineChart: View {
     }
 
     private func chart(_ points: [NativeChartSample]) -> some View {
+        let xDomain = NativeChartMath.domain(points.map(\.x), includeZero: false)
         let yDomain = NativeChartMath.domain(points.map(\.y), includeZero: includeZero)
+        let xMajors = NativeChartMath.ticks(xDomain, count: 6), yMajors = NativeChartMath.ticks(yDomain)
+        let xMinors = NativeChartMath.minorTicks(xMajors, in: xDomain)
+        let yMinors = NativeChartMath.minorTicks(yMajors, in: yDomain)
         return Chart {
             ForEach(points) { point in
                 LineMark(x: .value("Position", point.x), y: .value("Value", point.y),
                          series: .value("Path", point.pathID))
                     .foregroundStyle(point.color)
-                    .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                    .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .round))
                     .interpolationMethod(monotone ? .monotone : .linear)
                 if showPoints {
                     PointMark(x: .value("Position", point.x), y: .value("Value", point.y))
-                        .foregroundStyle(point.color).symbolSize(isolated == nil ? 20 : 34)
+                        .foregroundStyle(point.color).symbol(.square).symbolSize(isolated == nil ? 14 : 26)
                         .accessibilityLabel(point.label + ", " + xFormat(point.x))
                         .accessibilityValue(yFormat(point.y))
                 }
             }
         }
-        .chartXScale(domain: NativeChartMath.domain(points.map(\.x), includeZero: false))
+        .chartXScale(domain: xDomain)
         .chartYScale(domain: yDomain)
-        .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 6)) { value in
-                AxisGridLine().foregroundStyle(Theme.grid)
-                AxisValueLabel {
-                    if let x = value.as(Double.self) { Text(xFormat(x)).font(Theme.mono(9)).foregroundStyle(Theme.muted) }
-                }
-            }
-        }
-        .chartYAxis {
-            AxisMarks(position: .trailing, values: NativeChartMath.ticks(yDomain)) { value in
-                AxisGridLine().foregroundStyle(Theme.grid)
-                AxisValueLabel {
-                    if let y = value.as(Double.self) { Text(yFormat(y)).font(Theme.mono(9)).foregroundStyle(Theme.muted) }
-                }
-            }
-        }
+        .chartXAxis { NativeChartAxis.numeric(xMajors, minors: xMinors, position: .bottom, format: xFormat) }
+        .chartYAxis { NativeChartAxis.numeric(yMajors, minors: yMinors, position: .trailing, format: yFormat) }
         .chartLegend(.hidden)
-        .chartOverlay { proxy in NativeChartOverlay(proxy: proxy, samples: points, xFormat: xFormat, yFormat: yFormat) }
+        .chartPlotStyle { plot in plot.nativePlotSpine() }
+        .chartOverlay { proxy in
+            NativeChartOverlay(proxy: proxy, samples: points, markers: true, xFormat: xFormat, yFormat: yFormat)
+        }
         .frame(height: height)
         .animation(reduceMotion || !visible ? nil : NativeMotion.isolation, value: isolated)
     }
@@ -320,51 +518,43 @@ struct NativeStackedBarChart: View {
 
     var body: some View {
         let points = NativeChartMath.samples(series.filter { isolated == nil || $0.id == isolated })
-        let sums = Dictionary(grouping: points, by: \.x).values.flatMap { group in
-            [group.reduce(0) { $0 + max(0, $1.y) }, group.reduce(0) { $0 + min(0, $1.y) }]
-        }
-        let yDomain = NativeChartMath.domain(sums)
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             if points.isEmpty {
-                NativeEmptyState(title: "No measured columns", detail: "Missing readings remain gaps.", icon: "chart.bar")
+                Blank(icon: "chart-bar", title: "No measured columns", detail: "Missing readings remain gaps.")
             } else {
-                Chart(points) { point in
-                    BarMark(x: .value("Position", point.x), y: .value("Value", point.y))
-                        .foregroundStyle(point.color)
-                        .cornerRadius(0)
-                        .accessibilityLabel(point.label + ", " + xFormat(point.x))
-                        .accessibilityValue(yFormat(point.y))
-                }
-                .chartYScale(domain: yDomain)
-                .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 6)) { value in
-                        AxisGridLine().foregroundStyle(Theme.grid)
-                        AxisValueLabel {
-                            if let x = value.as(Double.self) { Text(xFormat(x)).font(Theme.mono(9)).foregroundStyle(Theme.muted) }
-                        }
-                    }
-                }
-                .chartYAxis {
-                    AxisMarks(position: .trailing, values: NativeChartMath.ticks(yDomain)) { value in
-                        AxisGridLine().foregroundStyle(Theme.grid)
-                        AxisValueLabel {
-                            if let y = value.as(Double.self) { Text(yFormat(y)).font(Theme.mono(9)).foregroundStyle(Theme.muted) }
-                        }
-                    }
-                }
-                .chartLegend(.hidden)
-                // The plot grows as one unit; individual segments never bounce
-                // apart or acquire pill-shaped corners during the entrance.
-                .chartPlotStyle { plot in plot.nativeEntrance(.growVertical) }
-                .chartOverlay { proxy in NativeChartOverlay(proxy: proxy, samples: points, xFormat: xFormat, yFormat: yFormat) }
-                .frame(height: height)
-                .animation(reduceMotion || !visible ? nil : NativeMotion.isolation, value: isolated)
+                chart(points)
             }
             NativeChartLegend(entries: series.map { NativeLegendEntry(id: $0.id, label: $0.label, color: $0.color) }, selection: $isolated)
         }
         .onChange(of: series) {
             if let isolated, !series.contains(where: { $0.id == isolated }) { self.isolated = nil }
         }
+    }
+
+    private func chart(_ points: [NativeChartSample]) -> some View {
+        let sums = Dictionary(grouping: points, by: \.x).values.flatMap { group in
+            [group.reduce(0) { $0 + max(0, $1.y) }, group.reduce(0) { $0 + min(0, $1.y) }]
+        }
+        let yDomain = NativeChartMath.domain(sums)
+        let yMajors = NativeChartMath.ticks(yDomain)
+        let yMinors = NativeChartMath.minorTicks(yMajors, in: yDomain)
+        return Chart(points) { point in
+            BarMark(x: .value("Position", point.x), y: .value("Value", point.y))
+                .foregroundStyle(point.color)
+                .cornerRadius(0)
+                .accessibilityLabel(point.label + ", " + xFormat(point.x))
+                .accessibilityValue(yFormat(point.y))
+        }
+        .chartYScale(domain: yDomain)
+        .chartXAxis { NativeChartAxis.automatic(position: .bottom, format: xFormat) }
+        .chartYAxis { NativeChartAxis.numeric(yMajors, minors: yMinors, position: .trailing, format: yFormat) }
+        .chartLegend(.hidden)
+        .chartPlotStyle { plot in plot.nativePlotSpine() }
+        .chartOverlay { proxy in
+            NativeChartOverlay(proxy: proxy, samples: points, markers: false, xFormat: xFormat, yFormat: yFormat)
+        }
+        .frame(height: height)
+        .animation(reduceMotion || !visible ? nil : NativeMotion.isolation, value: isolated)
     }
 }
 
@@ -378,6 +568,7 @@ struct NativeRankEntry: Identifiable {
     var color: Color? = nil
 }
 
+/// A ranked ledger: each line is its own meter, drawn against the best value.
 struct NativeRankingChart: View {
     var rows: [NativeRankEntry]
     var lowerIsBetter: Bool = false
@@ -387,7 +578,7 @@ struct NativeRankingChart: View {
     var body: some View {
         let values = rows.compactMap(\.value).filter(\.isFinite)
         let best = fixedMaximum ?? (lowerIsBetter ? values.min() : values.max()) ?? 1
-        VStack(spacing: 2) {
+        VStack(spacing: 0) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 NativeRankBarRow(row: row, rank: index + 1, best: best,
                                  lowerIsBetter: lowerIsBetter, format: format)
@@ -402,8 +593,6 @@ private struct NativeRankBarRow: View {
     var best: Double
     var lowerIsBetter: Bool
     var format: (Double) -> String
-    @State private var hovering = false
-    @Environment(\.nativeReducedMotion) private var reduceMotion
     private var color: Color { row.color ?? Theme.pairColor(row.id) }
     private func fraction(_ value: Double) -> Double {
         guard best.isFinite, best >= 0, value.isFinite, value >= 0 else { return 0 }
@@ -419,23 +608,25 @@ private struct NativeRankBarRow: View {
         return min(a, b)...max(a, b)
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .center, spacing: 12) {
+            Text(String(format: "%02d", rank)).font(Theme.mono(10.5)).foregroundStyle(Theme.faint)
+                .frame(width: 18, alignment: .leading)
+            NativeSeriesTick(color: color)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(String(format: "%02d", rank)).font(Theme.mono(10)).foregroundStyle(Theme.muted)
-                    .frame(width: 18, alignment: .leading)
-                Text(row.title).font(Theme.mono(12, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                if !row.detail.isEmpty { Text(row.detail).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1) }
-                Spacer(minLength: 12)
-                NativeNumberText(text: row.value.flatMap { $0.isFinite ? format($0) : nil } ?? "-",
-                                 font: Theme.mono(12, weight: .medium), delay: Double(rank - 1) * 0.045)
+                Text(row.title).font(Theme.mono(12)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                if !row.detail.isEmpty {
+                    Text(row.detail).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1).layoutPriority(-1)
+                }
             }
-            NativeGrowBar(fraction: row.value.map(fraction) ?? 0, color: color,
-                          delay: Double(rank - 1) * 0.045, spread: spread)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Scale(fraction: row.value.map(fraction) ?? 0, color: color, spread: spread)
+                .frame(maxWidth: .infinity)
+            NativeNumberText(text: row.value.flatMap { $0.isFinite ? format($0) : nil } ?? "-",
+                             font: Theme.readout(17), color: row.value == nil ? Theme.faint : Theme.ink)
+                .frame(width: 84, alignment: .trailing)
         }
-        .padding(.horizontal, 9).padding(.vertical, 8)
-        .background(hovering ? Theme.subtle : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-        .onHover { hovering = $0 }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hovering)
+        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+        .overlay(alignment: .bottom) { Rule() }
         .accessibilityElement(children: .combine)
     }
 }
