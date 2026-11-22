@@ -66,6 +66,7 @@ struct NativeKeyboardPage: View {
     @EnvironmentObject private var session: NativeAppSession
     @Environment(\.nativeInterfaceDensity) private var density
     @AppStorage("uniapi.keyboard.range") private var range = "7d"
+    @AppStorage("uniapi.keyboard.view") private var view = "keys"
     @State private var reads = NativePageReadScope()
     @State private var state: JSONValue = .null
     @State private var live: JSONValue = .null
@@ -100,7 +101,7 @@ struct NativeKeyboardPage: View {
     var body: some View {
         GeometryReader { viewport in
             NativePage(title: "Keyboard Stats", maxWidth: 1240, readiness: readiness, tabs: {
-                if started { NativeTabs(options: Self.ranges.map { ($0.value, $0.label) }, selection: range) { range = $0 } }
+                if started { NativeTabs(options: [("keys", "Keys"), ("typing", "Typing"), ("rhythm", "Rhythm")], selection: ["typing", "rhythm"].contains(view) ? view : "keys") { view = $0 } }
             }, actions: {
                 if started { barActions }
             }) {
@@ -115,11 +116,16 @@ struct NativeKeyboardPage: View {
                     if !hasKeys {
                         NativeEmptyState(title: "No keys \(rangeTitle)", detail: enabled ? "" : "Recording is off.", icon: "keyboard")
                     } else {
-                        tiles
-                        heatmap
-                        columns { topKeys } _: { corrections }
-                        rhythm
-                        columns { balance } _: { VStack(spacing: 24) { categories; shortcuts } }
+                        switch view {
+                        case "typing":
+                            tiles
+                            columns { corrections } _: { balance }
+                        case "rhythm":
+                            rhythm
+                        default:
+                            heatmap
+                            columns { topKeys } _: { VStack(spacing: 24) { categories; shortcuts } }
+                        }
                     }
                 }
             }
@@ -159,6 +165,7 @@ struct NativeKeyboardPage: View {
             Button("Cancel") { confirmingReset = false }.buttonStyle(T3Button(.outline))
             Button("Delete") { confirmingReset = false; Task { await operation("reset") } }.buttonStyle(T3Button(.destructive))
         } else {
+            NativeMenuSelect(title: "Range", selection: $range, options: Self.ranges, width: 112)
             T3IconButton(system: "info", help: "What is recorded", active: information) { information.toggle() }
                 .popover(isPresented: $information, arrowEdge: .bottom) { informationSheet }
             T3IconButton(system: "trash-2", help: "Delete all counters") { confirmingReset = true }
