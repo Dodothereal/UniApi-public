@@ -10,6 +10,8 @@ struct NativeSetupStep: Identifiable {
     var busyText: String = "Working…"
     var progress: Double? = nil
     var cancel: (() -> Void)? = nil
+    /// False keeps the action visible but unavailable, with the reason in `detail`.
+    var enabled: Bool = true
     var actionTitle: String = ""
     var actionIcon: String? = nil
     var action: (() -> Void)? = nil
@@ -58,7 +60,7 @@ struct NativeSetup: View {
                     else if !step.done, let action = step.action, !step.actionTitle.isEmpty {
                         Button(step.actionTitle, nativeIcon: step.actionIcon ?? "arrow-right", action: action)
                             .buttonStyle(T3Button(step.id == next ? .primary : .outline))
-                            .disabled(step.id != next)
+                            .disabled(step.id != next || !step.enabled)
                     }
                 }
                 .padding(.vertical, 10)
@@ -175,5 +177,56 @@ struct NativeIconMenu<Items: View>: View {
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .opacity(enabled ? 1 : 0.4).onHover { hovering = $0 && enabled }
         .help(help).accessibilityLabel(help)
+    }
+}
+
+private struct NativeRouteStackedKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var nativeRouteStacked: Bool {
+        get { self[NativeRouteStackedKey.self] }
+        set { self[NativeRouteStackedKey.self] = newValue }
+    }
+}
+
+/// Separates two stops of a route line. Hidden when the line stacks.
+struct NativeRouteArrow: View {
+    @Environment(\.nativeRouteStacked) private var stacked
+    var body: some View {
+        if !stacked { NativeIcon("arrow-right", size: 13).foregroundStyle(Theme.faint).accessibilityHidden(true) }
+    }
+}
+
+/// One route, read left to right: the tool, then each choice that decides
+/// where its requests go. The choices are the controls, and one action on
+/// the right applies them. Stacks when the line does not fit.
+struct NativeRouteLine<Stops: View, Action: View>: View {
+    var tool: String
+    var icon: String = "terminal"
+    @ViewBuilder var stops: () -> Stops
+    @ViewBuilder var action: () -> Action
+    private var lead: some View {
+        HStack(spacing: 8) {
+            NativeIcon(icon, size: 15).foregroundStyle(Theme.muted).accessibilityHidden(true)
+            Text(tool).font(Theme.ui(Theme.textSm, weight: .semibold)).lineLimit(1)
+        }.fixedSize()
+    }
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                lead
+                NativeRouteArrow()
+                stops()
+                Spacer(minLength: 12)
+                action()
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) { lead; Spacer(minLength: 8); action() }
+                stops()
+            }.environment(\.nativeRouteStacked, true)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1) }
     }
 }

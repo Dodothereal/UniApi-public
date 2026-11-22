@@ -87,20 +87,28 @@ struct NativeSwitcherPage: View {
     @State private var customModelID = ""
     @State private var showCodexModels = false
     @State private var emptyCodexSource = "subscription"
-    @State private var providerToolsID: String?
+    /// The provider picked on the route line before it is applied. Nil follows the route in use.
+    @State private var draftRoute: String?
+    @State private var inspectedProvider: String?
     private var tab: String { NativeSwitcherDisplayPolicies.engine(savedEngine) }
     init(runtime: NativeRuntime) { self.runtime = runtime; _state = StateObject(wrappedValue: NativeSwitcherModel(runtime: runtime)) }
     var body: some View {
-        NativePage(title: "Switcher", readiness: state.readiness, tabs: {
-            NativeTabs(options: [("claude", "Claude Code"), ("codex", "Codex")], selection: tab) { savedEngine = $0 }
+        NativePage(title: "Switcher", maxWidth: .infinity, readiness: state.readiness, scrolls: false, tabs: {
+            NativeTabs(options: [("claude", "Claude Code"), ("codex", "Codex")], selection: tab) { savedEngine = $0; inspectedProvider = nil }
         }, actions: {
             T3IconButton(system: "refresh-cw", help: "Reload") { Task { await state.reload() } }.disabled(state.busy)
-            if tab == "codex" { Button("Open Codex", nativeIcon: "external-link") { run("codexAction", ["action": "open"]) }.buttonStyle(T3Button(.ghost)).disabled(state.controlsBusy) }
+            NativeIconMenu {
+                if tab == "claude" {
+                    Button("Restore Anthropic subscription") { draftRoute = nil; run("restore") }.disabled(claudeDirect)
+                    if state.claude["shim"]["owned"] == true { Button("Stop translation listener") { run("stopShim") } }
+                } else {
+                    Button("Open Codex") { run("codexAction", ["action": "open"]) }
+                    Button("Restore direct Codex") { run("codexAction", ["action": "restore"]) }.disabled(state.codex["restoreAvailable"] != true)
+                }
+            }.disabled(tab == "claude" ? state.busy : state.controlsBusy)
             Button("Add provider", nativeIcon: "plus") { addProvider = true }.buttonStyle(T3Button(.primary)).disabled(tab == "claude" ? state.busy : state.controlsBusy)
         }) {
-            if !state.error.isEmpty { NativeError(message: state.error) }
-            if !state.message.isEmpty { Text(state.message).font(Theme.ui(12)).foregroundStyle(Theme.dim).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
-            if state.claude.isNull || state.codex.isNull { ShimmerText(text: "Loading…") }
+            if state.claude.isNull || state.codex.isNull { NativePane(maxWidth: 900, centered: false) { notices; ShimmerText(text: "Loading…") } }
             else if tab == "claude" { claude }
             else { codex }
         }
@@ -108,141 +116,204 @@ struct NativeSwitcherPage: View {
         .sheet(isPresented: $addProvider) { NativeSwitcherProviderForm { values in await state.act("provider", values) } }
     }
     private func run(_ operation: String, _ values: JSONObject = [:]) { Task { _ = await state.act(operation, values) } }
+    @ViewBuilder private var notices: some View {
+        if !state.error.isEmpty { NativeError(message: state.error) }
+        if !state.message.isEmpty { Text(state.message).font(Theme.ui(12)).foregroundStyle(Theme.dim).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+    }
+
+    // MARK: Claude Code
+    private var claudeDirect: Bool { state.claude["snapshot"]["baseUrl"].string.isEmpty }
+    private var claudeCurrentID: String { claudeDirect ? "" : state.claude["current"].string }
+    private var routeID: String { draftRoute ?? claudeCurrentID }
+    private var routedProvider: JSONValue? { state.claude["providers"].array.first { $0["id"].string == routeID && !$0["format"].isNull } }
+    private var inspectedProviderRow: JSONValue? { inspectedProvider.flatMap { id in state.claude["providers"].array.first { $0["id"].string == id } } }
+    private var claudeRouteChanged: Bool {
+        guard routedProvider != nil else { return draftRoute != nil && !claudeDirect }
+        if routeID != claudeCurrentID { return true }
+        guard let picked = models[routeID] else { return false }
+        return picked != state.claude["snapshot"]["model"].string
+    }
+    private func applyClaudeRoute() {
+        if let provider = routedProvider { run("applyAndProbe", ["id": provider["id"], "model": .string(chosenModel(provider))]) }
+        else { run("restore") }
+    }
     private var claude: some View {
-        let direct = state.claude["snapshot"]["baseUrl"].string.isEmpty
-        let shimOK = state.claude["shim"]["ok"] == true
-        return NativeSheet {
-            NativeSection("New sessions", detail: "Open sessions keep their route") {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(state.claude["currentName"].string).font(Theme.ui(Theme.text2Xl, weight: .semibold)).tracking(Theme.tracking(Theme.text2Xl))
-                        Text(state.claude["snapshot"]["model"].string.isEmpty ? "Claude Code picks its own models" : state.claude["snapshot"]["model"].string)
-                            .font(state.claude["snapshot"]["model"].string.isEmpty ? Theme.ui(Theme.textXs) : Theme.mono(Theme.textXs)).foregroundStyle(Theme.muted).textSelection(.enabled)
-                        Text(direct ? "api.anthropic.com" : state.claude["snapshot"]["baseUrl"].string).font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.faint).lineLimit(1).textSelection(.enabled)
-                    }
-                    Spacer(minLength: 8)
-                    if !direct { Button("Restore subscription", nativeIcon: "undo-2") { run("restore") }.disabled(state.busy) }
-                }
-                SettingRow(title: "Thinking effort") {
-                    T3Segmented(options: [("", "Default")] + state.claude["efforts"].array.map { ($0.string, $0.string.capitalized) }, selection: state.claude["snapshot"]["effort"].string, enabled: !state.busy) { run("effort", ["effort": $0.isEmpty ? .null : .string($0)]) }
-                }
-            }
-            NativeSection("Routes", detail: "\(state.claude["providers"].array.count + 1)") {
-                NativeStack {
-                    NativeSwitcherListRow(active: direct) {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Anthropic subscription").font(Theme.ui(Theme.textSm, weight: .medium))
-                                Text("No gateway").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+        let providers = state.claude["providers"].array
+        let effort = state.claude["snapshot"]["effort"].string
+        return NativeInspectorSplit(open: inspectedProviderRow != nil, width: 340, onClose: { inspectedProvider = nil }, main: {
+            NativePane(maxWidth: 900, centered: false) {
+                notices
+                VStack(alignment: .leading, spacing: 8) {
+                    NativeRouteLine(tool: "Claude Code", stops: {
+                        NativeMenuSelectLabel(title: draftRoute == nil ? state.claude["currentName"].string : routedProvider?["name"].string ?? "Anthropic subscription", width: 196) {
+                            Button("Anthropic subscription") { draftRoute = "" }
+                            ForEach(providers.filter { !$0["format"].isNull }, id: \.self["id"]) { provider in
+                                Button(provider["name"].string) { draftRoute = provider["id"].string }
                             }
-                            Spacer()
-                            if direct { activeBadge }
-                            else { Button("Use") { run("restore") }.buttonStyle(T3Button(.primary)).disabled(state.busy) }
+                        }.disabled(state.busy).accessibilityLabel("Route for new sessions")
+                        NativeRouteArrow()
+                        if let provider = routedProvider {
+                            NativeSwitcherRouteModelControl(models: provider["models"].array.map(\.string), chosen: Binding(get: { chosenModel(provider) }, set: { models[provider["id"].string] = $0 }))
+                                .frame(width: 210).help(chosenModel(provider)).disabled(state.busy)
+                        } else {
+                            Text("Its own models").font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.muted).frame(height: 30)
+                        }
+                        NativeRouteArrow()
+                        NativeMenuSelectLabel(title: effort.isEmpty ? "Default effort" : effort.capitalized + " effort", width: 140) {
+                            Button("Default") { run("effort", ["effort": .null]) }
+                            ForEach(state.claude["efforts"].array.map(\.string), id: \.self) { value in
+                                Button(value.capitalized) { run("effort", ["effort": .string(value)]) }
+                            }
+                        }.disabled(state.busy).accessibilityLabel("Thinking effort")
+                    }, action: {
+                        if claudeRouteChanged { Button("Apply", nativeIcon: "check") { applyClaudeRoute() }.buttonStyle(T3Button(.primary)).disabled(state.busy) }
+                        else { activeBadge }
+                    })
+                    HStack(spacing: 10) {
+                        Text(claudeDirect ? "api.anthropic.com" : state.claude["snapshot"]["baseUrl"].string).font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                        Text("New sessions only").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint).fixedSize()
+                            .help("Open sessions keep the route they started with.")
+                    }.padding(.leading, 14)
+                    if !state.claudeProbe.isNull, inspectedProviderRow == nil { probeVerdict.padding(.leading, 14).padding(.top, 4) }
+                }
+                if state.claude["shim"]["ok"] != true {
+                    NativeSetup(steps: [NativeSetupStep(
+                        id: "shim", title: "Start the translation listener",
+                        detail: state.claude["shim"]["legacyPresent"] == true ? "A legacy listener is running in its place." : "Providers that do not speak the Anthropic format are reached through it.",
+                        done: false, enabled: !state.busy, actionTitle: "Start", actionIcon: "play", action: { run("startShim") })])
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("Providers").font(Theme.ui(Theme.textSm, weight: .semibold)).accessibilityAddTraits(.isHeader)
+                        Text("\(providers.count)").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.faint)
+                    }.padding(.bottom, 10)
+                    if providers.isEmpty {
+                        NativeEmptyState(title: "No providers", detail: "A provider's models can be routed to Claude Code and Codex.", icon: "server")
+                    } else {
+                        Theme.rule.frame(height: 1)
+                        ForEach(providers, id: \.self["id"]) { provider in
+                            let id = provider["id"].string
+                            NativeSwitcherProviderRow(provider: provider, inUse: claudeCurrentID == id, selected: inspectedProvider == id) { inspectedProvider = inspectedProvider == id ? nil : id }
+                            Theme.rule.frame(height: 1)
                         }
                     }
-                    ForEach(state.claude["providers"].array, id: \.self["id"]) { provider in providerRow(provider) }
                 }
             }
-            NativeSection("Translation shim") {
-                HStack(spacing: 12) {
-                    NativeStatus(text: shimOK ? "Listening" : state.claude["shim"]["legacyPresent"] == true ? "Legacy listener kept" : "Not running", tone: shimOK ? .ok : state.claude["shim"]["legacyPresent"] == true ? .idle : .warn)
-                    Spacer(minLength: 8)
-                    if state.claude["shim"]["owned"] == true { Button("Stop", nativeIcon: "square") { run("stopShim") }.disabled(state.busy) }
-                    else if !shimOK { Button("Start", nativeIcon: "play") { run("startShim") }.disabled(state.busy) }
-                }.help("Providers that do not speak the Anthropic format are reached through this local listener.")
-            }
-        }
+        }, inspector: {
+            if let provider = inspectedProviderRow { providerInspector(provider) }
+        })
     }
     private var activeBadge: some View {
-        HStack(spacing: 5) { NativeIcon("check", size: 12); Text("In use") }.font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 78, alignment: .trailing)
+        HStack(spacing: 5) { NativeIcon("check", size: 12); Text("In use") }.font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.accent).frame(height: 30)
     }
-    private func providerRow(_ provider: JSONValue) -> some View {
-        let id = provider["id"].string, chosen = chosenModel(provider)
-        return NativeSwitcherListRow(active: state.claude["current"] == provider["id"]) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 11) {
-                    providerIdentity(provider).fixedSize(horizontal: true, vertical: false)
-                    Spacer(minLength: 8)
-                    providerRowActions(provider, id: id, chosen: chosen)
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    providerIdentity(provider)
-                    HStack { Spacer(minLength: 0); providerRowActions(provider, id: id, chosen: chosen) }
-                }
-            }
-            if state.claudeProbe["provider"] == provider["id"] {
-                let verdict = state.claudeProbe, working = verdict["ok"] == true && verdict["empty"] != true
-                HStack(spacing: 8) { NativeStatus(text: working ? "Answered" : "Route check failed", tone: working ? .ok : .fail); Text(verdict["model"].string + " · " + String(format: "%.1f s", verdict["ms"].double / 1000)).font(Theme.mono(11)).foregroundStyle(Theme.muted); Spacer() }
-                Text(verdict["message"].string).font(Theme.ui(12)).foregroundStyle(working ? Theme.muted : Theme.failFg).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-    private func providerIdentity(_ provider: JSONValue) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 7) {
-                Text(provider["name"].string).font(Theme.ui(Theme.textSm, weight: .medium))
-                if !provider["format"].isNull { MonoChip(text: provider["format"].string, color: provider["format"] == "anthropic" ? Theme.muted : Theme.warnFg) }
-            }
-            Text(provider["format"].isNull ? "Benchmark only. Enable detects its wire format." : "\(provider["models"].array.count) models · " + (provider["directUrl"].isNull ? "via shim" : "direct")).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
-        }
-    }
-    private func providerRowActions(_ provider: JSONValue, id: String, chosen: String) -> some View {
-                HStack(spacing: 8) {
-                    if !provider["format"].isNull {
-                        NativeSwitcherRouteModelControl(models: provider["models"].array.map(\.string), chosen: Binding(get: { chosenModel(provider) }, set: { models[id] = $0 })).frame(width: 190).help(chosen).disabled(state.busy)
-                    } else { Color.clear.frame(width: 190, height: 1) }
-                    Group {
-                        if provider["format"].isNull { Button("Enable") { run("provider", ["operation": "adopt", "id": provider["id"]]) } }
-                        else { Button("Use") { run("applyAndProbe", ["id": provider["id"], "model": .string(chosen)]) }.buttonStyle(T3Button(.primary)) }
-                    }.frame(width: 78, alignment: .trailing).disabled(state.busy)
-                    T3IconButton(system: "refresh-cw", help: "Refresh models for " + provider["name"].string) { run("provider", ["operation": "refresh", "id": provider["id"]]) }.disabled(state.busy)
-                    T3IconButton(system: "ellipsis", help: "Tools for " + provider["name"].string) { providerToolsID = id }
-                        .popover(isPresented: Binding(get: { providerToolsID == id }, set: { if !$0 { providerToolsID = nil } })) { providerTools(provider, chosen: chosen) }
-                }
-    }
-    private func providerTools(_ provider: JSONValue, chosen: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(provider["name"].string).font(Theme.ui(Theme.textSm, weight: .semibold))
-            Text(provider["baseUrl"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+    private var probeVerdict: some View {
+        let verdict = state.claudeProbe, working = verdict["ok"] == true && verdict["empty"] != true
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                if !provider["format"].isNull {
-                    Button("Save model") { run("modelAndProbe", ["id": provider["id"], "model": .string(chosen)]) }.buttonStyle(T3Button(.ghost)).disabled(chosen.isEmpty || state.busy)
-                    Button("Text probe") { run("probe", ["id": provider["id"], "model": .string(chosen)]) }.buttonStyle(T3Button(.ghost)).disabled(state.busy)
-                }
-                Button { Task { await state.copy(provider["id"]) } } label: { NativeIcon("key-round", size: 12) }.buttonStyle(T3Button(.ghost)).help("Copy key").accessibilityLabel("Copy key for " + provider["name"].string).disabled(provider["hasKey"] != true)
-                Button { run("provider", ["operation": "remove", "id": provider["id"]]) } label: { NativeIcon("trash-2", size: 12) }.buttonStyle(T3Button(.ghost)).foregroundStyle(Theme.failFg).help("Remove provider").accessibilityLabel("Remove " + provider["name"].string).disabled(state.busy)
+                NativeStatus(text: working ? "Answered" : "Route check failed", tone: working ? .ok : .fail)
+                Text(verdict["model"].string + " · " + String(format: "%.1f s", verdict["ms"].double / 1000)).font(Theme.mono(11)).foregroundStyle(Theme.muted).lineLimit(1)
             }
-        }.padding(16).frame(width: 370).background(Theme.bg).foregroundStyle(Theme.ink)
+            Text(verdict["message"].string).font(Theme.ui(12)).foregroundStyle(working ? Theme.muted : Theme.failFg).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }
     }
-    private var codex: some View {
-        NativeSheet {
-            NativeSection("Default", detail: state.codex["installed"] == true ? "" : "Codex not found") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(state.codex["current"]["model"].string.isEmpty ? "Codex default" : state.codex["current"]["model"].string).font(Theme.ui(Theme.text2Xl, weight: .semibold)).tracking(Theme.tracking(Theme.text2Xl)).textSelection(.enabled)
-                    Text([state.codex["current"]["source"].string, state.codex["current"]["effort"].string.isEmpty ? "default effort" : state.codex["current"]["effort"].string].filter { !$0.isEmpty }.joined(separator: " · ")).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
-                }.help("Open tasks can keep their previous model. Reload Codex after a change when asked.")
-                ForEach(Array(state.codex["warnings"].array.enumerated()), id: \.offset) { _, warning in HStack(alignment: .top, spacing: 8) { NativeIcon("triangle-alert", size: 13); Text(warning.string) }.font(Theme.ui(12)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true) }
-                defaultSection
+    private func providerInspector(_ provider: JSONValue) -> some View {
+        let id = provider["id"].string, enabled = !provider["format"].isNull, chosen = chosenModel(provider)
+        let inUse = claudeCurrentID == id && chosen == state.claude["snapshot"]["model"].string
+        return NativeInspector(title: provider["name"].string, caption: provider["baseUrl"].string, icon: "server", onClose: { inspectedProvider = nil }) {
+            VStack(alignment: .leading, spacing: 0) {
+                NativeFact(label: "Format", value: enabled ? provider["format"].string : "Not detected", mono: enabled)
+                if enabled { NativeFact(label: "Reached", value: provider["directUrl"].isNull ? "Through the translation listener" : "Directly") }
+                NativeFact(label: "Models", value: "\(provider["models"].array.count)")
+                NativeFact(label: "Key", value: provider["hasKey"] == true ? "Saved" : "None")
+                if enabled {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Model").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                        NativeSwitcherRouteModelControl(models: provider["models"].array.map(\.string), chosen: Binding(get: { chosenModel(provider) }, set: { models[id] = $0 }))
+                            .help(chosen).disabled(state.busy)
+                        HStack(spacing: 8) {
+                            Button("Save as default") { run("modelAndProbe", ["id": provider["id"], "model": .string(chosen)]) }.disabled(chosen.isEmpty || state.busy)
+                            Button("Text probe") { run("probe", ["id": provider["id"], "model": .string(chosen)]) }.disabled(state.busy)
+                        }
+                    }.padding(.top, 16)
+                } else {
+                    Text("Used for benchmarks only. Enabling detects its wire format so tools can be routed to it.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true).padding(.top, 14)
+                }
+                if state.claudeProbe["provider"] == provider["id"] { probeVerdict.padding(.top, 16) }
             }
-            nativeRoutingSection
+        } actions: {
+            HStack(spacing: 8) {
+                if enabled {
+                    Button(inUse ? "In use" : "Use for Claude Code") { draftRoute = nil; run("applyAndProbe", ["id": provider["id"], "model": .string(chosen)]) }
+                        .buttonStyle(T3Button(.primary)).disabled(state.busy || inUse)
+                } else {
+                    Button("Enable") { run("provider", ["operation": "adopt", "id": provider["id"]]) }.buttonStyle(T3Button(.primary)).disabled(state.busy)
+                }
+                Spacer(minLength: 0)
+                T3IconButton(system: "refresh-cw", help: "Refresh models") { run("provider", ["operation": "refresh", "id": provider["id"]]) }.disabled(state.busy)
+                T3IconButton(system: "key-round", help: "Copy key") { Task { await state.copy(provider["id"]) } }.disabled(provider["hasKey"] != true)
+                T3IconButton(system: "trash-2", help: "Remove provider") { inspectedProvider = nil; run("provider", ["operation": "remove", "id": provider["id"]]) }.disabled(state.busy)
+            }
+        }
+    }
+
+    // MARK: Codex
+    private var codex: some View {
+        let current = state.codex["current"], native = state.codex["native"]
+        return NativePane(maxWidth: 900, centered: false) {
+            notices
+            VStack(alignment: .leading, spacing: 8) {
+                NativeRouteLine(tool: "Codex", stops: {
+                    NativeMenuSelectLabel(title: codexSource == "web" ? "ChatGPT Web" : codexSource == "provider" ? "API providers" : "ChatGPT subscription", width: 196) {
+                        Button("ChatGPT subscription") { chooseCodexSource("subscription") }
+                        Button("ChatGPT Web") { chooseCodexSource("web") }
+                        Button("API providers") { chooseCodexSource("provider") }
+                    }.disabled(state.controlsBusy).accessibilityLabel("Model source")
+                    NativeRouteArrow()
+                    Button { showCodexModels = true } label: {
+                        HStack(spacing: 6) {
+                            Text(selectedRow.map { $0["name"].string.isEmpty ? $0["id"].string : $0["name"].string } ?? "Choose model").font(Theme.mono(11.5)).lineLimit(1).truncationMode(.middle)
+                            Spacer(minLength: 0)
+                            NativeIcon("chevrons-up-down", size: 12).foregroundStyle(Theme.faint)
+                        }
+                    }
+                    .frame(width: 210).disabled(state.controlsBusy).accessibilityLabel(codexSource == "web" ? "Web model and mode" : "Model")
+                    .popover(isPresented: $showCodexModels) { codexModels }
+                    if let row = selectedRow, !row["efforts"].array.isEmpty {
+                        NativeRouteArrow()
+                        NativeMenuSelectLabel(title: selectionEffort.isEmpty ? "Default effort" : selectionEffort, width: 140) {
+                            Button("Default") { state.selection.effort = "" }
+                            ForEach(row["efforts"].array.map(\.string), id: \.self) { effort in Button(effort) { state.selection.effort = effort } }
+                        }.disabled(state.controlsBusy).accessibilityLabel(codexSource == "web" ? "Web mode" : "Reasoning effort")
+                    }
+                }, action: {
+                    if let row = selectedRow {
+                        if NativeSwitcherModelKey(row).matches(current) && selectionEffort == current["effort"].string { activeBadge }
+                        else {
+                            Button("Set default", nativeIcon: "check") { run("codexSelect", ["source": row["source"], "providerId": row["providerId"], "model": row["id"], "effort": selectionEffort.isEmpty ? .null : .string(selectionEffort)]) }
+                                .buttonStyle(T3Button(.primary)).disabled(state.controlsBusy || codexSelectionIssue(row) != nil)
+                        }
+                    }
+                })
+                Text([current["model"].string.isEmpty ? "Codex default" : current["model"].string, current["source"].string, current["effort"].string.isEmpty ? "default effort" : current["effort"].string].filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle).textSelection(.enabled).padding(.leading, 14)
+                    .help("Open tasks can keep their previous model. Reload Codex after a change when asked.")
+                Group {
+                    if state.codex["installed"] != true { Text("Codex not found") }
+                    ForEach(Array(state.codex["warnings"].array.enumerated()), id: \.offset) { _, warning in Text(warning.string) }
+                    if let row = selectedRow, let issue = codexSelectionIssue(row) { Text(issue) }
+                }.font(Theme.ui(12)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true).padding(.leading, 14)
+            }
+            if native["connected"] != true {
+                NativeSetup(steps: [NativeSetupStep(
+                    id: "connect", title: "Connect Codex to UniApi routing",
+                    detail: !native["error"].isNull ? native["error"].string : native["running"] != true ? "The routing service is not running." : "API providers and ChatGPT subscription models are then routed through the background service.",
+                    done: false, enabled: !state.controlsBusy && native["canConnect"] == true, actionTitle: "Connect", actionIcon: "plug", action: { run("codexAction", ["action": "nativeConnect"]) })])
+            } else if let issue = nativeEditingIssue {
+                Text(issue).font(Theme.ui(12)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true)
+            }
             catalogSection
             bridgeSection
-        }
-    }
-    private var nativeRoutingSection: some View {
-        NativeSection("Native routing") {
-            HStack(spacing: 18) {
-                readiness("Connected", state.codex["native"]["connected"])
-                readiness("Service", state.codex["native"]["running"])
-                Spacer(minLength: 0)
-            }.help("Routes API providers and ChatGPT subscription models through UniApi's background service. Connecting hands off an idle Web route and keeps the default, providers and workers.")
-            if let issue = nativeEditingIssue { Text(issue).font(Theme.ui(12)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true) }
-            NativeScrollRail {
-                Button("Connect", nativeIcon: "plug") { run("codexAction", ["action": "nativeConnect"]) }.buttonStyle(T3Button(.primary))
-                    .disabled(state.controlsBusy || state.codex["native"]["canConnect"] != true)
-                Button("Restore direct Codex", nativeIcon: "undo-2") { run("codexAction", ["action": "restore"]) }
-                    .disabled(state.controlsBusy || state.codex["restoreAvailable"] != true)
-            }
         }
     }
     private var nativeEditingIssue: String? {
@@ -371,44 +442,10 @@ struct NativeSwitcherPage: View {
             }
         }
     }
-    @ViewBuilder private var defaultSection: some View {
-        NativeSwitcherSourceRow(spacing: 0) {
-            sourceButton("subscription", title: "ChatGPT subscription", detail: "Native Codex models")
-            sourceButton("web", title: "ChatGPT Web", detail: "Browser session")
-            sourceButton("provider", title: "API providers", detail: "Compatible routes")
-        }.background(Theme.sunken, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-        SettingRow(title: codexSource == "web" ? "Web model and mode" : "Model") {
-            Button { showCodexModels = true } label: { HStack(spacing: 8) { Text(selectedRow.map { $0["name"].string.isEmpty ? $0["id"].string : $0["name"].string } ?? "Choose model").lineLimit(1); NativeIcon("chevrons-up-down", size: 12).foregroundStyle(Theme.faint) } }.frame(maxWidth: 280).disabled(state.controlsBusy)
-                .popover(isPresented: $showCodexModels) { codexModels }
-        }
-        if let row = selectedRow {
-            if !row["efforts"].array.isEmpty {
-                SettingRow(title: codexSource == "web" ? "Web mode" : "Reasoning effort") {
-                    NativeMenuSelectLabel(title: selectionEffort.isEmpty ? "Default" : selectionEffort, width: 150) {
-                        Button("Default") { state.selection.effort = "" }
-                        ForEach(row["efforts"].array.map(\.string), id: \.self) { effort in Button(effort) { state.selection.effort = effort } }
-                    }.disabled(state.controlsBusy)
-                }
-            }
-            if let issue = codexSelectionIssue(row) { Text(issue).font(Theme.ui(12)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true) }
-            HStack(spacing: 10) {
-                Button("Set as default", nativeIcon: "check") { run("codexSelect", ["source": row["source"], "providerId": row["providerId"], "model": row["id"], "effort": selectionEffort.isEmpty ? .null : .string(selectionEffort)]) }.buttonStyle(T3Button(.primary)).disabled(state.controlsBusy || codexSelectionIssue(row) != nil || NativeSwitcherModelKey(row).matches(state.codex["current"]) && selectionEffort == state.codex["current"]["effort"].string)
-                Text(modelLabel(row)).font(Theme.mono(11)).foregroundStyle(Theme.faint).lineLimit(1).textSelection(.enabled)
-            }
-        }
-    }
     private var codexSource: String { selectedRow?["source"].string ?? emptyCodexSource }
-    private func sourceButton(_ source: String, title: String, detail: String) -> some View {
-        Button {
-            emptyCodexSource = source
-            state.selection.choose(availableModels.first { $0.row["source"] == .string(source) && $0.key.matches(state.codex["current"]) }?.row ?? availableModels.first { $0.row["source"] == .string(source) && $0.row["available"] == true }?.row ?? availableModels.first { $0.row["source"] == .string(source) }?.row)
-        } label: {
-            VStack(alignment: .leading, spacing: 3) { Text(title).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(codexSource == source ? Theme.ink : Theme.dim); Text(detail).font(Theme.ui(11)).foregroundStyle(Theme.muted) }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(.horizontal, 12).padding(.vertical, 9)
-                .background(codexSource == source ? Theme.raised : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(codexSource == source ? Theme.border : .clear, lineWidth: 1) }
-                .padding(3).contentShape(Rectangle())
-        }.buttonStyle(.plain).pointingHand().disabled(state.controlsBusy).accessibilityAddTraits(codexSource == source ? [.isSelected] : [])
+    private func chooseCodexSource(_ source: String) {
+        emptyCodexSource = source
+        state.selection.choose(availableModels.first { $0.row["source"] == .string(source) && $0.key.matches(state.codex["current"]) }?.row ?? availableModels.first { $0.row["source"] == .string(source) && $0.row["available"] == true }?.row ?? availableModels.first { $0.row["source"] == .string(source) }?.row)
     }
     private var codexModels: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -439,22 +476,40 @@ struct NativeSwitcherPage: View {
             }.frame(height: 300)
         }.padding(16).frame(width: 460).background(Theme.bg).foregroundStyle(Theme.ink)
     }
+    private var bridgeSteps: [NativeSetupStep] {
+        let bridge = state.codex["bridge"], native = state.codex["native"], busy = state.controlsBusy
+        func step(_ id: String, _ title: String, _ value: JSONValue, _ actionTitle: String, _ icon: String, enabled: Bool = true, _ operation: String, _ values: JSONObject = [:]) -> NativeSetupStep {
+            NativeSetupStep(id: id, title: title, detail: value.isNull ? "Not checked" : "", done: value == true, enabled: enabled && !busy, actionTitle: actionTitle, actionIcon: icon, action: { run(operation, values) })
+        }
+        return [
+            step("installed", "Install the bridge", bridge["installed"], "Open Web GPT", "globe", "codexAction", ["action": "setup"]),
+            step("configured", "Point Codex at the bridge", bridge["configured"], "Connect", "plug",
+                 enabled: !(native["connected"] == true || !native["error"].isNull || !native["phase"].isNull), "codexAction", ["action": "connect"]),
+            step("running", "Start the runtime", bridge["running"], "Start", "play", "codexAction", ["action": "start"]),
+            step("signin", "Sign in to ChatGPT in the browser", bridge["signInChecked"], "Open Web GPT", "globe", "codexAction", ["action": "setup"]),
+            step("tools", "Verify coding tools", bridge["toolsVerified"], "Verify", "shield-check",
+                 enabled: state.codex["installed"] == true && state.codex["configError"].isNull && bridge["mode"] == "full" && bridge["busy"] == false && bridge["signInChecked"] == true, "verifyCodexTools")
+        ]
+    }
     private var bridgeSection: some View {
-        NativeSection("ChatGPT Web bridge", detail: "Optional") {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)], alignment: .leading, spacing: 10) {
-                readiness("Installed", state.codex["bridge"]["installed"]); readiness("Configured", state.codex["bridge"]["configured"]); readiness("Runtime", state.codex["bridge"]["running"]); readiness("Sign-in", state.codex["bridge"]["signInChecked"]); readiness("Coding tools", state.codex["bridge"]["toolsVerified"])
-            }
-            if state.codex["bridge"]["healthDeferred"] == true { Text("Checks are paused while native routing is connected. Check connection runs one now.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted) }
-            NativeScrollRail {
-                ForEach(["setup", "doctor", "start", "stop", "connect", "restore"], id: \.self) { action in
-                    Button { run("codexAction", ["action": .string(action)]) } label: {
-                        HStack(spacing: 6) { NativeIcon(action == "setup" ? "globe" : action == "doctor" ? "search-check" : action == "start" ? "play" : action == "stop" ? "square" : action == "connect" ? "plug" : "unplug", size: 12); Text(action == "setup" ? "Open Web GPT" : action == "doctor" ? "Check connection" : action == "start" ? "Start" : action == "stop" ? "Stop" : action == "connect" ? "Connect" : "Restore direct Codex") }
-                    }.disabled(state.controlsBusy || action == "restore" && state.codex["restoreAvailable"] != true || action == "stop" && state.codex["bridge"]["canStop"] != true || action == "connect" && (state.codex["native"]["connected"] == true || !state.codex["native"]["error"].isNull || !state.codex["native"]["phase"].isNull))
+        let bridge = state.codex["bridge"], native = state.codex["native"], steps = bridgeSteps
+        return NativeDisclosure("ChatGPT Web bridge") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    if steps.allSatisfy(\.done) { NativeStatus(text: "Ready", tone: .ok) }
+                    else { Text("Optional. Routes Codex through a ChatGPT browser session.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted) }
+                    Spacer(minLength: 8)
+                    NativeIconMenu(help: "Bridge actions") {
+                        Button("Open Web GPT") { run("codexAction", ["action": "setup"]) }
+                        Button("Check connection") { run("codexAction", ["action": "doctor"]) }
+                        Button("Start") { run("codexAction", ["action": "start"]) }
+                        Button("Stop") { run("codexAction", ["action": "stop"]) }.disabled(bridge["canStop"] != true)
+                        Button("Connect") { run("codexAction", ["action": "connect"]) }.disabled(native["connected"] == true || !native["error"].isNull || !native["phase"].isNull)
+                        Button("Restore direct Codex") { run("codexAction", ["action": "restore"]) }.disabled(state.codex["restoreAvailable"] != true)
+                    }.disabled(state.controlsBusy)
                 }
-            }
-            HStack(spacing: 10) {
-                Button("Verify coding tools", nativeIcon: "shield-check") { run("verifyCodexTools") }.disabled(state.controlsBusy || state.codex["installed"] != true || !state.codex["configError"].isNull || state.codex["bridge"]["mode"] != "full" || state.codex["bridge"]["busy"] != false || state.codex["bridge"]["signInChecked"] != true)
-                    .help("Browser text access is separate from local coding tools. This runs one ephemeral tool check and stores the evidence for the current bridge configuration.")
+                if bridge["healthDeferred"] == true { Text("Checks are paused while native routing is connected. Check connection runs one now.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted) }
+                if !steps.allSatisfy(\.done) { NativeSetup(steps: steps) }
                 if NativeSwitcherDisplayPolicies.checksRunning(state.jobs) { Text("A verification is running.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted) }
             }
         }
@@ -467,48 +522,27 @@ struct NativeSwitcherPage: View {
     private var catalogWorkers: [(key: String, row: JSONValue)] { state.catalogDraft.visibleWorkers(state.codex["models"].array).filter { matches($0, workerQuery) }.map { (NativeSwitcherCatalogDraft.workerID($0), $0) } }
     private var selectedRow: JSONValue? { availableModels.first { $0.key == state.selection.key }?.row }
     private var selectionEffort: String { NativeSwitcherSelectionDraft.supportedEffort(selectedRow, state.selection.effort) }
-    private func readiness(_ label: String, _ value: JSONValue) -> some View {
-        HStack(spacing: 6) {
-            NativeIcon(value == true ? "check" : value.isNull ? "circle-minus" : "x", size: 12).foregroundStyle(value == true ? Theme.okFg : Theme.faint)
-            Text(label).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(value == true ? Theme.ink : Theme.muted)
-        }.accessibilityElement(children: .ignore).accessibilityLabel(label).accessibilityValue(value.isNull ? "Unknown" : value.bool ? "Available" : "Not verified")
-            .help(value.isNull ? "Unknown" : value.bool ? "Available" : "Not verified")
-    }
 }
 
-/// Measure wrapped labels at their actual column width, then give every choice
-/// the tallest natural height. ScrollView's unbounded height is never reused as
-/// a frame, and choosing a source does not change the geometry of its siblings.
-private struct NativeSwitcherSourceRow: Layout {
-    let spacing: CGFloat
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard !subviews.isEmpty else { return .zero }
-        let gaps = spacing * CGFloat(subviews.count - 1)
-        let natural = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
-        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? natural * CGFloat(subviews.count) + gaps
-        let column = max(0, (width - gaps) / CGFloat(subviews.count))
-        let height = subviews.map { $0.sizeThatFits(.init(width: column, height: nil)).height }.max() ?? 0
-        return CGSize(width: max(0, width), height: height)
-    }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard !subviews.isEmpty else { return }
-        let column = max(0, (bounds.width - spacing * CGFloat(subviews.count - 1)) / CGFloat(subviews.count))
-        for (index, view) in subviews.enumerated() {
-            view.place(at: CGPoint(x: bounds.minX + CGFloat(index) * (column + spacing), y: bounds.minY),
-                       anchor: .topLeading, proposal: .init(width: column, height: bounds.height))
-        }
-    }
-}
-
-private struct NativeSwitcherListRow<Content: View>: View {
-    var active = false
-    @ViewBuilder var content: () -> Content
+private struct NativeSwitcherProviderRow: View {
+    let provider: JSONValue, inUse: Bool, selected: Bool
+    let action: () -> Void
     @State private var hovering = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) { content() }
-            .padding(.leading, 14).padding(.vertical, 12)
-            .overlay(alignment: .leading) { RoundedRectangle(cornerRadius: 1).fill(active ? Theme.accent : hovering ? Theme.input : .clear).frame(width: 2).padding(.vertical, 12) }
-            .contentShape(Rectangle()).onHover { hovering = $0 }
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Text(provider["name"].string).font(Theme.ui(Theme.textSm, weight: .medium)).lineLimit(1)
+                if !provider["format"].isNull { MonoChip(text: provider["format"].string, color: provider["format"] == "anthropic" ? Theme.muted : Theme.warnFg) }
+                Spacer(minLength: 8)
+                if inUse { HStack(spacing: 5) { NativeIcon("check", size: 12); Text("In use") }.font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.accent) }
+                Text(provider["format"].isNull ? "Not enabled" : "\(provider["models"].array.count) models").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.muted)
+                    .frame(width: 96, alignment: .trailing)
+                NativeIcon("chevron-right", size: 13).foregroundStyle(Theme.faint).accessibilityHidden(true)
+            }
+            .padding(.horizontal, 10).frame(height: 42).nativeRowHover(hovering, selected: selected).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointingHand().onHover { hovering = $0 }
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }
 
