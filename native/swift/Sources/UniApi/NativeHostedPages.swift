@@ -24,6 +24,10 @@ struct NativeBenchmarkPage: View {
         }
         .onAppear { if let opens { view = opens } }
         .onChange(of: resultsRun) { _, run in if run != nil { view = "table" } }
+        // A run opened from Home scopes Results only until the user goes back to Run.
+        .onChange(of: view) { _, value in
+            if resultsRun != nil, !Self.results.contains(where: { $0.value == value }) { NotificationCenter.default.post(name: .nativeResultsScope, object: nil) }
+        }
     }
 }
 

@@ -251,7 +251,8 @@ struct NativeShell: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .nativeSidebarToggle)) { _ in toggleSidebar() }
         .onReceive(NotificationCenter.default.publisher(for: .nativeResultsScope)) { event in
-            if let id = event.object as? String { resultsRun = id; navigate(.results) }
+            resultsRun = event.object as? String
+            if resultsRun != nil { navigate(.results) }
         }
         // AppKit owns the normal window minimum. System tiling can supply a
         // narrower viewport; a second SwiftUI minimum would crop both edges.
