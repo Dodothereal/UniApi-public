@@ -47,30 +47,39 @@ struct NativePromptsPage: View {
     private var pageError: String? { error ?? mediaReads.detailError ?? mediaReads.previewError }
     var body: some View {
         GeometryReader { geometry in
-        let contentWidth = min(1500, geometry.size.width) - 2 * density.pageMargin
-        NativePage(title: "Prompts & Results", subtitle: "Keep full prompts and compare the files models made for them.", maxWidth: 1500, readiness: pageError != nil ? .failed : catalog.isNull || selected != nil && detail.isNull ? .pending : .ready, actions: {
-            Button { Task { await reload() } } label: {
-                HStack(spacing: 6) { NativeIcon("rotate-cw", size: 14); Text("Reload") }
-            }.buttonStyle(T3Button(.outline))
+        NativePage(title: "Prompts", readiness: pageError != nil ? .failed : catalog.isNull || selected != nil && detail.isNull ? .pending : .ready, scrolls: false, actions: {
+            T3IconButton(system: "refresh-cw", help: "Reload") { Task { await reload() } }
+            if !detail.isNull {
+                Button { beginResult() } label: { HStack(spacing: 6) { NativeIcon("plus", size: 13); Text("Add result") } }.buttonStyle(T3Button(.outline))
+            }
             Button { error = nil; promptEditor = NativePresentedValue(value: .null) } label: {
-                HStack(spacing: 6) { NativeIcon("plus", size: 14); Text("New prompt") }
+                HStack(spacing: 6) { NativeIcon("plus", size: 13); Text("New prompt") }
             }.buttonStyle(T3Button(.primary))
         }) {
-            if let pageError { NativeError(message: pageError) }
-            if cleanupPending { Text("Removed. Managed file cleanup will retry in the background.").font(Theme.ui(12)).foregroundStyle(Theme.warnFg) }
-            if prompts.isEmpty { promptList }
-            else {
-                VStack(alignment: .leading, spacing: 24) {
-                    if contentWidth >= 760 {
-                        HStack(alignment: .top, spacing: 24) {
-                            promptList.frame(width: 280)
-                            promptDetail.frame(maxWidth: .infinity, alignment: .topLeading)
-                        }
-                    } else {
-                        promptList
-                        promptDetail
+            VStack(alignment: .leading, spacing: 0) {
+                if pageError != nil || cleanupPending {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let pageError { NativeError(message: pageError) }
+                        if cleanupPending { Text("Removed. File cleanup will retry in the background.").font(Theme.ui(12)).foregroundStyle(Theme.warnFg) }
+                    }.padding(.horizontal, density.pageMargin).padding(.top, 16)
+                }
+                if prompts.isEmpty {
+                    promptList.padding(.horizontal, density.pageMargin).padding(.top, density.pageGap)
+                } else if geometry.size.width >= 760 {
+                    HStack(alignment: .top, spacing: 0) {
+                        ScrollView { promptList.padding(.vertical, 8) }.frame(width: 288).background(Theme.sunken.opacity(0.5))
+                        Theme.border.frame(width: 1)
+                        ScrollView { promptDetail.padding(.horizontal, density.pageMargin).padding(.top, density.pageGap).padding(.bottom, 48).frame(maxWidth: 820, alignment: .topLeading).frame(maxWidth: .infinity, alignment: .topLeading) }
                     }
-                }.frame(maxWidth: .infinity)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            promptList.padding(.vertical, 8)
+                            Theme.border.frame(height: 1)
+                            promptDetail.padding(.horizontal, density.pageMargin).padding(.top, density.pageGap).padding(.bottom, 48)
+                        }
+                    }
+                }
             }
         }
         .overlay { if dragTarget { RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 2, dash: [8, 5])).padding(12).allowsHitTesting(false) } }
@@ -96,76 +105,62 @@ struct NativePromptsPage: View {
         }
         .nativePageActivity(reads: reads, suspended: { cancelPendingDrops(); dragTarget = false })
     }
-    private var promptList: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if prompts.isEmpty {
-                if catalog.isNull && error == nil { ShimmerText(text: "Loading prompts …") }
-                else {
-                    NativePromptEmptyState(icon: "file-text", title: error == nil ? "No prompts yet" : "Could not load prompts", detail: error == nil ? "Create a prompt to start collecting results." : "Try reloading your saved prompts.")
-                }
+    @ViewBuilder private var promptList: some View {
+        if prompts.isEmpty {
+            if catalog.isNull && error == nil { ShimmerText(text: "Loading prompts…") }
+            else if error == nil {
+                EmptyState(icon: "file-text", title: "No prompts", detail: "Keep a task's full text here, then collect the files each model made for it.",
+                           actionTitle: "New prompt") { error = nil; promptEditor = NativePresentedValue(value: .null) }
             }
-            else {
-                SectionLabel(text: "Prompts") {
-                    NativeNumberText(text: "\(prompts.count) \(prompts.count == 1 ? "prompt" : "prompts")", font: Theme.ui(12), color: Theme.muted)
-                }
-                LazyVStack(spacing: 8) {
-                    ForEach(prompts, id: \.self["id"]) { prompt in
-                        NativePromptListRow(prompt: prompt, selected: selected == prompt["id"].string, onSelect: {
-                            selected = prompt["id"].string; detail = .null
-                            Task { await loadDetail() }
-                        }, onCopy: { copy(prompt["text"].string) })
-                    }
+        } else {
+            LazyVStack(spacing: 0) {
+                ForEach(prompts, id: \.self["id"]) { prompt in
+                    NativePromptListRow(prompt: prompt, selected: selected == prompt["id"].string, onSelect: {
+                        selected = prompt["id"].string; detail = .null
+                        Task { await loadDetail() }
+                    }, onCopy: { copy(prompt["text"].string) })
                 }
             }
         }
     }
-    private var promptDetail: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if detail.isNull {
-                if mediaReads.detailError != nil {
-                    NativeReadFailureState(icon: "file-text", title: "Could not load results", detail: "Try loading this prompt again.", retryTitle: "Reload results") {
-                        Task { await loadDetail() }
-                    }
-                } else { ShimmerText(text: "Loading prompt and results …") }
-            }
-            else {
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(detail["prompt"]["title"].string).font(Theme.ui(18, weight: .semibold)).accessibilityAddTraits(.isHeader)
-                            .fixedSize(horizontal: false, vertical: true)
-                        HStack(spacing: 4) {
-                            Text("Created")
-                            Text(Date(timeIntervalSince1970: detail["prompt"]["createdAt"].double / 1000), style: .date)
-                        }.font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+    @ViewBuilder private var promptDetail: some View {
+        if detail.isNull {
+            if mediaReads.detailError != nil {
+                NativeReadFailureState(icon: "file-text", title: "Could not load results", detail: "Try loading this prompt again.", retryTitle: "Reload results") {
+                    Task { await loadDetail() }
+                }
+            } else { ShimmerText(text: "Loading…") }
+        }
+        else {
+            let results = detail["results"].array
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(detail["prompt"]["title"].string).font(Theme.ui(Theme.text2Xl, weight: .semibold)).tracking(Theme.tracking(Theme.text2Xl)).accessibilityAddTraits(.isHeader)
+                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(Date(timeIntervalSince1970: detail["prompt"]["createdAt"].double / 1000), style: .date).font(Theme.ui(12)).foregroundStyle(Theme.muted)
                     promptActions(detail["prompt"])
                 }
-                Card {
-                    Text(detail["prompt"]["text"].string).font(Theme.ui(12.5)).foregroundStyle(Theme.dim).lineSpacing(6)
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                }
-                HStack(spacing: 12) {
-                    SectionLabel(text: "Results") {
-                        NativeNumberText(text: "\(detail["results"].array.count) \(detail["results"].array.count == 1 ? "result" : "results")", font: Theme.ui(12), color: Theme.muted)
-                    }
-                    Button { beginResult() } label: {
-                        HStack(spacing: 6) { NativeIcon("plus", size: 14); Text("Add result") }
-                    }.buttonStyle(T3Button(.primary)).fixedSize()
-                }
-                Text("Drop files anywhere on this page to add them to \(detail["prompt"]["title"].string). All file types · 50 MiB per file.")
-                    .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                if detail["results"].array.isEmpty {
-                    NativePromptEmptyState(icon: "file-code-2", title: "No results yet", detail: "Drop files here or add a URL for a model response.")
-                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
-                } else {
-                    LazyVStack(spacing: 8) {
-                        ForEach(Array(detail["results"].array.enumerated()), id: \.element["id"]) { index, result in
-                            Card(padding: 12) {
-                                ViewThatFits(in: .horizontal) {
-                                    HStack(spacing: 12) { resultMetadata(result, index: index); resultActions(result, index: index) }
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        resultMetadata(result, index: index)
-                                        HStack { Spacer(minLength: 0); resultActions(result, index: index) }
+                Text(detail["prompt"]["text"].string).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.dim).lineSpacing(5)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 14).overlay(alignment: .leading) { Theme.border.frame(width: 2) }
+                NativeSection("Results", detail: results.isEmpty ? "" : "\(results.count)") {
+                    if results.isEmpty {
+                        HStack(spacing: 10) {
+                            NativeIcon("upload", size: 15).foregroundStyle(Theme.faint)
+                            Text("Drop files anywhere on this page, or add a URL. Any type, 50 MiB per file.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                            Spacer(minLength: 0)
+                        }.padding(16)
+                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(Theme.input, style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
+                    } else {
+                        NativeStack {
+                            ForEach(Array(results.enumerated()), id: \.element["id"]) { index, result in
+                                NativePromptResultRow {
+                                    ViewThatFits(in: .horizontal) {
+                                        HStack(spacing: 12) { resultMetadata(result, index: index); resultActions(result, index: index) }
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            resultMetadata(result, index: index)
+                                            HStack { Spacer(minLength: 0); resultActions(result, index: index) }
+                                        }
                                     }
                                 }
                             }
@@ -184,7 +179,7 @@ struct NativePromptsPage: View {
     }
     private func resultMetadata(_ result: JSONValue, index: Int) -> some View {
         HStack(spacing: 12) {
-            Text(String(index + 1)).font(Theme.mono(12)).foregroundStyle(Theme.muted).frame(width: 24)
+            Text(String(index + 1)).font(Theme.num(12, weight: .medium)).foregroundStyle(Theme.faint).frame(width: 20, alignment: .leading)
             VStack(alignment: .leading, spacing: 3) {
                 Text(result["model"].string).font(Theme.mono(12.5, weight: .medium)).lineLimit(1).textSelection(.enabled).help(result["model"].string)
                 Text(resultDescription(result)).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1).textSelection(.enabled)
@@ -223,8 +218,7 @@ struct NativePromptsPage: View {
     private func promptForm(_ item: NativePresentedValue) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(item.value.isNull ? "New prompt" : "Edit prompt").font(Theme.ui(18, weight: .semibold))
-                Text("Keep the full task text here so you can reuse it across models.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                Text(item.value.isNull ? "New prompt" : "Edit prompt").font(Theme.ui(Theme.textBase, weight: .semibold))
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Title").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
@@ -233,8 +227,8 @@ struct NativePromptsPage: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Prompt text").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
                 TextEditor(text: $text).font(Theme.ui(12.5)).scrollContentBackground(.hidden)
-                    .padding(8).frame(height: 250).background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1)).accessibilityLabel("Prompt text")
+                    .padding(8).frame(height: 250).background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(Theme.input, lineWidth: 1)).accessibilityLabel("Prompt text")
             }
             if let error { NativeError(message: error) }
             HStack(spacing: 8) {
@@ -249,9 +243,7 @@ struct NativePromptsPage: View {
     private func resultForm(_ item: NativePresentedValue) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(item.value.isNull ? "Add result" : "Edit result").font(Theme.ui(18, weight: .semibold))
-                Text(item.value.isNull ? "Add files of any type or a web page for this prompt." : "Update the model and source details.")
-                    .font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                Text(item.value.isNull ? "Add result" : "Edit result").font(Theme.ui(Theme.textBase, weight: .semibold))
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -544,25 +536,39 @@ private struct NativePromptListRow: View {
     let onSelect: () -> Void
     let onCopy: () -> Void
     @State private var hovering = false
+    @Environment(\.nativeReducedMotion) private var reduceMotion
 
     var body: some View {
-        HStack(alignment: .top, spacing: 1) {
+        ZStack(alignment: .topTrailing) {
             Button(action: onSelect) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(prompt["title"].string).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text(prompt["text"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineSpacing(3).lineLimit(2)
-                    HStack(spacing: 4) {
-                        Text("\(prompt["resultCount"].int) \(prompt["resultCount"].int == 1 ? "result" : "results") ·")
-                        Text(Date(timeIntervalSince1970: prompt["updatedAt"].double / 1000), style: .date)
-                    }.font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1).padding(.top, 4)
-                }.padding(.horizontal, 10).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(prompt["title"].string).font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text("\(prompt["resultCount"].int)").font(Theme.num(11, weight: .medium)).foregroundStyle(prompt["resultCount"].int == 0 ? Theme.faint : Theme.muted)
+                            .opacity(hovering ? 0 : 1).help("\(prompt["resultCount"].int) results")
+                    }
+                    Text(prompt["text"].string).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineSpacing(2).lineLimit(2)
+                    Text(Date(timeIntervalSince1970: prompt["updatedAt"].double / 1000), style: .date).font(Theme.ui(11)).foregroundStyle(Theme.faint).lineLimit(1).padding(.top, 2)
+                }.padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(.plain).pointingHand().accessibilityAddTraits(selected ? [.isSelected] : [])
             NativePromptIconButton(name: "clipboard", title: "Copy prompt: " + prompt["title"].string, action: onCopy)
-                .padding(.top, 4)
-        }.padding(4)
-            .background(selected ? Theme.accent.opacity(0.09) : hovering ? Theme.subtle : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(selected ? Theme.accent.opacity(0.35) : Theme.border, lineWidth: 1))
+                .padding(.top, 4).padding(.trailing, 8).opacity(hovering ? 1 : 0)
+        }
+            .background(selected ? Theme.raised : hovering ? Theme.subtle : .clear)
+            .overlay(alignment: .leading) { Theme.accent.frame(width: 2).opacity(selected ? 1 : 0) }
+            .overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
             .onHover { hovering = $0 }
+            .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+            .animation(reduceMotion ? nil : NativeMotion.selection, value: selected)
+    }
+}
+
+private struct NativePromptResultRow<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    @State private var hovering = false
+    var body: some View {
+        content().padding(.vertical, 8).contentShape(Rectangle()).onHover { hovering = $0 }
     }
 }
 
@@ -587,15 +593,3 @@ private struct NativePromptIconButton: View {
     }
 }
 
-private struct NativePromptEmptyState: View {
-    let icon: String
-    let title: String
-    let detail: String
-    var body: some View {
-        VStack(spacing: 8) {
-            NativeIcon(icon, size: 24).foregroundStyle(Theme.muted).accessibilityHidden(true)
-            Text(title).font(Theme.ui(14, weight: .medium))
-            Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-        }.frame(maxWidth: .infinity).padding(.horizontal, 16).padding(.vertical, 48).accessibilityElement(children: .combine)
-    }
-}
