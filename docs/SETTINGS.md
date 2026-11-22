@@ -57,11 +57,11 @@ When the shell knows that Battery is unsupported, it omits Battery from the laun
 
 ## Sidebar
 
-Open `Edit sidebar` for a preview of the navigation layout, including hidden pages. Drag a section handle onto another section heading, or a page handle onto a page in the same section. When moving up, the item is placed before the target; when moving down, it is placed after it. An insertion line marks the position; invalid targets are marked and cannot be dropped. Each row also has a Move menu for keyboard access and a visibility switch. Home stays at the top, while Jobs and Settings stay at the bottom; these anchored pages cannot be moved or hidden. An unavailable Battery page retains its saved preference.
+`Expanded` switches between the full sidebar and an icon rail; Command-B does the same from any page, and the rail keeps every destination one click away. Open `Pages and order` for a preview of the navigation layout, including hidden pages. Drag a section handle onto another section heading, or a page handle onto a page in the same section. When moving up, the item is placed before the target; when moving down, it is placed after it. An insertion line marks the position; invalid targets are marked and cannot be dropped. Each row also has a Move menu for keyboard access and a visibility switch. Home stays at the top, while Jobs and Settings stay at the bottom; these anchored pages cannot be moved or hidden. An unavailable Battery page retains its saved preference.
 
 Hidden pages remain valid destinations, including for launch or restoration. Some can also be reached from Home; any hidden page can be restored with its visibility control. Sections with no visible pages are omitted. Hiding a page does not change the saved page and section order.
 
-`Show badges` is enabled by default. Turning it off hides the Jobs, Code and Arena counts and the battery percentage in the sidebar while leaving the destinations and their content available. `Restore sidebar layout defaults` resets width, page and section order, page visibility and badges. It does not change whether the sidebar is open.
+`Badges` is enabled by default. Turning it off hides the Jobs, Code and Arena counts and the battery percentage in the sidebar while leaving the destinations and their content available. `Restore defaults` resets width, page and section order, page visibility and badges. It does not change whether the sidebar is expanded.
 
 The backing preference keys are `uniapi-start-page`, `uniapi-restore-last-page`, `uniapi-sidebar-order`, `uniapi-sidebar-hidden` and `uniapi-sidebar-badges`. Unrecognized launch and hidden-page entries are ignored. Choose a launch page or turn a sidebar page back on in Settings to replace them.
 

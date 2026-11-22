@@ -61,18 +61,18 @@ COMBINED_DEFAULT_LABEL = "Offscreen native page, empty fixture; capture-only ses
 # their existing location; they do not replace any content or page container.
 DETAIL_TRANSFORMS = {
     "NativeSettingsPage.swift": [
-        ('DisclosureGroup("Customize colors") {',
-         'DisclosureGroup("Customize colors", isExpanded: .constant(ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"]?.hasPrefix("theme-") == true)) {'),
-        ('NativeThemeSettingsView().padding(.top, 12)',
-         'NativeThemeSettingsView().padding(.top, 12).background(PublicCaptureAnchor("theme-common"))'),
+        ('NativeDisclosure("Customize colors") {',
+         'NativeDisclosure("Customize colors", isExpanded: .constant(ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"]?.hasPrefix("theme-") == true)) {'),
+        ('NativeThemeSettingsView()',
+         'NativeThemeSettingsView().background(PublicCaptureAnchor("theme-common"))'),
         ('NativeSidebarSettingsView()',
          'NativeSidebarSettingsView().background(PublicCaptureAnchor("sidebar"))'),
         ('NativeTelegramSettingsView(runtime: runtime)',
          'NativeTelegramSettingsView(runtime: runtime).background(PublicCaptureAnchor("telegram"))'),
     ],
     "NativeSidebarSettingsView.swift": [
-        ('DisclosureGroup("Edit sidebar") {',
-         'DisclosureGroup("Edit sidebar", isExpanded: .constant(ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] == "sidebar")) {'),
+        ('NativeDisclosure("Pages and order") {',
+         'NativeDisclosure("Pages and order", isExpanded: .constant(ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] == "sidebar")) {'),
     ],
     "NativeTelegramSettingsView.swift": [
         ('@State private var expanded = false',
@@ -81,8 +81,8 @@ DETAIL_TRANSFORMS = {
     "NativeThemeSettingsView.swift": [
         ('@State private var showAdvanced = false',
          '@State private var showAdvanced = ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] == "theme-advanced"'),
-        ('.font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.ink)\n        }.onAppear',
-         '.font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.ink)\n            .background(PublicCaptureAnchor("theme-advanced"))\n        }.onAppear'),
+        ('colorRows(advanced)\n            }\n        }.onAppear',
+         'colorRows(advanced)\n            }\n            .background(PublicCaptureAnchor("theme-advanced"))\n        }.onAppear'),
     ],
 }
 
