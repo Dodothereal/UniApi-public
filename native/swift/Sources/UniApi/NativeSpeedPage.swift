@@ -17,8 +17,9 @@ struct NativeSpeedPage: View {
     init(runtime: NativeRuntime, model: NativeSpeedModel? = nil) { self.runtime = runtime; _state = StateObject(wrappedValue: model ?? NativeSpeedModel(runtime: runtime)) }
     private var browserSelected: Bool { state.catalog["providers"].array.contains { $0["transport"] == "chatgpt-web" && state.selection["included"].array.contains($0["id"]) } }
     @State private var tab = "bench"
+    @State private var benchQuery = ""
     var body: some View {
-        NativePage(title: "Speed", readiness: !state.error.isEmpty ? .failed : state.catalog.isNull || state.progress.isNull || state.free.isNull ? .pending : .ready, tabs: {
+        NativePage(title: "Speed", maxWidth: .infinity, readiness: !state.error.isEmpty ? .failed : state.catalog.isNull || state.progress.isNull || state.free.isNull ? .pending : .ready, scrolls: false, tabs: {
             NativeTabs(options: [("bench", "Run"), ("free", "Free test")], selection: tab) { tab = $0; host?.select($0) }
                 .nativeHostedView(["bench", "free"]) { tab = $0 }
         }, actions: {
@@ -26,8 +27,11 @@ struct NativeSpeedPage: View {
             if tab == "bench" {
                 if state.running { Button { Task { await state.cancel() } } label: { HStack(spacing: 6) { NativeIcon("square", size: 11); Text("Stop run") } }.buttonStyle(T3Button(.destructive)) }
                 else {
+                    NativeMenuSelectLabel(title: state.selection["tier"].string.capitalized, width: 112) {
+                        ForEach(["quick", "standard", "deep"], id: \.self) { name in Button(name.capitalized) { state.tier(name) } }
+                    }.disabled(state.anyRunning).accessibilityLabel("Depth").help(description)
                     Button { Task { await state.run() } } label: {
-                        HStack(spacing: 7) { NativeIcon("zap", size: 13); Text("Run " + state.selection["tier"].string); NativeNumberText(text: "\(state.pairs.count)", font: Theme.num(11, weight: .medium), color: Theme.onInk.opacity(0.62)) }
+                        HStack(spacing: 7) { NativeIcon("zap", size: 13); Text("Run"); NativeNumberText(text: "\(state.pairs.count)", font: Theme.num(11, weight: .medium), color: Theme.onInk.opacity(0.62)) }
                     }.buttonStyle(T3Button(.primary)).disabled(state.busy || state.freeRunning || state.pairs.isEmpty || !state.issues.isEmpty)
                         .help(state.pairs.isEmpty ? "Include a provider and pick models first" : "Benchmark \(state.pairs.count) models")
                 }
@@ -36,32 +40,29 @@ struct NativeSpeedPage: View {
                 else { Button { Task { await state.sweep() } } label: { HStack(spacing: 6) { NativeIcon("sparkles", size: 13); Text("Run free test") } }.buttonStyle(T3Button(.primary)).disabled(state.running || state.catalog["providers"].array.isEmpty) }
             }
         }) {
-            if !state.error.isEmpty { NativeError(message: state.error) }
             if tab == "bench" {
-                ForEach(state.issues, id: \.self) { NativeError(message: $0) }
-                NativeSheet {
-                    if state.running || state.progress["progress"]["done"].bool || state.progress["interrupted"].bool || !state.progress["job"]["log"].array.isEmpty || state.progress["job"]["status"] == "failed" { progressPanel }
-                    NativeSection("Depth") {
-                        VStack(alignment: .leading, spacing: 14) {
-                            T3Segmented(options: [("quick", "Quick"), ("standard", "Standard"), ("deep", "Deep")], selection: state.selection["tier"].string, enabled: !state.anyRunning) { state.tier($0) }
-                            tierSpec
-                            if browserSelected { Text(BenchmarkMath.browserNote).font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+                GeometryReader { geometry in
+                    if geometry.size.width >= 780 {
+                        HStack(spacing: 0) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                T3Field(placeholder: "Filter providers and models", text: $benchQuery, leadingIcon: "search")
+                                    .accessibilityLabel("Filter providers and models")
+                                    .padding(.horizontal, 16).padding(.vertical, 12)
+                                Theme.rule.frame(height: 1)
+                                ScrollView { selectionList.padding(.horizontal, 16).padding(.bottom, 24) }.scrollContentBackground(.hidden)
+                            }.frame(width: 372)
+                            Theme.border.frame(width: 1)
+                            NativePane(maxWidth: 900, centered: false) { runPane }
                         }
-                    }
-                    NativeSection("Providers", detail: state.catalog.isNull ? "" : "\(state.pairs.count) models selected. Providers run in parallel, models within one in sequence.") {
-                        if state.catalog.isNull { ShimmerText(text: "Reading provider configuration…") }
-                        else if state.catalog["providers"].array.isEmpty {
-                            NativeEmptyState(title: "No providers yet", detail: "Add a provider in Switcher, then return here to choose models.",
-                                             actionTitle: "Add provider in Switcher") {
-                                NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.switcher)
-                            }
-                        } else {
-                            NativeStack { ForEach(state.catalog["providers"].array, id: \.self["id"]) { provider in providerRow(provider) } }
-                        }
+                    } else {
+                        NativePane { selectionList; runPane }
                     }
                 }
             } else {
-                freePanel
+                NativePane(maxWidth: 1100, centered: false) {
+                    if !state.error.isEmpty { NativeError(message: state.error) }
+                    freePanel
+                }
             }
         }
         .nativePageTask {
@@ -110,36 +111,97 @@ struct NativeSpeedPage: View {
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
-    private func providerRow(_ provider: JSONValue) -> some View {
+    private var benchTerms: [Substring] { benchQuery.lowercased().split(whereSeparator: \.isWhitespace) }
+    private func benchMatches(_ text: String) -> Bool { benchTerms.allSatisfy { text.lowercased().contains($0) } }
+    /// Every provider with its chosen models: the left side decides what runs.
+    @ViewBuilder private var selectionList: some View {
+        if state.catalog.isNull { ShimmerText(text: "Reading provider configuration…").padding(.top, 14) }
+        else if state.catalog["providers"].array.isEmpty {
+            NativeEmptyState(title: "No providers yet", detail: "Add a provider in Switcher, then choose its models here.", icon: "server", actionTitle: "Open Switcher", actionIcon: "route") {
+                NotificationCenter.default.post(name: .nativeNavigation, object: NativeDestination.switcher)
+            }.padding(.top, 14)
+        } else {
+            let providers = state.catalog["providers"].array.filter { provider in
+                benchTerms.isEmpty || benchMatches(provider["name"].string) || state.selection["models"][provider["id"].string].array.contains { benchMatches($0.string) }
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(providers, id: \.self["id"]) { provider in
+                    providerBlock(provider)
+                    Theme.rule.frame(height: 1)
+                }
+                if providers.isEmpty { Text("No provider or model matches").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint).padding(.top, 14) }
+            }
+        }
+    }
+    private func providerBlock(_ provider: JSONValue) -> some View {
         let id = provider["id"].string, included = state.selection["included"].array.contains(provider["id"]), browser = provider["transport"] == "chatgpt-web"
         let chosen = state.selection["models"][id].array
+        let shown = chosen.filter { benchTerms.isEmpty || benchMatches(provider["name"].string) || benchMatches($0.string) }
         return NativeSpeedProviderRow { hovering in
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 T3Switch(isOn: Binding(get: { included }, set: { _ in state.toggle(id) }), enabled: !state.anyRunning && (!browser || provider["ready"].bool || included)).accessibilityLabel("Include " + provider["name"].string)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 7) {
                         Text(provider["name"].string).font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(included ? Theme.ink : Theme.muted).lineLimit(1)
                         if browser && !provider["ready"].bool { NativeStatus(text: "Setup needed", tone: .warn) }
                     }
-                    Text(browser ? "Browser session" : provider["baseUrl"].string).font(browser ? Theme.ui(12) : Theme.mono(11)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                    Text(browser ? "Browser session" : provider["baseUrl"].string).font(browser ? Theme.ui(11) : Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: 4)
                 if !browser {
-                    NativeKeyPill(key: provider["maskedKey"].string) { Task { await state.copyKey(id) } }
+                    T3IconButton(system: "key-round", help: "Copy key " + provider["maskedKey"].string, size: 13) { Task { await state.copyKey(id) } }.opacity(hovering ? 1 : 0)
                     T3IconButton(system: "pencil", help: "Edit provider", size: 13) { Task { if let value = await state.editable(provider) { editor = NativePresentedValue(value: value) } } }
-                        .disabled(state.anyRunning).opacity(hovering ? 1 : 0.55)
+                        .disabled(state.anyRunning).opacity(hovering ? 1 : 0)
                 }
-                Button { picker = NativePresentedValue(value: provider); if !browser && provider["catalog"].array.isEmpty { Task { await state.discover(id) } } } label: {
-                    HStack(spacing: 6) { NativeIcon("plus", size: 12); Text(browser ? "Modes" : "Models"); if !chosen.isEmpty { Text("\(chosen.count)").font(Theme.num(11, weight: .medium)).foregroundStyle(Theme.muted) } }
-                }.buttonStyle(T3Button()).disabled(state.anyRunning)
+                T3IconButton(system: "plus", help: browser ? "Choose modes" : "Choose models", size: 14) {
+                    picker = NativePresentedValue(value: provider); if !browser && provider["catalog"].array.isEmpty { Task { await state.discover(id) } }
+                }.disabled(state.anyRunning)
             }
-            if !provider["catalogError"].isNull { Text(provider["catalogError"].string).font(Theme.ui(12)).foregroundStyle(Theme.warnFg).padding(.leading, 48) }
-            if !chosen.isEmpty {
-                NativeScrollRail {
-                    ForEach(chosen, id: \.self) { model in
-                        ModelChip(model: model.string, color: Theme.pairColor(id + "|" + model.string)) { state.models(id, chosen.map(\.string).filter { $0 != model.string }) }.disabled(state.anyRunning)
+            if !provider["catalogError"].isNull { Text(provider["catalogError"].string).font(Theme.ui(12)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true).padding(.leading, 46) }
+            if chosen.isEmpty {
+                Text(browser ? "No modes chosen" : "No models chosen").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint).padding(.leading, 46)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(shown, id: \.self) { model in
+                        NativeSpeedModelRow(model: model.string, color: Theme.pairColor(id + "|" + model.string), dimmed: !included, locked: state.anyRunning) {
+                            state.models(id, chosen.map(\.string).filter { $0 != model.string })
+                        }
                     }
-                }.padding(.leading, 48).opacity(included ? 1 : 0.55)
+                }.padding(.leading, 46)
+            }
+        }
+    }
+    /// What the depth measures, then the run: the models waiting, or the one in progress.
+    @ViewBuilder private var runPane: some View {
+        if !state.error.isEmpty { NativeError(message: state.error) }
+        ForEach(state.issues, id: \.self) { NativeError(message: $0) }
+        VStack(alignment: .leading, spacing: 12) {
+            tierSpec
+            if browserSelected { Text(BenchmarkMath.browserNote).font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+        }
+        if state.running || state.progress["progress"]["done"].bool || state.progress["interrupted"].bool || !state.progress["job"]["log"].array.isEmpty || state.progress["job"]["status"] == "failed" { progressPanel }
+        if !state.running { queue }
+    }
+    private var queue: some View {
+        let pairs = state.pairs, providers = state.catalog["providers"].array
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Next run").font(Theme.ui(Theme.textSm, weight: .semibold)).accessibilityAddTraits(.isHeader)
+                Text("\(pairs.count)").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.faint)
+            }.padding(.bottom, 10)
+            if pairs.isEmpty {
+                Text("Include a provider and choose models.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+            } else {
+                Theme.rule.frame(height: 1)
+                ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
+                    HStack(spacing: 8) {
+                        RoundedRectangle(cornerRadius: 1).fill(Theme.pairColor(pair["provider"].string + "|" + pair["model"].string)).frame(width: 3, height: 12)
+                        Text(pair["model"].string).font(Theme.mono(12)).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 8)
+                        Text(providers.first { $0["id"] == pair["provider"] }?["name"].string ?? pair["provider"].string).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
+                    }.frame(height: 34)
+                    Theme.rule.frame(height: 1)
+                }
             }
         }
     }
@@ -167,6 +229,9 @@ struct NativeSpeedPage: View {
                         }
                     }
                 } else if state.running { ShimmerText(text: "Starting…") }
+                if state.progress["progress"]["done"].bool, !state.running, let host {
+                    Button("Open results", nativeIcon: "chart-bar") { host.select("table") }.buttonStyle(T3Button(.primary))
+                }
                 if state.progress["resumeAvailable"].bool {
                     HStack(spacing: 12) {
                         Button("Resume") { Task { await state.resume() } }.buttonStyle(T3Button()).disabled(state.busy)
@@ -249,6 +314,22 @@ private struct NativeSpeedProviderRow<Content: View>: View {
         VStack(alignment: .leading, spacing: 9) { content(hovering) }
             .padding(.vertical, 12).contentShape(Rectangle())
             .onHover { hovering = $0 }
+    }
+}
+
+private struct NativeSpeedModelRow: View {
+    let model: String, color: Color, dimmed: Bool, locked: Bool
+    let remove: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 3, height: 12).opacity(dimmed ? 0.45 : 1)
+            Text(model).font(Theme.mono(11.5)).foregroundStyle(dimmed ? Theme.muted : Theme.ink).lineLimit(1).truncationMode(.middle).help(model)
+            Spacer(minLength: 4)
+            Button(action: remove) { NativeIcon("x", size: 12).frame(width: 22, height: 22).contentShape(Rectangle()) }
+                .buttonStyle(.plain).foregroundStyle(Theme.muted).opacity(hovering ? 1 : 0).disabled(locked)
+                .accessibilityLabel("Remove " + model).help("Remove")
+        }.frame(height: 26).contentShape(Rectangle()).onHover { hovering = $0 }
     }
 }
 
