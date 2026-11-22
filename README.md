@@ -48,6 +48,15 @@ read the [update and recovery details](docs/INSTALL.md#background-work-and-updat
 before changing an existing installation. Normal Quit keeps background work
 running; closing a window does not prove services have stopped.
 
+An installed release can also update itself. **Settings > Application >
+Software update** looks for a newer GitHub release, downloads it in the
+background and verifies its published checksum. **Update to ...** (also shown at
+the bottom of the sidebar once a release is ready) then runs the same guarded
+installer: it waits until no job or coding turn is active, closes the window,
+replaces the app and reopens it. Providers, data, preferences and service
+settings are kept, and a refused or failed installation leaves the previous
+version in place.
+
 For source builds and separate runtime data, see [local development](docs/LOCAL-DEVELOPMENT.md).
 
 ## Your first five minutes
@@ -172,6 +181,7 @@ Home, Jobs and Settings stay available in the sidebar. See
 | Statistics | Review supported local coding-tool usage history |
 | Transcribe | Run optional local Whisper transcription |
 | Activity, Fan Control, Battery | Inspect activity and supported Mac hardware controls |
+| Keyboard Stats | Optional key heatmap, typing speed, corrections and shortcut counts |
 | Jobs, Settings | Follow background work and configure the app |
 
 Jobs' **Clear old jobs…** action asks for confirmation before removing completed,

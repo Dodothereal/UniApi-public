@@ -1,5 +1,32 @@
 # Preview validation
 
+## In-app update and Keyboard Stats (candidate)
+
+The optimized native gate passed 1,355 tests with zero failures on macOS with
+Swift 6.4 and SDK 26.5, including 13 keyboard aggregation, summary and
+persistence methods and the updater's version, checksum, staging, idle-wait,
+cancellation and failure-result methods, all against injected fixtures. The
+secret scan was clean. The static gate ran 72 Python tests; the nine
+`NativeBuildDiscoveryTests` cases that use a fixture Xcode path failed
+identically on the unmodified base revision on that host and are not counted
+as evidence either way.
+
+One update was exercised end to end on a single arm64 host that had no earlier
+installation: a production build of this candidate, versioned 0.1.0, was
+installed with the source installer. Its background service found the published
+0.1.17 release, verified the archive against the published checksum and staged
+it without interaction. Choosing **Update to 0.1.17** from the sidebar produced
+an `installed` result 34 seconds later; the bundle reported 0.1.17, both
+services were running again, the window reopened and the saved launch-page
+preference was unchanged. That is one fresh, idle installation with no
+providers, jobs or coding turns. Waiting for active work, cancellation and a
+refused or rolled-back installation are covered by fixtures only.
+
+Keyboard Stats pages were rendered from a development build against an isolated
+data folder with synthetic counters. Live capture through Input Monitoring,
+secure-field behavior, non-US layouts, external keyboards and the effect of an
+update on a granted permission were not exercised.
+
 ## UTC watermark day keys (candidate)
 
 The three lifetime/source/publication folds reuse the existing UTC day string

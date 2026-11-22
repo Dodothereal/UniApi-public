@@ -264,6 +264,11 @@ final class NativeAppSession: ObservableObject {
     var battery: NativeBatteryService?
     var fans: NativeFanService?
     var energy: NativeEnergyService?
+    var keyboard: NativeKeyboardService?
+    var updater: NativeAppUpdater?
+    let updates = NativeUpdateModel()
+    private var updateStates: Task<Void, Never>?
+    private var updateChecks: Task<Void, Never>?
     var summaries: NativeHubSummaries?
     private var statistics: NativeStatisticsService?
     private var statisticsStartup: Task<Void, Never>?
@@ -290,6 +295,10 @@ final class NativeAppSession: ObservableObject {
             self.fans = fans
             let energy = NativeEnergyService(runtime: runtime)
             self.energy = energy
+            let keyboard = NativeKeyboardService(runtime: runtime)
+            self.keyboard = keyboard
+            let updater = NativeAppUpdater(runtime: runtime)
+            self.updater = updater
             statistics = NativeStatisticsService.shared(runtime: runtime)
             let benchmark = NativeBenchmarkService.shared(runtime: runtime)
             self.benchmark = benchmark
@@ -352,6 +361,21 @@ final class NativeAppSession: ObservableObject {
                     try await battery.start()
                     try await fans.start()
                     try await energy.start()
+                    try await keyboard.start()
+                    let updateEvents = await runtime.events.stream()
+                    self.updateStates = Task { [updates] in
+                        for await event in updateEvents where event.topic == "update.state" { updates.apply(event.data) }
+                    }
+                    await updater.start()
+                    updates.apply(await updater.state())
+                    self.updateChecks = Task(priority: .utility) {
+                        // Find and stage a release ahead of time so installing it is one click.
+                        try? await Task.sleep(nanoseconds: 5_000_000_000)
+                        while !Task.isCancelled {
+                            if NativeAppSession.automaticUpdateChecks { await updater.check(automatic: true) }
+                            try? await Task.sleep(nanoseconds: 1_800_000_000_000)
+                        }
+                    }
                     if !paths.readOnly {
                         try await runtime.jobs.recover()
                         try await arena.reconcileAfterRecovery()
@@ -386,7 +410,18 @@ final class NativeAppSession: ObservableObject {
         // Let the retained or newly mounted shell install its notification observer.
         DispatchQueue.main.async { NotificationCenter.default.post(name: .nativeNavigation, object: destination) }
     }
+    static let automaticUpdateKey = "uniapi.update.automatic"
+    static var automaticUpdateChecks: Bool { UserDefaults.standard.object(forKey: automaticUpdateKey) as? Bool ?? true }
+    /// Installs the staged release once idle. The guarded installer refuses to
+    /// replace an app with a visible presentation, so the window is put away first.
+    func installUpdate() {
+        guard let updater else { return }
+        updates.restore = { (NSApp.delegate as? NativeAppDelegate)?.restoreAfterUpdate() }
+        Task { await updater.install(hide: { await MainActor.run { (NSApp.delegate as? NativeAppDelegate)?.hideForUpdate() } }) }
+    }
     func shutdown() async {
+        updateChecks?.cancel(); updateChecks = nil
+        updateStates?.cancel(); updateStates = nil
         statisticsStopping = true
         let startup = statisticsStartup; startup?.cancel()
         if let runtime, !runtime.paths.readOnly {
@@ -401,6 +436,7 @@ final class NativeAppSession: ObservableObject {
         }
         await fans?.stopMonitoring()
         await energy?.stop()
+        await keyboard?.stop()
         await switcher?.shutdown()
     }
 }
@@ -547,6 +583,8 @@ final class NativeAppSession: ObservableObject {
         Task { await NativeAppSession.current?.shutdown(); sender.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
+    func hideForUpdate() { hidePresentation() }
+    func restoreAfterUpdate() { showWindow() }
     private func hidePresentation() {
         NativeAppSession.current?.pageActive = false
         NativeAppSession.current?.presentation.discard()

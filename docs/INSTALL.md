@@ -110,4 +110,12 @@ Normal Quit hides the presentation while background work continues. Closing the 
 
 For an update, let active jobs and coding turns finish, use normal Quit to dismiss the presentation, then let the installer perform its ownership and idle-state checks. The installer must refuse conflicting owners or active work. Do not bypass these checks, kill another installation's processes, or launch a second owner against the same data.
 
+### Updating from inside the app
+
+**Settings > Application > Software update** checks the `releases/latest` page of the public repository, downloads the release archive into `updates/` under the data folder and compares it with the published SHA-256 file. The extracted package must contain the production bundle identifier, the announced version and a valid code signature before it is offered. With **Check for updates automatically** on (the default), this happens in the background every few hours so the release is already staged when you choose to install it; nothing is installed without that choice.
+
+**Update to ...** runs the packaged installer with the storage locations of the running app. It first waits until no job is queued or running and no coding turn is active, and can be cancelled while it waits. It then puts the window away, because the installer refuses a visible presentation, and starts the installer detached from the app. The installer applies every check described above, keeps data, providers, preferences and service settings, and reopens UniApi when it finishes. If it refuses or rolls back, the previous version keeps running, its window returns and Settings shows the reason; the full output is in `update-<version>.log` in the logs folder. Development and unversioned builds, read-only hosts and copies that were not installed by the installer do not offer updates.
+
+In-app updates use the same ad-hoc signed public package as a manual installation. macOS privacy permissions that are tied to the signature, such as Input Monitoring for Keyboard Stats, may have to be granted again after an update.
+
 A full stop requires an explicit operation that verifies ownership for that installation. This preview does not document a general stop/uninstall command; do not substitute blanket process kills or service removal. Removing an app bundle alone does not prove background services stopped or remove saved data. Back up your configuration and data before an update or removal.

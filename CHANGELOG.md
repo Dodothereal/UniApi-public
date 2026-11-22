@@ -2,6 +2,11 @@
 
 User-facing changes are recorded here. Release entries should describe shipped behavior and actual validation, with unresolved limitations kept explicit.
 
+## Unreleased
+
+- Added in-app updates. Settings > Application finds the newest GitHub release, downloads and checksum-verifies it in the background, and installs it with one click through the existing guarded installer once no job or coding turn is active. Providers, data, preferences and service settings are kept; a refused or failed installation keeps the previous version. A sidebar button appears when a release is ready. Automatic checking can be turned off.
+- Added the Keyboard Stats page: key heatmap, most pressed keys, live, average and peak typing speed, corrections and correction rate, typing time, streaks, hourly, weekday and daily charts, hand, finger and row balance, key types and shortcuts. Recording is opt-in, needs the macOS Input Monitoring permission and stores only local per-day counters, never typed text or key order. The permission may need to be granted again after an update.
+
 ## 0.1.5 — preview
 
 - Reworked onboarding with a compact step rail, visual appearance previews, aligned controls and a final settings summary. Smaller windows retain accessible navigation and simplify decoration. Setup keeps the same preference, completion and navigation behavior.

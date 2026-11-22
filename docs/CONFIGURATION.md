@@ -159,3 +159,15 @@ restoration precedence and reset behavior.
 Fan and battery controls depend on hardware support and may need an explicitly installed helper. Install or change controls only through their supported flow. Preserve your chosen hardware settings during updates and inspect any unsupported-device message before proceeding.
 
 Normal Quit hides the presentation and preserves background work. See [Installation](INSTALL.md#background-work-and-updates) for ownership and update constraints.
+
+## Keyboard Stats
+
+Keyboard Stats is off until you turn it on in its page, and needs the macOS Input Monitoring permission (System Settings > Privacy & Security > Input Monitoring). While it is on and UniApi is running, a listen-only event tap counts key presses made anywhere on the Mac. It cannot change or block input.
+
+Only aggregates are written, to the `keyboard_*` tables of the local database: per-hour totals (keys, characters, words, deletions, corrections, typing time, bursts, peak speed) and per-day counts for each physical key and each Command or Control shortcut. Typed text, the order of keys, the active application and window titles are never recorded, and nothing leaves the Mac. macOS does not deliver keys typed into secure fields such as password prompts.
+
+Speed is characters divided by five per minute of active typing; a pause longer than two seconds ends a burst and is not counted as typing time. A correction is one run of Delete or Forward Delete presses, and the correction rate is deleted characters divided by typed characters. Peak speed needs a burst of at least 25 characters over four seconds. Finger, hand and travel figures assume standard touch typing on the built-in layout and are estimates. **Reset statistics** deletes every counter; turning recording off keeps them.
+
+## Software update
+
+The automatic check preference is stored as `uniapi.update.automatic`. Staged releases live in `updates/` under the data folder and are removed once they are no longer newer than the running app. See [updating from inside the app](INSTALL.md#updating-from-inside-the-app).

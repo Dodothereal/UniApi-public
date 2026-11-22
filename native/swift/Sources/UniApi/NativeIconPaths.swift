@@ -1073,6 +1073,29 @@ enum NativeIconPaths {
         do {
             let p = CGMutablePath()
             let f = CGMutablePath()
+            p.move(to: CGPoint(x: 10, y: 8))
+            p.addLine(to: CGPoint(x: 10.01, y: 8))
+            p.move(to: CGPoint(x: 12, y: 12))
+            p.addLine(to: CGPoint(x: 12.01, y: 12))
+            p.move(to: CGPoint(x: 14, y: 8))
+            p.addLine(to: CGPoint(x: 14.01, y: 8))
+            p.move(to: CGPoint(x: 16, y: 12))
+            p.addLine(to: CGPoint(x: 16.01, y: 12))
+            p.move(to: CGPoint(x: 18, y: 8))
+            p.addLine(to: CGPoint(x: 18.01, y: 8))
+            p.move(to: CGPoint(x: 6, y: 8))
+            p.addLine(to: CGPoint(x: 6.01, y: 8))
+            p.move(to: CGPoint(x: 7, y: 16))
+            p.addLine(to: CGPoint(x: 17, y: 16))
+            p.move(to: CGPoint(x: 8, y: 12))
+            p.addLine(to: CGPoint(x: 8.01, y: 12))
+            p.addRoundedRect(in: CGRect(x: 2, y: 4, width: 20, height: 16), cornerWidth: 2, cornerHeight: 2)
+            result["keyboard"] = p
+            if !f.isEmpty { fills["keyboard"] = f }
+        }
+        do {
+            let p = CGMutablePath()
+            let f = CGMutablePath()
             p.move(to: CGPoint(x: 12.83, y: 2.18))
             p.addCurve(to: CGPoint(x: 11.17, y: 2.18), control1: CGPoint(x: 12.3027941, y: 1.93952376), control2: CGPoint(x: 11.6972059, y: 1.93952376))
             p.addLine(to: CGPoint(x: 2.6, y: 6.08))

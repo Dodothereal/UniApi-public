@@ -6,8 +6,8 @@ final class HardwareEnergyTests: XCTestCase {
         let batteryRegistry: JSONValue = [
             "BatteryInstalled": true,
             "CurrentCapacity": 82,
-            "IsCharging": batteryMw > 0,
-            "ExternalConnected": systemInMw > 0,
+            "IsCharging": .bool(batteryMw > 0),
+            "ExternalConnected": .bool(systemInMw > 0),
             "FullyCharged": false,
             "Voltage": 12_200,
             "InstantAmperage": .number(batteryMw / 12.2),
@@ -103,7 +103,7 @@ final class HardwareEnergyTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let runtime = try NativeRuntime(paths: NativePaths.discover(root: root, data: root.appendingPathComponent("data")))
+        let runtime = try NativeRuntime(paths: NativePaths(root: root, home: root, dataRoot: root.appendingPathComponent("data")))
         var now = 1_700_000_000_000.0
         var loadMw = 12_000.0
         let io = NativeEnergyIO(

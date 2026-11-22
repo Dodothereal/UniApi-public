@@ -14,7 +14,7 @@ extension EnvironmentValues {
 }
 
 enum NativeDestination: String, CaseIterable, Identifiable {
-    case home, speed, results, prompts, arena, switcher, code, stats, activity, fans, battery, energy, transcribe, jobs, settings
+    case home, speed, results, prompts, arena, switcher, code, stats, activity, fans, battery, energy, keyboard, transcribe, jobs, settings
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -30,6 +30,7 @@ enum NativeDestination: String, CaseIterable, Identifiable {
         case .fans: return "Fan Control"
         case .battery: return "Battery"
         case .energy: return "Energy"
+        case .keyboard: return "Keyboard Stats"
         case .transcribe: return "Transcribe"
         case .jobs: return "Jobs"
         case .settings: return "Settings"
@@ -49,6 +50,7 @@ enum NativeDestination: String, CaseIterable, Identifiable {
         case .fans: return "fan"
         case .battery: return "battery-charging"
         case .energy: return "zap"
+        case .keyboard: return "keyboard"
         case .transcribe: return "mic"
         case .jobs: return "list-checks"
         case .settings: return "settings"
@@ -59,7 +61,7 @@ enum NativeDestination: String, CaseIterable, Identifiable {
         case .home, .jobs, .settings: return ""
         case .speed, .results, .prompts, .arena: return "Benchmark"
         case .switcher, .code, .stats: return "Coding"
-        case .activity, .fans, .battery, .energy: return "Mac"
+        case .activity, .fans, .battery, .energy, .keyboard: return "Mac"
         case .transcribe: return "Media"
         }
     }
@@ -68,7 +70,7 @@ enum NativeDestination: String, CaseIterable, Identifiable {
 /// Registration is kept explicit so a page is admitted only with its native
 /// implementation; the acceptance manifest tracks the remaining destinations.
 enum NativeInstalledPages {
-    static let destinations: Set<NativeDestination> = [.home, .speed, .results, .switcher, .code, .arena, .prompts, .stats, .transcribe, .activity, .battery, .fans, .energy, .jobs, .settings]
+    static let destinations: Set<NativeDestination> = [.home, .speed, .results, .switcher, .code, .arena, .prompts, .stats, .transcribe, .activity, .battery, .fans, .energy, .keyboard, .jobs, .settings]
     @MainActor @ViewBuilder static func page(_ destination: NativeDestination, runtime: NativeRuntime, models: NativePageModels? = nil, resultsRun: String? = nil, navigate: @escaping (NativeDestination) -> Void) -> some View {
         switch destination {
         case .home: NativeHomePage(runtime: runtime, navigate: navigate)
@@ -81,6 +83,7 @@ enum NativeInstalledPages {
         case .battery: NativeBatteryPage(runtime: runtime)
         case .fans: NativeFansPage(runtime: runtime)
         case .energy: NativeEnergyPage(runtime: runtime)
+        case .keyboard: NativeKeyboardPage(runtime: runtime)
         case .speed: NativeSpeedPage(runtime: runtime, model: models?.speed)
         case .results: NativeResultsPage(runtime: runtime, initialRun: resultsRun)
         case .code: NativeCodePage(runtime: runtime)
@@ -300,6 +303,7 @@ struct NativeShell: View {
     private var footer: some View {
         let shim = NativeShellPolicy.shim(routeStatus)
         return VStack(alignment: .leading, spacing: 7) {
+            NativeUpdateSidebarButton(model: session.updates).padding(.bottom, 3)
             HStack(spacing: 7) {
                 NativeStatusDot(color: shim.state == .up ? Theme.okFg : shim.state == .down ? Theme.failFg : shim.state == .legacy ? Theme.warnFg : Theme.muted)
                 Text(shim.text).font(Theme.ui(11)).foregroundStyle(shim.state == .down ? Theme.failFg : Theme.muted)

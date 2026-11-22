@@ -65,6 +65,10 @@ Hidden pages remain valid destinations, including for launch or restoration. Som
 
 The backing preference keys are `uniapi-start-page`, `uniapi-restore-last-page`, `uniapi-sidebar-order`, `uniapi-sidebar-hidden` and `uniapi-sidebar-badges`. Unrecognized launch and hidden-page entries are ignored. Choose a launch page or turn a sidebar page back on in Settings to replace them.
 
+## Software update
+
+`Software update` in the Application section shows the installed version and the newest GitHub release. `Check for updates` looks immediately; a newer release is downloaded and verified before `Update to ...` appears there and at the bottom of the sidebar. Installing waits for jobs and coding turns to finish, closes the window briefly and reopens the updated app with providers, data and settings unchanged. `Check for updates automatically` is on by default and only finds and downloads releases; it never installs one. See [updating from inside the app](INSTALL.md#updating-from-inside-the-app).
+
 ## Optional Telegram delivery
 
 Settings shows the saved delivery state: Not configured, Off, or Ready. Ready means the saved configuration is enabled and passes local validation; it does not prove delivery. Configure expands the form: create a bot with BotFather, send it a message, and choose Find my chats to look up and select a destination. This explicit lookup reads recent bot updates without sending a message, acknowledging updates, or changing webhook settings. An active webhook or another client consuming updates can prevent lookup; a manual chat ID field remains available. The token is masked in Settings until deliberately revealed.

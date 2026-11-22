@@ -62,6 +62,7 @@ struct NativeSettingsPage: View {
                     Text(statusSummary).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }.frame(maxWidth: .infinity, alignment: .leading)
+                NativeUpdateSettings(model: session.updates)
                 DisclosureGroup("Diagnostics and storage", isExpanded: $showDiagnostics) {
                     VStack(alignment: .leading, spacing: 16) {
                         NativeUIRecordingControls(runtime: runtime)
