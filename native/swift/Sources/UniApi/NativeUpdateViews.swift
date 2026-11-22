@@ -10,6 +10,8 @@ import UniApiCore
     var latest: String { state["staged"].string.isEmpty ? state["latest"].string : state["staged"].string }
     /// A release is downloaded and verified, or is being installed.
     var actionable: Bool { ["ready", "waiting", "installing"].contains(phase) }
+    /// A verified release is waiting, either fresh or after a refused attempt.
+    var installable: Bool { phase == "ready" || phase == "failed" && !state["staged"].string.isEmpty }
 
     func apply(_ next: JSONValue) {
         // A refused or rolled-back installation leaves this process running
@@ -30,9 +32,24 @@ import UniApiCore
         default: return running
         }
     }
+
+    /// The state in two or three words, for a reading rather than a sentence.
+    var brief: String {
+        switch phase {
+        case "checking": return "Checking for a release"
+        case "current": return "Newest release"
+        case "downloading": return "Downloading " + latest
+        case "ready": return latest + " ready to install"
+        case "waiting": return latest + " installs when idle"
+        case "installing": return "Installing " + latest
+        case "failed": return "Update did not finish"
+        case "unavailable": return "Updates unavailable"
+        default: return "Not checked yet"
+        }
+    }
 }
 
-/// Settings > Application: release check, one-click install and the automatic check preference.
+/// Settings > Updates: release check, one-click install and the automatic check preference.
 struct NativeUpdateSettings: View {
     @ObservedObject var model: NativeUpdateModel
     @EnvironmentObject private var session: NativeAppSession
@@ -40,63 +57,120 @@ struct NativeUpdateSettings: View {
 
     var body: some View {
         let phase = model.phase
-        SettingRow(title: "Software update", desc: model.summary) {
+        OptionRow(title: "Software update", detail: model.summary) {
             HStack(spacing: 8) {
                 switch phase {
                 case "ready":
-                    Button { session.installUpdate() } label: {
-                        HStack(spacing: 6) { NativeIcon("download", size: 12); Text("Update to " + model.latest) }
-                    }.buttonStyle(T3Button(.primary))
+                    // The page's primary sits in the header; this is the same action beside its explanation.
+                    Button("Update to " + model.latest, nativeIcon: "download") { session.installUpdate() }
                 case "waiting":
-                    Button("Cancel") { Task { await session.updater?.cancelInstall() } }.buttonStyle(T3Button(.outline))
+                    Button("Cancel") { Task { await session.updater?.cancelInstall() } }
                 case "installing":
-                    ShimmerText(text: "Installing…")
+                    NativeUpdateProgressWord("Installing")
                 case "checking":
-                    ShimmerText(text: "Checking…")
+                    NativeUpdateProgressWord("Checking")
                 case "downloading":
-                    NativeGrowBar(fraction: model.state["progress"].double, height: 6, entrance: false).frame(width: 120)
-                        .accessibilityLabel("Download progress").accessibilityValue("\(Int(model.state["progress"].double * 100)) percent")
+                    NativeUpdateDownloadMeter(fraction: model.state["progress"].double)
                 case "unavailable":
                     EmptyView()
                 default:
                     if phase == "failed", !model.state["staged"].string.isEmpty {
-                        Button("Try again") { session.installUpdate() }.buttonStyle(T3Button(.primary))
+                        Button("Try again") { session.installUpdate() }
                     }
-                    Button("Check for updates") { Task { await session.updater?.check() } }.buttonStyle(T3Button(.outline))
+                    Button("Check for updates") { Task { await session.updater?.check() } }
                 }
             }
+            .buttonStyle(Press(.secondary))
         }
         if phase != "unavailable" {
-            SettingRow(title: "Check for updates automatically", desc: "On by default. Looks for a newer GitHub release every few hours and downloads it in the background, so installing is one click. Nothing is installed until you choose to update.") {
-                T3Switch(isOn: $automatic).accessibilityLabel("Check for updates automatically")
+            OptionRow(title: "Check for updates automatically",
+                      detail: "Finds and downloads a newer release every few hours. Nothing installs until you choose to update.") {
+                Flip(isOn: $automatic).accessibilityLabel("Check for updates automatically")
             }
         }
     }
 }
 
-/// Sidebar footer: appears only once a newer release is ready to install.
+/// The one primary on Settings: present only while a verified release waits.
+struct NativeUpdateHeaderButton: View {
+    @ObservedObject var model: NativeUpdateModel
+    @EnvironmentObject private var session: NativeAppSession
+    var body: some View {
+        if model.installable {
+            Button(model.phase == "ready" ? "Update to " + model.latest : "Try update again", nativeIcon: "download") { session.installUpdate() }
+                .buttonStyle(Press(.primary))
+                .help("Installs UniApi \(model.latest) now. Providers, data and settings are kept.")
+                .accessibilityLabel(model.phase == "ready" ? "Update to UniApi " + model.latest : "Try the update again")
+        }
+    }
+}
+
+/// Work with no measurable progress: a still word, not a spinner or a shimmer.
+private struct NativeUpdateProgressWord: View {
+    let word: String
+    init(_ word: String) { self.word = word }
+    var body: some View {
+        HStack(spacing: 6) {
+            NativeStatusDot(color: Theme.signal, size: 5, pulse: true)
+            Text(word).font(Theme.ui(12.5)).foregroundStyle(Theme.dim)
+        }
+        .frame(height: 28).accessibilityElement(children: .combine)
+    }
+}
+
+/// Download progress as a graduated meter with its percentage as a reading.
+private struct NativeUpdateDownloadMeter: View {
+    let fraction: Double
+    private var percent: Int { Int((NativeMotion.fraction(fraction) * 100).rounded()) }
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Scale(fraction: fraction, ticks: true).frame(width: 132)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                NativeNumberText(text: String(percent), font: Theme.readout(17), color: Theme.ink)
+                MicroLabel("%")
+            }
+            .frame(width: 42, alignment: .trailing)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Download progress").accessibilityValue("\(percent) percent")
+    }
+}
+
+/// Index footer: appears only once a newer release is ready to install.
 struct NativeUpdateSidebarButton: View {
     @ObservedObject var model: NativeUpdateModel
     @EnvironmentObject private var session: NativeAppSession
+    @State private var hovering = false
+    @Environment(\.nativeReducedMotion) private var reduceMotion
 
     var body: some View {
         if model.actionable {
             let phase = model.phase
-            Button { if phase == "ready" { session.installUpdate() } } label: {
+            let ready = phase == "ready"
+            Button { if ready { session.installUpdate() } } label: {
                 HStack(spacing: 7) {
-                    NativeIcon("download", size: 12, strokeWidth: 2)
-                    Text(phase == "ready" ? "Update to " + model.latest : phase == "waiting" ? "Updating when idle" : "Installing update")
+                    NativeIcon(ready ? "download" : "clock", size: 12, strokeWidth: 1.75)
+                    Text(ready ? "Update to " + model.latest : phase == "waiting" ? "Updating when idle" : "Installing update")
                         .font(Theme.ui(11.5, weight: .medium)).lineLimit(1)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 9).frame(height: 28).frame(maxWidth: .infinity)
-                .foregroundStyle(Theme.onAccent)
-                .background(Theme.accent.opacity(phase == "ready" ? 1 : 0.6), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .foregroundStyle(ready ? Theme.onInk : Theme.dim)
+                .background(RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous)
+                    .fill(ready ? Theme.ink.opacity(hovering ? 0.86 : 1) : Theme.hover))
+                .overlay {
+                    if !ready {
+                        RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous).strokeBorder(Theme.rule, lineWidth: 1)
+                    }
+                }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain).disabled(phase != "ready")
-            .help(phase == "ready" ? "Installs UniApi \(model.latest) now. Providers, data and settings are kept." : model.state["message"].string)
-            .accessibilityLabel(phase == "ready" ? "Update to UniApi " + model.latest : "Update in progress")
+            .buttonStyle(.plain).disabled(!ready).pointingHand(ready)
+            .onHover { hovering = $0 && ready }
+            .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+            .padding(.bottom, 6)
+            .help(ready ? "Installs UniApi \(model.latest) now. Providers, data and settings are kept." : model.state["message"].string)
+            .accessibilityLabel(ready ? "Update to UniApi " + model.latest : "Update in progress")
         }
     }
 }

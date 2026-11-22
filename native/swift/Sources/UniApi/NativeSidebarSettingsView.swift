@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 import UniApiCore
 
 /// Edits the same preferences consumed by the shell. Dragging only changes the
-/// order after a valid drop; the menus provide the same moves without a pointer.
+/// order after a valid drop; the arrows provide the same moves without a pointer.
 struct NativeSidebarSettingsView: View {
     @Environment(\.nativeBatterySupported) private var batterySupported
     @AppStorage("uniapi-sidebar") private var sidebarOpen = true
@@ -11,65 +11,90 @@ struct NativeSidebarSettingsView: View {
     @AppStorage("uniapi-sidebar-order") private var sidebarOrder = ""
     @AppStorage("uniapi-sidebar-hidden") private var sidebarHidden = ""
     @AppStorage("uniapi-sidebar-badges") private var sidebarBadges = NativeNavigationPreferences.defaultSidebarBadges
+    @State private var editing = false
     @State private var dragged: SidebarDrag?
     @State private var dragNonce: String?
     @State private var hovered: SidebarDrag?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SectionLabel("Sidebar")
-            SettingRow(title: "Show sidebar", desc: "Command-B also toggles the sidebar.") {
-                T3Switch(isOn: $sidebarOpen).accessibilityLabel("Show sidebar")
-            }
-            SettingRow(title: "Width", desc: "Adjust the sidebar from 180 to 320 points.") {
-                HStack(spacing: 8) {
-                    Slider(value: $sidebarWidth, in: 180...320).frame(width: 140).accessibilityLabel("Sidebar width")
-                    Text("\(Int(NativeSidebarLayout.width(sidebarWidth))) pt").font(Theme.mono(11)).frame(width: 48, alignment: .trailing)
-                }
-            }
-            SettingRow(title: "Show badges", desc: "Show counts and battery percentage beside pages.") {
-                T3Switch(isOn: $sidebarBadges).accessibilityLabel("Show sidebar badges")
-            }
-            DisclosureGroup("Edit sidebar") {
-              VStack(alignment: .leading, spacing: 8) {
-                Text("Drag onto a row: moving up places it before that row; moving down places it after. Use Move for keyboard access. Pages stay within their section.")
-                    .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                VStack(alignment: .leading, spacing: 7) {
-                    anchoredRow(.home)
-                    ForEach(NativeSidebarLayout.orderedSections(sidebarOrder), id: \.self) { section in
-                        sectionView(section)
-                    }
-                    Divider().padding(.vertical, 3)
-                    anchoredRow(.jobs)
-                    anchoredRow(.settings)
-                }
-                .padding(12).frame(maxWidth: 500, alignment: .leading)
-                .background(Theme.sidebarBG, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                Text("Home stays at the top; Jobs and Settings stay at the bottom.")
-                    .font(Theme.ui(11)).foregroundStyle(Theme.muted)
-                if let dragged, let hovered, !validMove(dragged, hovered) {
-                    Text("Cannot move here. Pages stay within their section; sections move onto section headings. Fixed pages cannot move.")
-                        .font(Theme.ui(11)).foregroundStyle(Theme.failFg)
-                }
-              }.padding(.top, 10)
-            }.font(Theme.ui(13, weight: .medium))
-            Button("Restore sidebar layout defaults") {
+        Band(title: "Sidebar", spacing: 0) {
+            Button("Restore defaults", nativeIcon: "rotate-ccw") {
                 sidebarWidth = NativeSidebarLayout.defaultWidth
                 sidebarOrder = ""
                 sidebarHidden = ""
                 sidebarBadges = NativeNavigationPreferences.defaultSidebarBadges
-            }.buttonStyle(T3Button(.ghost))
+            }
+            .buttonStyle(Press(.quiet)).padding(.trailing, -8)
+            .help("Resets width, order, hidden pages and readings.")
+            .accessibilityLabel("Restore sidebar layout defaults")
+        } content: {
+            OptionRow(title: "Layout", detail: "Command-B switches between the two.") {
+                Stops(options: [(true, "Full"), (false, "Icon rail")], selection: sidebarOpen) { sidebarOpen = $0 }
+                    .accessibilityLabel("Show sidebar")
+            }
+            OptionRow(title: "Width", detail: "Of the full sidebar, 180 to 320 points.") {
+                HStack(spacing: 12) {
+                    SettingsRuleSlider(value: $sidebarWidth, range: 180...320, label: "Sidebar width")
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(String(Int(NativeSidebarLayout.width(sidebarWidth)))).font(Theme.readout(17)).foregroundStyle(Theme.ink)
+                        MicroLabel("pt")
+                    }
+                    .frame(width: 46, alignment: .trailing)
+                }
+            }
+            OptionRow(title: "Readings", detail: "Counts, charge and power beside the page names.") {
+                Flip(isOn: $sidebarBadges).accessibilityLabel("Show sidebar badges")
+            }
+            SettingsFold(title: "Pages", detail: pagesSummary, isOpen: $editing, label: "Edit sidebar") {
+                VStack(alignment: .leading, spacing: 10) {
+                    ledger
+                    // One fixed line, so refusing a drop never moves the rows being dragged over.
+                    let refused = dragged.flatMap { source in hovered.map { !validMove(source, $0) } } ?? false
+                    Text(refused ? "Cannot move here. Pages stay within their section; sections move onto section headings. Fixed pages cannot move."
+                                 : "Drag a handle onto a row: moving up places it before that row, moving down after. Pages stay within their section.")
+                        .font(Theme.ui(11.5)).foregroundStyle(refused ? Theme.failFg : Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var pagesSummary: String {
+        let pages = NativeSidebarLayout.pages(sidebarOrder)
+        let hidden = pages.filter { !NativeNavigationPreferences.isSidebarVisible($0.rawValue, hiddenPages: sidebarHidden) }.count
+        let sections = NativeSidebarLayout.orderedSections(sidebarOrder).count
+        return "\(pages.count) pages in \(sections) sections" + (hidden == 0 ? ", all shown" : ", \(hidden) hidden")
+    }
+
+    // ---- the drag ledger ---------------------------------------------------
+
+    private var ledger: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LedgerHead {
+                HStack(spacing: 8) {
+                    MicroLabel("Page")
+                    Spacer(minLength: 8)
+                    MicroLabel("Shown").fixedSize().frame(width: 48)
+                    MicroLabel("Order").fixedSize().frame(width: 56)
+                }
+            }
+            anchoredRow(.home)
+            ForEach(NativeSidebarLayout.orderedSections(sidebarOrder), id: \.self) { section in
+                sectionView(section)
+            }
+            anchoredRow(.jobs)
+            anchoredRow(.settings)
         }
     }
 
     private func anchoredRow(_ page: NativeDestination) -> some View {
-        HStack(spacing: 9) {
-            NativeIcon(page.symbol, size: 14).frame(width: 18)
-            Text(page.title).font(Theme.ui(12, weight: .medium))
-            Spacer()
-            Text("Fixed").font(Theme.ui(11)).foregroundStyle(Theme.muted)
-        }.frame(height: 29).padding(.horizontal, 8)
-            .contentShape(Rectangle())
+        SidebarLedgerLine {
+            Color.clear.frame(width: 14)
+            NativeIcon(page.symbol, size: 14, strokeWidth: 1.75).foregroundStyle(Theme.muted).frame(width: 18)
+            Text(page.title).font(Theme.ui(13)).foregroundStyle(Theme.ink)
+            Spacer(minLength: 8)
+            MicroLabel("Fixed", color: Theme.faint).frame(width: 116, alignment: .center)
+        }
             .overlay(alignment: .top) { dropMarker(.fixed(page)) }
             .onDrop(of: [UTType.text], delegate: SidebarDropDelegate(dragged: $dragged, dragNonce: $dragNonce, hovered: $hovered, target: .fixed(page), move: reorder))
             .accessibilityElement(children: .combine)
@@ -78,30 +103,27 @@ struct NativeSidebarSettingsView: View {
     private func sectionView(_ section: String) -> some View {
         let sections = NativeSidebarLayout.orderedSections(sidebarOrder)
         let pages = NativeSidebarLayout.pages(sidebarOrder).filter { $0.section == section }
-        return VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 7) {
+        return VStack(alignment: .leading, spacing: 0) {
+            SidebarLedgerLine(height: 34) {
                 dragHandle(.section(section), label: "Drag \(section) section")
-                Text(section.uppercased()).font(Theme.ui(10.5, weight: .medium)).tracking(0.7).foregroundStyle(Theme.muted)
-                Spacer()
-                moveMenu("Move \(section) section", canMoveUp: sections.first != section, canMoveDown: sections.last != section,
-                         up: { moveSection(section, by: -1) }, down: { moveSection(section, by: 1) })
-            }.frame(height: 29).padding(.horizontal, 8)
-                .contentShape(Rectangle())
+                MicroLabel(section, color: Theme.ink)
+                Spacer(minLength: 8)
+                moveButtons("\(section) section", canMoveUp: sections.first != section, canMoveDown: sections.last != section,
+                            up: { moveSection(section, by: -1) }, down: { moveSection(section, by: 1) })
+            }
                 .onDrop(of: [UTType.text], delegate: SidebarDropDelegate(dragged: $dragged, dragNonce: $dragNonce, hovered: $hovered, target: .section(section), move: reorder))
             ForEach(pages) { page in
-                HStack(spacing: 7) {
+                let shown = NativeNavigationPreferences.isSidebarVisible(page.rawValue, hiddenPages: sidebarHidden)
+                SidebarLedgerLine {
                     dragHandle(.page(page), label: "Drag \(page.title)")
-                    NativeIcon(page.symbol, size: 14).frame(width: 18).foregroundStyle(Theme.sidebarMuted)
-                    Text(page.title).font(Theme.ui(12)).foregroundStyle(Theme.sidebarInk)
-                    if page == .battery && batterySupported == false {
-                        Text("Unavailable").font(Theme.ui(10)).foregroundStyle(Theme.muted)
-                    }
+                    NativeIcon(page.symbol, size: 14, strokeWidth: 1.75).frame(width: 18).foregroundStyle(shown ? Theme.dim : Theme.faint)
+                    Text(page.title).font(Theme.ui(13)).foregroundStyle(shown ? Theme.ink : Theme.muted)
+                    if page == .battery && batterySupported == false { Tag("Unavailable") }
                     Spacer(minLength: 4)
-                    T3Switch(isOn: visibility(page)).accessibilityLabel("Show \(page.title) in sidebar")
-                    moveMenu("Move \(page.title)", canMoveUp: pages.first != page, canMoveDown: pages.last != page,
-                             up: { movePage(page, by: -1) }, down: { movePage(page, by: 1) })
-                }.frame(height: 32).padding(.horizontal, 8)
-                    .contentShape(Rectangle())
+                    Flip(isOn: visibility(page)).accessibilityLabel("Show \(page.title) in sidebar").frame(width: 48)
+                    moveButtons(page.title, canMoveUp: pages.first != page, canMoveDown: pages.last != page,
+                                up: { movePage(page, by: -1) }, down: { movePage(page, by: 1) })
+                }
                     .overlay(alignment: markerAlignment(.page(page))) { dropMarker(.page(page)) }
                     .onDrop(of: [UTType.text], delegate: SidebarDropDelegate(dragged: $dragged, dragNonce: $dragNonce, hovered: $hovered, target: .page(page), move: reorder))
             }
@@ -109,8 +131,8 @@ struct NativeSidebarSettingsView: View {
     }
 
     private func dragHandle(_ item: SidebarDrag, label: String) -> some View {
-        NativeIcon("grip-vertical", size: 13).foregroundStyle(Theme.muted)
-            .frame(width: 18, height: 26).contentShape(Rectangle())
+        NativeIcon("grip-vertical", size: 13, strokeWidth: 1.75).foregroundStyle(Theme.faint)
+            .frame(width: 14, height: 26).contentShape(Rectangle())
             .help(label).accessibilityHidden(true)
             .onDrag {
                 let nonce = "uniapi-sidebar-" + UUID().uuidString
@@ -121,21 +143,19 @@ struct NativeSidebarSettingsView: View {
             }
     }
 
-    private func moveMenu(_ label: String, canMoveUp: Bool, canMoveDown: Bool,
-                          up: @escaping () -> Void, down: @escaping () -> Void) -> some View {
-        Menu {
-            Button("Move up", action: up).disabled(!canMoveUp)
-            Button("Move down", action: down).disabled(!canMoveDown)
-        } label: {
-            HStack(spacing: 3) { Text("Move"); NativeIcon("chevron-down", size: 10) }
-                .font(Theme.ui(11)).foregroundStyle(Theme.muted).frame(height: 26).contentShape(Rectangle())
-        }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
-            .help(label).accessibilityLabel(label)
+    /// The pointer-free way to reorder: one press per step.
+    private func moveButtons(_ name: String, canMoveUp: Bool, canMoveDown: Bool,
+                             up: @escaping () -> Void, down: @escaping () -> Void) -> some View {
+        HStack(spacing: 0) {
+            IconPress(icon: "arrow-up", help: "Move \(name) up", size: 13, action: up).disabled(!canMoveUp)
+            IconPress(icon: "arrow-down", help: "Move \(name) down", size: 13, action: down).disabled(!canMoveDown)
+        }
+        .frame(width: 56)
     }
 
     private func dropMarker(_ target: SidebarDrag) -> some View {
         let valid = dragged.map { validMove($0, target) } ?? false
-        return Rectangle().fill(valid ? Theme.accent : Theme.failFg)
+        return Rectangle().fill(valid ? Theme.signal : Theme.failFg)
             .frame(height: 2).opacity(hovered == target ? 1 : 0).allowsHitTesting(false)
     }
 
@@ -187,6 +207,25 @@ struct NativeSidebarSettingsView: View {
             sidebarOrder = sections.flatMap { section in section == from.section ? siblings : allPages.filter { $0.section == section } }.map(\.rawValue).joined(separator: ",")
         default: return
         }
+    }
+}
+
+/// One line of the drag ledger: a ruled row whose hover fill bleeds into the
+/// margins, so the eye can follow a name across to its controls.
+private struct SidebarLedgerLine<Content: View>: View {
+    var height: CGFloat = 30
+    @ViewBuilder var content: () -> Content
+    @State private var hovering = false
+    var body: some View {
+        HStack(spacing: 8) { content() }
+            .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous)
+                    .fill(hovering ? Theme.hover : .clear).padding(.horizontal, -8)
+            }
+            .overlay(alignment: .bottom) { Rule() }
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
     }
 }
 
