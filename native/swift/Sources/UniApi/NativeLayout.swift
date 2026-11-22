@@ -495,6 +495,9 @@ struct Card<Content: View>: View {
     }
 }
 
+/// A titled block of a board: a hairline above, the name, then the content
+/// on the page ground. It is not a box; neighbouring plates share the rule
+/// grid instead of each drawing a border.
 struct NativeCard<Content: View>: View {
     var title: String
     private let content: Content
@@ -505,15 +508,16 @@ struct NativeCard<Content: View>: View {
     }
 
     var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                if !title.isEmpty {
-                    Text(title).font(Theme.ui(Theme.textSm, weight: .semibold))
-                        .foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-                }
-                content
+        VStack(alignment: .leading, spacing: 12) {
+            if !title.isEmpty {
+                Text(title).font(Theme.ui(Theme.textSm, weight: .semibold))
+                    .foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
             }
+            content
         }
+        .padding(.top, 16).padding(.bottom, 8)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .overlay(alignment: .top) { Theme.border.frame(height: 1) }
     }
 }
 

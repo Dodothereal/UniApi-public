@@ -12,25 +12,20 @@ struct NativeStatsValueTile: View {
     private var reading: String { value.flatMap { $0.isFinite ? format($0) : nil } ?? "-" }
 
     var body: some View {
-        Card(padding: 14) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    StatusDot(color: accent, size: 5)
-                    Text(label).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(label).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted).lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(reading).font(Theme.num(24)).tracking(Theme.tracking(24)).lineLimit(1).minimumScaleFactor(0.7)
+                    .nativeStatsNumberTransition(value)
+                if !unit.isEmpty {
+                    Text(unit).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted).lineLimit(1)
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(reading).font(Theme.mono(22, weight: .semibold)).monospacedDigit().lineLimit(1)
-                        .nativeStatsNumberTransition(value)
-                    if !unit.isEmpty {
-                        Text(unit).font(Theme.mono(12)).foregroundStyle(Theme.muted).lineLimit(1)
-                    }
-                }
-                if !detail.isEmpty {
-                    Text(detail).font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
+            }.padding(.top, 10)
+            if !detail.isEmpty {
+                Text(detail).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true).padding(.top, 4)
+            }
+        }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .ignore).accessibilityLabel(label)
         .accessibilityValue([reading, unit, detail].filter { !$0.isEmpty }.joined(separator: " "))
     }

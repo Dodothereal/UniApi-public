@@ -114,24 +114,13 @@ struct NativeStatsPage: View {
     }
     var body: some View {
         GeometryReader { geometry in
-        let contentWidth = max(0, min(1500, geometry.size.width) - 2 * density.pageMargin)
-        Group {
-            if let model = selectedModel {
-                NativeStatsDetailFrame(readiness: measuredReadiness) {
-                    HStack {
-                        Button { selectedModel = nil } label: { HStack(spacing: 6) { NativeIcon("arrow-left", size: 14); Text("Back to Statistics") } }.buttonStyle(T3Button(.ghost))
-                        Spacer()
-                        Text("Model statistics").font(Theme.ui(11)).foregroundStyle(Theme.muted)
-                    }
-                    PageHeader(title: model.split(separator: "/").last.map(String.init) ?? model,
-                               subtitle: model.contains("/") ? model : "Usage, activity and history for this model.") { headerActions }
-                    pageContents(width: contentWidth)
-                }
-            } else {
-                NativePage(title: "Statistics", subtitle: "Token usage from Claude Code, Codex, Antigravity, Z Code, OpenCode and DeepSeek Harness, with model, project and daily breakdowns.", maxWidth: 1500, readiness: measuredReadiness, actions: { headerActions }) {
-                    pageContents(width: contentWidth)
-                }
-            }
+        let contentWidth = max(0, min(1280, geometry.size.width) - 2 * density.pageMargin)
+        NativePage(title: selectedModel.map { $0.split(separator: "/").last.map(String.init) ?? $0 } ?? "Statistics", maxWidth: 1280, readiness: measuredReadiness,
+                   backTitle: "Statistics", back: selectedModel == nil ? nil : { selectedModel = nil },
+                   tabs: { NativeTabs(options: [("all", "All")] + StatisticsSource.allCases.map { ($0.rawValue, nativeStatsSourceName($0.rawValue)) }, selection: source) { source = $0 } },
+                   actions: { headerActions }) {
+            if let model = selectedModel, model.contains("/") { Text(model).font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.muted).textSelection(.enabled) }
+            pageContents(width: contentWidth)
         }
         }
         .environment(\.nativePageVisit, headerVisit?.visit ?? navigationVisit)
@@ -147,58 +136,34 @@ struct NativeStatsPage: View {
         .onDisappear { endHeaderVisit(reason: .disappeared) }
         .nativePageActivity(suspended: { endHeaderVisit(reason: .inactive); state.stop(owner: readOwner) })
     }
-    private var headerActions: some View {
-        HStack(spacing: 8) {
-            if state.busy { HStack(spacing: 5) { StatusDot(color: Theme.accent, size: 5); Text("reading").font(Theme.mono(11)).foregroundStyle(Theme.muted) } }
-            if selectedModel == nil {
-                T3Segmented(options: [(7, "7 days"), (30, "30 days"), (0, "All time")], selection: range) { range = $0 }
-            } else {
-                Menu {
-                    ForEach([7, 30, 90, 365, 0], id: \.self) { days in Button(days == 0 ? "All time" : days == 365 ? "1 year" : "\(days) days") { detailRange = days } }
-                } label: { NativeStatsMenuLabel(title: detailRange == 0 ? "All time" : detailRange == 365 ? "1 year" : "\(detailRange) days") }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-            }
-            Button { reload(.refresh, trigger: .refresh) } label: {
-                HStack(spacing: 6) { NativeIcon("refresh-cw", size: 12); Text(selectedModel == nil ? "Reload" : "Refresh") }
-            }.disabled(state.busy).help("Check for new or changed usage without reparsing unchanged history")
-            Menu {
-                Button("Rebuild All") { reload(.rebuild, trigger: .rebuild) }
-                    .help("Reparse every usage file, including files whose size and modification time stayed the same")
-            } label: { NativeIcon("ellipsis", size: 14) }
-                .menuStyle(.button).buttonStyle(T3Button(.ghost)).menuIndicator(.hidden)
-                .help("Statistics actions")
-                .accessibilityLabel("Statistics actions").disabled(state.busy)
-            if let model = selectedModel {
-                Button { Task { await state.export(model: model, source: source, range: detailRange) } } label: { HStack(spacing: 6) { NativeIcon("download", size: 12); Text("CSV") } }
-                    .disabled(current["derived"]["days"].array.isEmpty).help("Export daily CSV")
-            }
-        }.fixedSize(horizontal: true, vertical: false)
+    @ViewBuilder private var headerActions: some View {
+        if selectedModel == nil {
+            T3Segmented(options: [(7, "7d"), (30, "30d"), (0, "All")], selection: range) { range = $0 }
+        } else {
+            NativeMenuSelectLabel(title: detailRange == 0 ? "All time" : detailRange == 365 ? "1 year" : "\(detailRange) days") {
+                ForEach([7, 30, 90, 365, 0], id: \.self) { days in Button(days == 0 ? "All time" : days == 365 ? "1 year" : "\(days) days") { detailRange = days } }
+            }.fixedSize()
+        }
+        if let model = selectedModel {
+            T3IconButton(system: "download", help: "Export daily CSV") { Task { await state.export(model: model, source: source, range: detailRange) } }
+                .disabled(current["derived"]["days"].array.isEmpty)
+        }
+        T3IconButton(system: "refresh-cw", help: "Read new or changed usage") { reload(.refresh, trigger: .refresh) }.disabled(state.busy)
+        Menu {
+            Button("Rebuild all") { reload(.rebuild, trigger: .rebuild) }
+                .help("Reparse every usage file, including files whose size and modification time stayed the same")
+        } label: { NativeIcon("ellipsis", size: 15).foregroundStyle(Theme.muted).frame(width: Theme.control, height: Theme.control).contentShape(Rectangle()) }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .help("Statistics actions").accessibilityLabel("Statistics actions").disabled(state.busy)
     }
-    private var sourceRail: some View {
-        ScrollView(.horizontal) {
-            T3Segmented(options: [("all", "All apps")] + StatisticsSource.allCases.map { ($0.rawValue, nativeStatsSourceName($0.rawValue)) }, selection: source) { source = $0 }
-        }.scrollIndicators(.hidden).fixedSize(horizontal: false, vertical: true)
-    }
-    private var sourceNote: String {
-        ["all": "Each app counted separately, then added together", "claude": "Claude Code transcripts and lifetime cache", "codex": "Codex sessions and archived sessions", "antigravity": "Antigravity app, IDE and ACP conversations", "zcode": "Z Code from z.ai sessions and model usage", "opencode": "OpenCode sessions and their sub-agents", "dsh": "DeepSeek Harness records; streaming uses host-observed arrivals"][source] ?? ""
-    }
-    private func pageContents(width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { sourceRail; if selectedModel == nil { Text(sourceNote).font(Theme.ui(11)).foregroundStyle(Theme.muted).fixedSize() } }
-                VStack(alignment: .leading, spacing: 8) { sourceRail; if selectedModel == nil { Text(sourceNote).font(Theme.ui(11)).foregroundStyle(Theme.muted) } }
-            }
-            if !state.error.isEmpty { NativeError(message: state.error) }
-            if state.busy {
-                NativeStatsProgressLabel(progress: state.readProgress, hasContent: current["loaded"].bool)
-            }
-            if current["loaded"].bool {
-                NativeStatsContents(payload: current, benchmark: currentBenchmark, detail: selectedModel != nil, selectModel: { model in detailRange = range; selectedModel = model }, selectSource: { source = $0 }, availableWidth: width)
-                    .id(scope)
-            } else if !state.busy && state.error.isEmpty {
-                ShimmerText(text: "Reading saved usage…", font: Theme.ui(12))
-                    .frame(maxWidth: .infinity).padding(.vertical, 40)
-            }
+    @ViewBuilder private func pageContents(width: CGFloat) -> some View {
+        if !state.error.isEmpty { NativeError(message: state.error) }
+        if state.busy { NativeStatsProgressLabel(progress: state.readProgress, hasContent: current["loaded"].bool) }
+        if current["loaded"].bool {
+            NativeStatsContents(payload: current, benchmark: currentBenchmark, detail: selectedModel != nil, selectModel: { model in detailRange = range; selectedModel = model }, selectSource: { source = $0 }, availableWidth: width)
+                .id(scope)
+        } else if !state.busy && state.error.isEmpty {
+            ShimmerText(text: "Loading…", font: Theme.ui(12))
         }
     }
 }
@@ -208,7 +173,7 @@ private struct NativeStatsProgressLabel: View {
     let hasContent: Bool
     var body: some View {
         ShimmerText(text: NativeStatsPresentationPolicy.progressText(progress.value), font: Theme.ui(12))
-            .frame(maxWidth: .infinity).padding(.vertical, hasContent ? 6 : 40)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -216,37 +181,16 @@ struct NativeStatsMenuLabel: View {
     let title: String
     var width: CGFloat? = nil
     var body: some View {
-        HStack(spacing: 8) { Text(title).lineLimit(1); if width != nil { Spacer(minLength: 0) }; NativeIcon("chevron-down", size: 10) }
-            .font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-            .padding(.horizontal, 11).padding(.vertical, 6)
+        HStack(spacing: 8) { Text(title).lineLimit(1); if width != nil { Spacer(minLength: 0) }; NativeIcon("chevrons-up-down", size: 11).foregroundStyle(Theme.faint) }
+            .font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.ink)
+            .padding(.horizontal, 10).frame(height: Theme.control)
             .frame(width: width)
-            .background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1))
+            .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(Theme.input, lineWidth: 1))
     }
 }
 
-// The detail's Back row precedes its title, inside the same scrolling flow as
-// the web ModelStatsPage; readiness still belongs to this page visit.
-private struct NativeStatsDetailFrame<Content: View>: View {
-    let readiness: NativePageReadiness
-    @ViewBuilder var content: () -> Content
-    @Environment(\.nativePageVisit) private var visit
-    @Environment(\.nativeInterfaceDensity) private var density
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: density.pageGap) { content() }
-                .padding(.horizontal, density.pageMargin).padding(.top, density.pageGap).padding(.bottom, 44)
-                .frame(maxWidth: 1500, alignment: .leading).frame(maxWidth: .infinity)
-                .nativeEntrance(.page)
-        }.scrollContentBackground(.hidden).background(Theme.bg).foregroundStyle(Theme.ink)
-            .font(Theme.ui(13)).buttonStyle(T3Button(.outline)).tint(Theme.accent).nativeMotionVisibility()
-            .background(alignment: .topLeading) {
-                if let visit, NativeUIReadiness.shared.enabled { NativeReadinessProbe(visit: visit, readiness: readiness).frame(width: 1, height: 1).allowsHitTesting(false).accessibilityHidden(true) }
-            }
-    }
-}
-
-func nativeStatsSourceName(_ source: String) -> String { ["all": "All apps", "claude": "Claude Code", "codex": "Codex", "antigravity": "Antigravity", "zcode": "Z Code", "opencode": "OpenCode", "dsh": "DeepSeek Harness"][source] ?? source }
+func nativeStatsSourceName(_ source: String) -> String { ["all": "All", "claude": "Claude Code", "codex": "Codex", "antigravity": "Antigravity", "zcode": "Z Code", "opencode": "OpenCode", "dsh": "DeepSeek Harness"][source] ?? source }
 func nativeStatsGrand(_ value: JSONValue) -> Double { value["input"].double + value["output"].double + value["cacheRead"].double + value["cacheWrite"].double }
 func nativeStatsCount(_ value: Double) -> String {
     guard value.isFinite else { return "-" }
@@ -286,53 +230,41 @@ private struct NativeStatsContents: View {
     private var d: JSONValue { payload["derived"] }
     private var t: JSONValue { d["summary"]["totals"] }
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 14) {
+        LazyVStack(alignment: .leading, spacing: 24) {
             if payload["source"].string == "all" {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: availableWidth >= 700 ? 3 : 2), spacing: 10) {
+                let total = max(1, StatisticsSource.allCases.map { nativeStatsGrand(payload["sources"][$0.rawValue]) }.reduce(0, +))
+                NativeStack {
                     ForEach(StatisticsSource.allCases, id: \.rawValue) { s in
                         let value = payload["sources"][s.rawValue]
                         let stream = NativeStatsThroughputPresentation.streamingSource(d["throughput"], source: s.rawValue)
                         let hasUsage = nativeStatsGrand(value) > 0 || value["messages"].double > 0
                         Button { selectSource(s.rawValue) } label: {
-                            Card(padding: 14) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(nativeStatsSourceName(s.rawValue)).font(Theme.ui(12, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                        Text(value.isNull ? "—" : nativeStatsCount(nativeStatsGrand(value))).font(Theme.mono(18, weight: .semibold)).monospacedDigit().lineLimit(1).nativeStatsNumberTransition(value.isNull ? nil : nativeStatsGrand(value))
-                                        Text(value.isNull ? "No recorded usage" : "tokens").font(Theme.ui(10)).foregroundStyle(Theme.muted)
-                                    }
-                                    if !detail, !value.isNull {
-                                        if hasUsage {
-                                            Text("\(nativeStatsCount(value["output"].double)) output · \(nativeStatsCount(value["cacheRead"].double)) cached").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                                            if let rate = NativeStatsThroughputPresentation.rate(stream) {
-                                                Text(String(format: "%.1f streaming tokens/s", rate)).font(Theme.mono(11)).foregroundStyle(Theme.dim)
-                                                    .help(NativeStatsRateMetric.streaming.timingDetail(stream))
-                                            } else {
-                                                Text(NativeStatsThroughputPresentation.missingClockLabel(source: s.rawValue))
-                                                    .font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                                                    .help("Token totals are available. A streaming rate needs token-arrival timestamps; elapsed tool and response time cannot replace them.")
-                                            }
-                                        } else {
-                                            // Match the populated tile's two detail lines.
-                                            Text("No recorded usage").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                                                .frame(minHeight: 30, alignment: .topLeading)
-                                        }
-                                    }
-                                }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            }
-                        }.buttonStyle(.plain).pointingHand().nativeStatsRowHover(radius: Theme.radius, overlay: true).accessibilityLabel("Open \(nativeStatsSourceName(s.rawValue)) statistics")
+                            HStack(alignment: .center, spacing: 16) {
+                                Text(nativeStatsSourceName(s.rawValue)).font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(hasUsage ? Theme.ink : Theme.muted).lineLimit(1).frame(width: 136, alignment: .leading)
+                                Text(hasUsage ? nativeStatsCount(nativeStatsGrand(value)) : "—").font(Theme.num(Theme.textSm)).foregroundStyle(hasUsage ? Theme.ink : Theme.faint).lineLimit(1).nativeStatsNumberTransition(value.isNull ? nil : nativeStatsGrand(value)).frame(width: 64, alignment: .trailing)
+                                NativeTickMeter(fraction: nativeStatsGrand(value) / total, color: Theme.ink, height: 10).frame(minWidth: 60, maxWidth: .infinity)
+                                if !detail, availableWidth >= 700 {
+                                    Text(hasUsage ? "\(nativeStatsCount(value["output"].double)) out · \(nativeStatsCount(value["cacheRead"].double)) cached" : "").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.muted).lineLimit(1).frame(width: 170, alignment: .trailing)
+                                    Group {
+                                        if let rate = NativeStatsThroughputPresentation.rate(stream) { Text(String(format: "%.1f tok/s", rate)).help(NativeStatsRateMetric.streaming.timingDetail(stream)) }
+                                        else { Text(hasUsage ? "—" : "").help(NativeStatsThroughputPresentation.missingClockLabel(source: s.rawValue) + ". A streaming rate needs token-arrival timestamps.") }
+                                    }.font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.dim).lineLimit(1).frame(width: 84, alignment: .trailing)
+                                }
+                                NativeIcon("chevron-right", size: 12).foregroundStyle(Theme.faint)
+                            }.padding(.vertical, 11).padding(.horizontal, 4).contentShape(Rectangle())
+                        }.buttonStyle(.plain).pointingHand().nativeStatsRowHover(radius: 0).accessibilityLabel("Open \(nativeStatsSourceName(s.rawValue)) statistics")
                             .accessibilityValue(hasUsage ? "Streaming tokens per second: " + (NativeStatsThroughputPresentation.rate(stream).map { String(format: "%.1f", $0) } ?? "Unavailable") + ". " + NativeStatsRateMetric.streaming.coverage(stream) : "No recorded usage")
                     }
                 }
             }
-            if d["isLifetime"].bool { Text("Lifetime token totals include Claude's cache. Dated charts, responses, projects and speed use available response records; pruned history cannot be reconstructed.").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
+            if d["isLifetime"].bool { Text("Lifetime totals include Claude's cache. Dated charts use the response records still on disk.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted) }
             ForEach(Array(payload["warnings"].array.enumerated()), id: \.offset) { _, warning in NativeError(message: warning.string) }
             ForEach(NativeStatsPresentationPolicy.excludedNotices(payload, detail: detail), id: \.source) { notice in
                 Text("\(nativeStatsSourceName(notice.source)): \(notice.count) records have no usable usage metadata.").font(Theme.ui(11)).foregroundStyle(Theme.muted)
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: availableWidth >= 600 ? 4 : 2), spacing: 10) {
-                NativeStatsValueTile(label: "Tokens processed", value: nativeStatsGrand(t), detail: "Read + written across \(d["summary"]["models"].int) models\(d["isLifetime"].bool ? " · lifetime" : "")", accent: nativeStatsColor("06b6d4"), format: nativeStatsCount)
-                NativeStatsValueTile(label: "Generated output", value: t["output"].double, detail: "\(nativeStatsCount(t["thinking"].double)) reasoning (inside output)", accent: nativeStatsColor("10b981"), format: nativeStatsCount)
+            NativeReadoutStrip(minCell: 190) {
+                NativeStatsValueTile(label: "Tokens processed", value: nativeStatsGrand(t), detail: "\(d["summary"]["models"].int) models\(d["isLifetime"].bool ? " · lifetime" : "")", accent: nativeStatsColor("06b6d4"), format: nativeStatsCount)
+                NativeStatsValueTile(label: "Generated output", value: t["output"].double, detail: "\(nativeStatsCount(t["thinking"].double)) reasoning inside output", accent: nativeStatsColor("10b981"), format: nativeStatsCount)
                 NativeStatsValueTile(label: detail ? "Cache efficiency" : "Served from cache", value: prompt > 0 ? t["cacheRead"].double * 100 / prompt : nil, unit: "%", detail: "\(nativeStatsCount(t["cacheRead"].double)) of \(nativeStatsCount(prompt)) prompt tokens", accent: nativeStatsColor("a855f7"), format: { String(format: "%.1f", $0) })
                 if detail {
                     NativeStatsValueTile(label: "Recorded responses", value: payload["coverage"]["datedTotals"]["messages"].double, detail: "\(d["summary"]["sessions"].int) sessions · \(d["summary"]["projects"].int) projects", format: nativeStatsCount)
@@ -346,14 +278,13 @@ private struct NativeStatsContents: View {
             if !detail { NativeStatsThroughput(data: d["throughput"], colors: payload["colors"], availableWidth: availableWidth, selectModel: selectModel) }
             if detail {
                 detailTiles
-                costTile
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: availableWidth >= 600 ? 2 : 1), alignment: .leading, spacing: 14) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 32, alignment: .top), count: availableWidth >= 600 ? 2 : 1), alignment: .leading, spacing: 24) {
                     NativeStatsProjectBoard(rows: d["projects"].array, all: detail)
                     NativeStatsHeat(grid: d["heat"].array)
                 }
                 NativeStatsDrive(summary: payload["datedSummary"])
             } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: availableWidth >= 600 ? 2 : 1), alignment: .leading, spacing: 14) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 32, alignment: .top), count: availableWidth >= 600 ? 2 : 1), alignment: .leading, spacing: 24) {
                     NativeStatsModelBoard(models: d["models"].array, lifetime: d["isLifetime"].bool, colors: payload["colors"], select: selectModel)
                     NativeStatsProjectBoard(rows: d["projects"].array, all: detail)
                     NativeStatsHeat(grid: d["heat"].array)
@@ -361,22 +292,20 @@ private struct NativeStatsContents: View {
                 }
             }
             if !payload["cache"].isNull { NativeCard {
-                NativeChartHeading(title: "Why this disagrees with /stats", caption: "Lifetime history and de-duplicated on-disk records measure different things.")
-                Text("Lifetime \(nativeStatsCount(nativeStatsGrand(payload["cache"]["totals"]))) · raw disk \(nativeStatsCount(payload["scan"]["rawGrand"].double)) · deduplicated disk \(nativeStatsCount(d["onDiskGrand"].double))")
-                Text("\(payload["scan"]["duplicates"].int) repeated blocks; \(payload["dayMatch"]["matched"].int)/\(payload["dayMatch"]["checked"].int) comparable UTC days agree.")
-                DisclosureGroup("How these totals differ") { Text("Claude's lifetime cache includes repeated content blocks and retained pruned history. Dated charts deduplicate response IDs. Only responses on UTC days after the cache watermark are added to the lifetime baseline.") }
+                NativeChartHeading(title: "Difference from /stats", caption: "Claude's lifetime cache includes repeated content blocks and retained pruned history. Dated charts deduplicate response IDs. Only responses on UTC days after the cache watermark are added to the lifetime baseline.")
+                Text("Lifetime \(nativeStatsCount(nativeStatsGrand(payload["cache"]["totals"]))) · raw disk \(nativeStatsCount(payload["scan"]["rawGrand"].double)) · deduplicated disk \(nativeStatsCount(d["onDiskGrand"].double))").font(Theme.num(Theme.textXs, weight: .regular))
+                Text("\(payload["scan"]["duplicates"].int) repeated blocks · \(payload["dayMatch"]["matched"].int)/\(payload["dayMatch"]["checked"].int) comparable UTC days agree").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.muted)
             } }
             // Detail uses an exact model/range-filtered benchmark payload.
             // The unfiltered overview ledger belongs only to All apps.
             if detail || payload["source"].string == "all" {
                 if detail && (benchmark["spend"]["calls"].int > 0 || !benchmark["trend"].array.isEmpty) {
-                    Rectangle().fill(Theme.border).frame(height: 1).padding(.top, 6)
-                    NativeChartHeading(title: "Benchmarks for this model", caption: "UniApi benchmark records for this exact model and date range, across providers. Separate from coding-app usage.")
+                    NativeChartHeading(title: "Benchmarks", caption: "UniApi benchmark records for this exact model and date range, across providers. Separate from coding-app usage.")
                 }
                 NativeStatsBenchmark(data: benchmark)
             }
             Text("\(Int(t["messages"].double)) responses · \(d["summary"]["sessions"].int) sessions · \(d["summary"]["projects"].int) projects · \(d["summary"]["models"].int) models · \(d["summary"]["activeDays"].int) active days\(span)\(scanFooter)")
-                .font(Theme.ui(11)).foregroundStyle(Theme.muted).textSelection(.enabled)
+                .font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.faint).textSelection(.enabled)
         }.font(Theme.ui(12)).foregroundStyle(Theme.ink)
             .accessibilityElement(children: .contain)
     }
@@ -396,31 +325,32 @@ private struct NativeStatsContents: View {
     private var scanFooter: String { detail ? "" : " · \(payload["scan"]["files"].int) files, \(nativeStatsCount(payload["scan"]["bytes"].double)) bytes · scan \(payload["scan"]["elapsedMs"].double.formatted(.number.precision(.fractionLength(0)))) ms" }
     private var detailTiles: some View {
         let dated = payload["coverage"]["datedTotals"], messages = dated["messages"].double, days = d["summary"]["activeDays"].double
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: availableWidth >= 600 ? 4 : 2), spacing: 10) {
+        return NativeReadoutStrip(minCell: 170) {
             NativeStatsValueTile(label: "Active days", value: days, detail: payload["coverage"]["first"].isNull ? "No dated records" : "First recorded \(nativeStatsDate(payload["coverage"]["first"].double))", format: nativeStatsCount)
             NativeStatsValueTile(label: "Tokens per response", value: messages > 0 ? nativeStatsGrand(dated) / messages : nil, format: nativeStatsCount)
             NativeStatsValueTile(label: "Output per response", value: messages > 0 ? dated["output"].double / messages : nil, format: nativeStatsCount)
             NativeStatsValueTile(label: "Responses / active day", value: days > 0 ? messages / days : nil)
+            costTile
         }
     }
 }
 
 private struct NativeStatsLedger: View {
     let totals: JSONValue
-    private var rows: [(String, String)] { [("Fresh input", "input"), ("Output", "output"), ("Thinking (inside output)", "thinking"), ("Cache writes", "cacheWrite"), ("Cache reads", "cacheRead")].sorted { totals[$0.1].double > totals[$1.1].double } }
+    private var rows: [(String, String)] { [("Fresh input", "input"), ("Output", "output"), ("Thinking", "thinking"), ("Cache writes", "cacheWrite"), ("Cache reads", "cacheRead")].sorted { totals[$0.1].double > totals[$1.1].double } }
     var body: some View { NativeCard {
-        NativeChartHeading(title: "Where the tokens go", caption: "Five token kinds. Thinking is counted inside output; its share is measured against output.")
+        NativeChartHeading(title: "Token kinds", caption: "Five token kinds. Thinking is counted inside output; its share is measured against output.")
         ForEach(Array(rows.enumerated()), id: \.element.1) { index, row in
             let (label, key) = row
             let denominator = key == "thinking" ? totals["output"].double : nativeStatsGrand(totals)
             let color = nativeStatsColor(["input": "3b82f6", "output": "10b981", "thinking": "f59e0b", "cacheWrite": "a855f7", "cacheRead": "06b6d4"][key] ?? "06b6d4")
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    StatusDot(color: color, size: 6)
-                    Text(label).font(Theme.ui(12.5, weight: .medium))
+                    RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 2, height: 10).accessibilityHidden(true)
+                    Text(label).font(Theme.ui(Theme.textXs, weight: .medium))
                     Spacer(minLength: 8)
-                    Text(nativeStatsCount(totals[key].double)).font(Theme.mono(12, weight: .medium)).monospacedDigit().lineLimit(1).nativeStatsNumberTransition(totals[key].double).frame(width: 70, alignment: .trailing)
-                    Text((denominator > 0 ? String(format: "%.1f%%", totals[key].double * 100 / denominator) : "—") + (key == "thinking" ? " of output" : "")).font(Theme.mono(10)).foregroundStyle(Theme.muted).frame(width: 96, alignment: .trailing)
+                    Text(nativeStatsCount(totals[key].double)).font(Theme.num(Theme.textXs, weight: .medium)).lineLimit(1).nativeStatsNumberTransition(totals[key].double).frame(width: 70, alignment: .trailing)
+                    Text((denominator > 0 ? String(format: "%.1f%%", totals[key].double * 100 / denominator) : "—") + (key == "thinking" ? " of output" : "")).font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted).frame(width: 96, alignment: .trailing)
                 }
                 NativeGrowBar(fraction: totals[key].double / max(1, denominator), color: color, delay: Double(index) * 0.06)
             }.help(key == "thinking" ? "Thinking is a subset of generated output; its percentage uses output as the denominator." : totals[key].double.formatted())
@@ -433,25 +363,27 @@ private struct NativeStatsModelBoard: View {
     @AppStorage("uniapi.stats.metric") private var metric = "tokens"
     private func value(_ row: JSONValue) -> Double { metric == "tokens" ? nativeStatsGrand(row["totals"]) : row["totals"][metric == "output" ? "output" : "messages"].double }
     var body: some View { NativeCard {
-        NativeChartHeading(title: "Models", caption: lifetime ? "\(models.count) served lifetime · pruned transcripts retain their totals." : "\(models.count) served this window.")
-        T3Segmented(options: [("tokens", "Tokens"), ("output", "Output")] + (lifetime ? [] : [("messages", "Responses")]), selection: metric) { metric = $0 }
-        ForEach(Array(models.sorted { value($0) > value($1) }.enumerated()), id: \.offset) { index, row in
+        HStack(spacing: 8) {
+            NativeChartHeading(title: "Models", caption: lifetime ? "\(models.count) served lifetime. Pruned transcripts retain their totals." : "\(models.count) served in this range.")
+            Spacer(minLength: 8)
+            T3Segmented(options: [("tokens", "Tokens"), ("output", "Output")] + (lifetime ? [] : [("messages", "Responses")]), selection: metric) { metric = $0 }
+        }
+        ForEach(Array(models.sorted { value($0) > value($1) }.enumerated()), id: \.offset) { _, row in
             Button { select(row["model"].string) } label: {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(String(format: "%02d", index + 1)).font(Theme.mono(10)).foregroundStyle(Theme.muted).frame(width: 18)
-                        Text(row["model"].string).font(Theme.mono(12, weight: .medium)).fixedSize(horizontal: false, vertical: true).help(row["model"].string)
-                        if row["viaProxy"].bool { Text("proxy").font(Theme.mono(9)).foregroundStyle(Theme.warnFg) }
-                        if row["pruned"].bool { Text("pruned").font(Theme.mono(9)).foregroundStyle(Theme.muted) }
+                        Text(row["model"].string).font(Theme.mono(Theme.textXs, weight: .medium)).fixedSize(horizontal: false, vertical: true).help(row["model"].string)
+                        if row["viaProxy"].bool { MonoChip(text: "proxy", color: Theme.warnFg) }
+                        if row["pruned"].bool { MonoChip(text: "pruned") }
                         Spacer(minLength: 2)
-                        Text("\(row["days"].int)d · \(row["sessions"].int) sessions").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                        Text(nativeStatsCount(value(row))).font(Theme.mono(12, weight: .medium))
-                        NativeIcon("arrow-up-right", size: 11).foregroundStyle(Theme.muted)
+                        Text("\(row["days"].int)d · \(row["sessions"].int) sessions").font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted)
+                        Text(nativeStatsCount(value(row))).font(Theme.num(Theme.textXs, weight: .medium)).frame(minWidth: 48, alignment: .trailing)
+                        NativeIcon("chevron-right", size: 11).foregroundStyle(Theme.faint)
                     }
                     NativeGrowBar(fraction: value(row) / max(1, models.map(value).max() ?? 0), color: nativeStatsColor(colors[row["model"].string].string))
                 }
-                .padding(.horizontal, 8).padding(.vertical, 7).contentShape(Rectangle())
-            }.buttonStyle(.plain).pointingHand().help("Open full history for \(row["model"].string)")
+                .padding(.vertical, 7).contentShape(Rectangle())
+            }.buttonStyle(.plain).pointingHand().nativeStatsRowHover(radius: 0).help("Open full history for \(row["model"].string)")
         }
     }.onChange(of: lifetime) { _, yes in if yes && metric == "messages" { metric = "tokens" } }.onAppear { if lifetime && metric == "messages" { metric = "tokens" } } }
 }
@@ -460,11 +392,11 @@ private struct NativeStatsProjectBoard: View {
     let rows: [JSONValue], all: Bool
     var body: some View { NativeCard {
         NativeChartHeading(title: "Projects", caption: !all && rows.count > 8 ? "Top 8 of \(rows.count) working directories." : "Working directories recorded by the selected apps.")
-        ForEach(Array((all ? rows : Array(rows.prefix(8))).enumerated()), id: \.offset) { index, row in VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) { Text(String(format: "%02d", index + 1)).font(Theme.mono(10)).foregroundStyle(Theme.muted).frame(width: 18); Text(row["name"].string).font(Theme.mono(12, weight: .medium)).lineLimit(1).help(row["path"].string); Spacer(minLength: 2); Text("\(row["sessions"].int) sessions").font(Theme.ui(10.5)).foregroundStyle(Theme.muted); Text(nativeStatsCount(nativeStatsGrand(row["totals"]))).font(Theme.mono(12, weight: .medium)) }
+        ForEach(Array((all ? rows : Array(rows.prefix(8))).enumerated()), id: \.offset) { _, row in VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) { Text(row["name"].string).font(Theme.mono(Theme.textXs, weight: .medium)).lineLimit(1).help(row["path"].string); Spacer(minLength: 2); Text("\(row["sessions"].int) sessions").font(Theme.ui(10.5)).foregroundStyle(Theme.muted); Text(nativeStatsCount(nativeStatsGrand(row["totals"]))).font(Theme.mono(12, weight: .medium)) }
             NativeGrowBar(fraction: nativeStatsGrand(row["totals"]) / max(1, rows.map { nativeStatsGrand($0["totals"]) }.max() ?? 0), color: Theme.pairColor(row["path"].string))
-        }.padding(.horizontal, 8).padding(.vertical, 7) }
-        if !all && rows.count > 8 { Text("\(rows.count - 8) more projects").foregroundStyle(Theme.muted) }
+        }.padding(.vertical, 7) }
+        if !all && rows.count > 8 { Text("\(rows.count - 8) more").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint) }
     }.frame(maxWidth: .infinity) }
 }
 
@@ -472,7 +404,7 @@ private struct NativeStatsHeat: View {
     let grid: [JSONValue]
     private var maximum: Double { grid.flatMap(\.array).map(\.double).max() ?? 0 }
     var body: some View { NativeCard {
-        NativeChartHeading(title: "When you work", caption: "Responses by local weekday and hour, brightest at your busiest hour.")
+        NativeChartHeading(title: "Hours", caption: "Responses by local weekday and hour, brightest at your busiest hour.")
         VStack(spacing: 3) {
         ForEach(0..<min(7, grid.count), id: \.self) { day in HStack(spacing: 3) { Text(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day]).frame(width: 35); ForEach(0..<24, id: \.self) { hour in let value = grid[day].array.count > hour ? grid[day].array[hour].double : 0; RoundedRectangle(cornerRadius: 2).fill(value > 0 ? Theme.accent.opacity(0.2 + 0.8 * value / max(1, maximum)) : Theme.track).frame(minWidth: 5, maxWidth: .infinity, minHeight: 12, maxHeight: 12).help("\(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][day]) \(hour):00: \(Int(value)) responses").accessibilityLabel("Day \(day + 1), hour \(hour), \(Int(value)) responses") } } }
         }
@@ -485,9 +417,8 @@ private struct NativeStatsHeat: View {
 private struct NativeStatsDrive: View {
     let summary: JSONValue
     var body: some View { NativeCard {
-        NativeChartHeading(title: "How you drive it", caption: "Thinking effort, subagents and server-side tools - the settings behind the numbers above.")
+        NativeChartHeading(title: "Sessions")
         ForEach(summary["effort"].object.keys.sorted(), id: \.self) { key in HStack { Text("Effort \(key)"); Spacer(); Text(summary["effort"][key].string).font(Theme.mono(12)) } }
-        Rectangle().fill(Theme.border).frame(height: 1)
         fact("Subagent turns", value: summary["sidechainMessages"].int, detail: "\(nativeStatsCount(summary["sidechainTokens"].double)) tokens")
         fact("Through the proxy", value: summary["proxyMessages"].int, detail: "Claude responses from a gateway model")
         fact("Web searches", value: summary["totals"]["webSearch"].int, detail: "Reported server-side searches")
@@ -495,8 +426,8 @@ private struct NativeStatsDrive: View {
     } }
     private func fact(_ title: String, value: Int, detail: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) { Text(title).font(Theme.ui(12.5, weight: .medium)); Text(detail).font(Theme.ui(10.5)).foregroundStyle(Theme.muted) }
-            Spacer(); Text("\(value)").font(Theme.mono(14, weight: .medium)).foregroundStyle(value == 0 ? Theme.muted : Theme.ink)
+            Text(title).font(Theme.ui(Theme.textXs, weight: .medium)); Text(detail).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1)
+            Spacer(); Text("\(value)").font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(value == 0 ? Theme.faint : Theme.ink)
         }
     }
 }

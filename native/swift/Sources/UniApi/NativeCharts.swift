@@ -99,16 +99,19 @@ enum NativeChartMath {
     }
 }
 
+/// A chart's name. What the chart measures and how to read it sits behind
+/// the mark beside the name, so the page shows data rather than prose.
 struct NativeChartHeading: View {
     var title: String
     var caption: String = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink)
+        HStack(spacing: 6) {
+            Text(title).font(Theme.ui(Theme.textSm, weight: .semibold)).foregroundStyle(Theme.ink)
                 .accessibilityAddTraits(.isHeader)
             if !caption.isEmpty {
-                Text(caption).font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                NativeIcon("circle-help", size: 12).foregroundStyle(Theme.faint)
+                    .frame(width: 18, height: 18).contentShape(Rectangle())
+                    .help(caption).accessibilityLabel(caption)
             }
         }
     }
