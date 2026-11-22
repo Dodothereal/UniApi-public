@@ -156,7 +156,7 @@ struct NativeCodePage: View {
                 }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if selectedThread.isEmpty {
                 VStack(spacing: 14) {
-                    Text(state.projects.isEmpty ? "No projects" : "No thread open").font(Theme.display(26)).foregroundStyle(Theme.dim)
+                    Text(state.projects.isEmpty ? "No projects" : "No thread open").font(Theme.display(24, weight: .medium)).foregroundStyle(Theme.muted)
                     if state.projects.isEmpty { Button("Add project", nativeIcon: "folder-plus", action: addProject).buttonStyle(T3Button(.primary)) }
                     else { Button("New thread", nativeIcon: "plus") { Task { await newThread() } }.buttonStyle(T3Button(.primary)).disabled(project.isEmpty) }
                 }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)

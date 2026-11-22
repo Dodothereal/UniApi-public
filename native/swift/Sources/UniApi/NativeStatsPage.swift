@@ -123,7 +123,7 @@ struct NativeStatsPage: View {
                     pageContents(width: contentWidth)
                 }
             } else {
-                NativePage(title: "Statistics", subtitle: "Token usage from Claude Code, Codex, Antigravity, Z Code, OpenCode and DeepSeek Harness, with model, project and daily breakdowns.", maxWidth: 1500, readiness: measuredReadiness, actions: { headerActions }) {
+                NativePage(title: "Statistics", maxWidth: 1500, readiness: measuredReadiness, actions: { headerActions }) {
                     pageContents(width: contentWidth)
                 }
             }

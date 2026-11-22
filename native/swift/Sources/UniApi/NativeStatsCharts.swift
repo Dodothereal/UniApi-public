@@ -442,7 +442,7 @@ struct NativeStatsThroughput: View {
                     .font(Theme.ui(11)).foregroundStyle(Theme.muted)
             }
         } else if summary["timedResponses"].int > 0 {
-            NativeEmptyState(title: "No responses in this range", detail: "Choose a longer range or another coding harness.")
+            NativeEmptyState(title: "No responses in this range", detail: "")
         }
         }
         NativeCard {

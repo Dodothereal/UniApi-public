@@ -37,7 +37,7 @@ struct NativeResultsCharts: View {
         let available = cells.filter { value($0) != nil }.sorted { lower ? value($0)! < value($1)! : value($0)! > value($1)! }
         return NativeCard {
             NativeChartHeading(title: title, caption: caption)
-            if available.isEmpty { NativeEmptyState(title: "No measurements", detail: "This scope has no available samples for this metric.", icon: "chart-bar") }
+            if available.isEmpty { NativeEmptyState(title: "No measurements", detail: "", icon: "chart-bar") }
             else {
                 NativeRankingChart(rows: available.map { cell in NativeRankEntry(id: cell.id, title: cell.short, detail: cell.value["provider_name"].string + (cell.browser ? " · Browser" : ""), value: value(cell), low: metric == "latency" ? BenchmarkMath.number(cell.value["latency"]["ttft_min_ms"]) : nil, high: metric == "latency" ? BenchmarkMath.number(cell.value["latency"]["ttft_max_ms"]) : nil, color: Theme.pairColor(cell.id)) }, lowerIsBetter: lower, fixedMaximum: maximum, format: format)
                 if history && !metric.isEmpty {
@@ -56,7 +56,7 @@ struct NativeResultsCharts: View {
         }
         return NativeCard {
             NativeChartHeading(title: title, caption: caption + (series.count > 8 ? " \(series.count - 8) less-sampled pairs omitted." : ""))
-            if history { NativeEmptyState(title: "Choose an individual run", detail: "Historical records retain source runs; curves are not combined across them.", icon: "chart-no-axes-combined") }
+            if history { NativeEmptyState(title: "Open one run to see this", detail: "", icon: "chart-no-axes-combined") }
             else { NativeLineChart(series: Array(series.prefix(8)), xFormat: { NativeNumberFormat.compact(pow(2, $0)) }, yFormat: format) }
         }
     }
@@ -81,7 +81,7 @@ struct NativeResultsCharts: View {
         }
         return NativeCard {
             NativeChartHeading(title: "Token arrival over time", caption: "Steeper is faster; flat steps show stalls. Browser tokens are estimates." + (chosen.count > 8 ? " \(chosen.count - 8) less-sampled pairs omitted." : ""))
-            if history { NativeEmptyState(title: "Choose an individual run", detail: "Arrival curves belong to actual requests.", icon: "chart-no-axes-combined") }
+            if history { NativeEmptyState(title: "Open one run to see this", detail: "", icon: "chart-no-axes-combined") }
             else { NativeLineChart(series: series, height: 215, monotone: false, showPoints: false, xFormat: { String(format: "%.1f s", $0) }, yFormat: { NativeNumberFormat.compact($0) + " tok" }) }
         }
     }

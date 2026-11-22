@@ -458,7 +458,7 @@ struct NativeSwitcherPage: View {
                     if sourceModels.isEmpty {
                         NativeEmptyState(title: codexSource == "web" ? "No ChatGPT Web models detected" : "No models listed", detail: codexSource == "web" ? "Open setup, complete browser sign-in, then reload this page." : "Reload after configuring a compatible source.")
                     } else if matching.isEmpty {
-                        NativeEmptyState(title: "No matching models", detail: "Try a different model or provider name.")
+                        NativeEmptyState(title: "No match", detail: "")
                     }
                     ForEach(matching, id: \.key) { item in
                         Button { state.selection.choose(item.row); showCodexModels = false } label: {

@@ -121,7 +121,6 @@ struct NativeFansPage: View {
     }
     private var headerActions: some View {
         HStack(spacing: 12) {
-            if snapshot.isNull, !state.isNull { NativeStatusText(text: "No readings", color: Theme.warnFg) }
             NativeMenuSelect(title: "Temperature unit", selection: Binding(get: { unit }, set: { value in Task { await operation("preferences", ["unit": .string(value)]) } }), options: [("c", "°C"), ("f", "°F")], width: 68)
             T3IconButton(icon: "refresh-cw", help: "Refresh") { Task { await reload(); if ["control", "timeline", "settings"].contains(tab) { await loadHistory() } } }
             if !state["enabled"].bool { Button(state["daemon"]["installed"].bool ? "Enable controls" : "Enable for this session") { Task { await operation("enable") } }.buttonStyle(T3Button(.primary)).disabled(pending || snapshot.isNull || runtime.paths.readOnly) }

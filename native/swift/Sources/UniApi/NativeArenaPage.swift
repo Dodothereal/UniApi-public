@@ -203,7 +203,7 @@ struct NativeArenaPage: View {
                 if model.standings.isEmpty { NativeEmptyState(title: "No verdicts", detail: "") }
                 ForEach(Array(model.standings.enumerated()), id: \.offset) { i, row in VStack(alignment: .leading, spacing: 5) { HStack { Text("\(i + 1). \(row["route"].string) · \(row["model"].string)").font(Theme.mono(12)); Spacer(); Text("\(row["elo"].int)").font(Theme.mono(13, weight: .semibold)) }; Text("\(row["wins"].int)W \(row["losses"].int)L \(row["draws"].int)D · \(row["failures"].int) failed · \(row["matches"].int) matches · \(ArenaStandingDetail(row).firstPlaceLabel) · \(NativeArenaDuration(row["avg_duration_ms"].double)) · \(Int(row["avg_turns"].double.rounded())) steps").font(Theme.ui(11)).foregroundStyle(Theme.muted); NativeGrowBar(fraction: fraction(row), color: Theme.pairColor(row["key"].string), delay: Double(i) * 0.045) }.padding(.vertical, 6).help(ArenaStandingDetail(row).accessibilitySummary) }
             } else if phase == .failed {
-                NativeEmptyState(title: "Ranking unavailable", detail: "Use Reload to retry this scope.")
+                NativeEmptyState(title: "Ranking unavailable", detail: "")
             } else { ShimmerText(text: "Reading ranking and shared ledger…") }
         }
         if hasContent {

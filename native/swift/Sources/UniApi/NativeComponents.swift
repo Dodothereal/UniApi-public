@@ -231,27 +231,23 @@ struct EmptyState: View {
     var actionTitle: String? = nil
     var actionIcon: String = "plus"
     var action: (() -> Void)? = nil
-    // Left-aligned on the page grid and short: what is missing, then the one
-    // thing to do about it. No centered illustration floating in a void.
+    // Absence is stated once, in the same condensed face as the figures it
+    // replaces, on the page grid. No icon, no illustration, no apology.
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                NativeIcon(systemName: icon, size: 15).foregroundStyle(Theme.muted)
-                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }.accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink)
-                    if !detail.isEmpty {
-                        Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }.accessibilityElement(children: .combine)
-            }
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(Theme.display(24, weight: .medium)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !detail.isEmpty {
+                    Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }.accessibilityElement(children: .combine)
             if let actionTitle, let action {
                 Button(actionTitle, nativeIcon: actionIcon, action: action).buttonStyle(T3Button(.primary))
-                    .padding(.leading, 25)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 20)
+        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 18)
     }
 }
 

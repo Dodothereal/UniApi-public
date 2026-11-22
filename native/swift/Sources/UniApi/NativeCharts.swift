@@ -255,7 +255,7 @@ struct NativeLineChart: View {
         let points = samples
         VStack(alignment: .leading, spacing: 12) {
             if points.isEmpty {
-                NativeEmptyState(title: "No measured points", detail: "Measurements appear here when they are available.", icon: "chart.xyaxis.line")
+                NativeEmptyState(title: "No data", detail: "", icon: "chart.xyaxis.line")
             } else {
                 chart(points)
             }

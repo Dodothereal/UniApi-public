@@ -68,18 +68,18 @@ struct NativeBatteryPage: View {
         }
     }
     var body: some View {
-        NativePage(title: "Battery", subtitle: "Stop charging at a level instead of always filling to 100%, so the charger powers the Mac directly.", readiness: state.error != nil ? .failed : state.status.isNull ? .pending : .ready) {
+        NativePage(title: "Battery", readiness: state.error != nil ? .failed : state.status.isNull ? .pending : .ready) {
             if let error = state.error { NativeError(message: error) }
             if !status["error"].isNull { NativeError(message: status["error"].string) }
             if status.isNull {
                 if state.error == nil {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
-                        Text("Reading battery state…").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                        Text("Reading battery").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
                     }
                     .frame(maxWidth: .infinity).padding(.vertical, 48)
                 } else {
-                    NativeEmptyState(title: "Battery unavailable", detail: "Refresh to try reading the battery again.", icon: "battery.0percent")
+                    NativeEmptyState(title: "Battery unavailable", detail: "", icon: "battery.0percent")
                     refreshButton
                 }
             } else if !status["supported"].bool {
@@ -109,11 +109,11 @@ struct NativeBatteryPage: View {
         .nativePageActivity(suspended: { state.stop(); interaction.blur(); controlFocused = false })
     }
     private var controlCard: some View {
-        Card(padding: 20) {
+        VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 16) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            NativeNumberText(text: percent.map { String(format: "%.0f%%", $0) } ?? "—", font: Theme.ui(34, weight: .medium), color: percent == nil ? Theme.muted : Theme.ink)
+                            NativeNumberText(text: percent.map { String(format: "%.0f%%", $0) } ?? "—", font: Theme.display(72), color: percent == nil ? Theme.muted : Theme.ink)
                             if status["battery"]["externalConnected"].bool {
                                 NativeIcon("plug", size: 14)
                                     .foregroundStyle(Theme.muted)

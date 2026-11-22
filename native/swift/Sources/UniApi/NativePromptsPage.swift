@@ -150,7 +150,7 @@ struct NativePromptsPage: View {
                 Text("Drop files anywhere on this page to add them to \(detail["prompt"]["title"].string). All file types · 50 MiB per file.")
                     .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 if detail["results"].array.isEmpty {
-                    NativePromptEmptyState(icon: "file-code-2", title: "No results yet", detail: "Drop files here or add a URL for a model response.")
+                    NativePromptEmptyState(icon: "file-code-2", title: "No results", detail: "Drop files or add a URL.")
                         .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
                 } else {
                     LazyVStack(spacing: 8) {
@@ -219,7 +219,6 @@ struct NativePromptsPage: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(item.value.isNull ? "New prompt" : "Edit prompt").font(Theme.ui(18, weight: .semibold))
-                Text("Keep the full task text here so you can reuse it across models.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Title").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
