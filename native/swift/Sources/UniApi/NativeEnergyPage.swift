@@ -1,17 +1,23 @@
 import SwiftUI
-import Charts
 import AppKit
 import UniApiCore
 import UniApiPresentation
 
+/// Series hues shared by the readings and the plots they belong to. System
+/// load is drawn in ink: it is the reading the page leads with.
+private enum EnergySeries {
+    static var load: Color { Theme.ink }
+    static let wall = Theme.pairPalette[3]
+    static let flow = Theme.pairPalette[6]
+}
+
 struct NativeEnergyPage: View {
     let runtime: NativeRuntime
     @EnvironmentObject private var session: NativeAppSession
-    @Environment(\.nativeInterfaceDensity) private var density
     @Environment(\.nativeReducedMotion) private var reduceMotion
-    @Environment(\.nativeMotionVisible) private var motionVisible
-    private static let tabs = ["flow", "history", "sensors", "settings"]
-    @State private var contentWidth: CGFloat = 882
+    /// Preferences moved behind the header control; an earlier stored
+    /// "settings" value opens the live view.
+    private static let views = ["flow", "history", "sensors"]
     @State private var reads = NativePageReadScope()
     @State private var preferencesRestored = false
     @State private var state: JSONValue = .null
@@ -29,6 +35,8 @@ struct NativeEnergyPage: View {
     @State private var pending = false
     @State private var rateText = "0.30"
     @State private var currencyText = "$"
+    @State private var showsPreferences = false
+    @State private var showsBreakdown = false
 
     private var snapshot: JSONValue { state["snapshot"] }
     private var sessionStats: JSONValue { state["session"] }
@@ -39,6 +47,8 @@ struct NativeEnergyPage: View {
     private var prefs: JSONValue { state["preferences"] }
     private var ratePerKwh: Double { NativeHardwareDisplayPolicies.number(prefs["ratePerKwh"]) ?? 0.30 }
     private var currency: String { prefs["currency"].string.isEmpty ? "$" : prefs["currency"].string }
+    private var view: String { Self.views.contains(tab) ? tab : "flow" }
+    private var needsHistory: Bool { ["flow", "history", "settings"].contains(tab) }
     private var historyRange: String { range }
     private var historyScope: String { historyRange == "custom" ? "custom:\(from.timeIntervalSince1970):\(through.timeIntervalSince1970)" : historyRange }
     private var history: JSONValue { historySelection.value(for: historyScope) }
@@ -48,14 +58,8 @@ struct NativeEnergyPage: View {
     }
 
     private static let rangeOptions: [(String, String)] = [
-        ("30m", "30m"),
-        ("1h", "1h"),
-        ("6h", "6h"),
-        ("24h", "24h"),
-        ("7d", "7d"),
-        ("30d", "30d"),
-        ("all", "All"),
-        ("custom", "Custom")
+        ("30m", "30m"), ("1h", "1h"), ("6h", "6h"), ("24h", "24h"),
+        ("7d", "7d"), ("30d", "30d"), ("all", "All"), ("custom", "Custom")
     ]
 
     private var rangeDisplayName: String {
@@ -78,40 +82,40 @@ struct NativeEnergyPage: View {
         if error != nil || statusReadError != nil || !state["error"].string.isEmpty { return .failed }
         if state.isNull { return .pending }
         if !state["supported"].bool { return .ready }
-        let needsHistory = ["flow", "history", "settings"].contains(tab)
         if needsHistory && historyError != nil { return .failed }
         if snapshot.isNull || (needsHistory && history.isNull) { return .pending }
         return .ready
     }
 
+    private var eyebrow: String {
+        if !snapshot.isNull { return "Live · every 2 s" }
+        if state.isNull { return "Reading power telemetry" }
+        return state["supported"].bool ? "Waiting for readings" : "Unavailable on this Mac"
+    }
+
     var body: some View {
-        GeometryReader { viewport in
-            NativePage(title: "Energy", subtitle: "Real-time power flow, subsystem rail telemetry, and historical consumption.", maxWidth: 1500, readiness: pageReadiness, showsHeader: false) {
-                energyHeader
-                if let statusReadError { statusError(statusReadError) }
-                if let error { NativeError(message: error) }
-                if !state["error"].string.isEmpty { statusError(state["error"].string) }
+        NativePage(title: "Energy", eyebrow: eyebrow, readiness: pageReadiness) {
+            headerActions
+        } content: {
+            if let statusReadError {
                 if state.isNull {
-                    if error == nil && statusReadError == nil {
-                        ShimmerText(text: "Reading live power telemetry and electrical rails…").padding(.vertical, 40)
+                    NativeReadFailureState(icon: "zap", title: "Power telemetry could not be read", detail: statusReadError, retryTitle: "Retry") {
+                        Task { await reload(force: true) }
                     }
-                } else if !state["supported"].bool {
-                    NativeEmptyState(title: "Energy telemetry is available on macOS", detail: "The other UniApi apps work on this platform.", icon: "zap")
-                } else {
-                    if contentWidth >= 700 {
-                        HStack(spacing: 16) { tabRail; Spacer(minLength: 8); powerSourceBadge }
-                    } else {
-                        VStack(alignment: .leading, spacing: 12) { tabRail; powerSourceBadge }
-                    }
-                    switch tab {
-                    case "history": historyTab
-                    case "sensors": sensorsTab
-                    case "settings": preferencesTab
-                    default: powerFlowTab
-                    }
+                } else { failure(statusReadError) }
+            }
+            if let error { Notice(text: error, tone: .fail).accessibilityLabel("Error: " + error) }
+            if !state["error"].string.isEmpty { failure(state["error"].string) }
+            if !state.isNull && !state["supported"].bool {
+                Blank(icon: "zap", title: "This Mac reports no power telemetry",
+                      detail: "Neither battery telemetry nor power sensors are exposed here, which is usual for a virtual machine.")
+            } else if !(state.isNull && statusReadError != nil) {
+                switch view {
+                case "history": historyView
+                case "sensors": sensorsView
+                default: nowView
                 }
             }
-            .onChange(of: max(0, min(1500, viewport.size.width) - 2 * density.pageMargin), initial: true) { _, width in contentWidth = width }
         }
         .nativePageTask {
             if !preferencesRestored {
@@ -131,7 +135,7 @@ struct NativeEnergyPage: View {
             }
         }
         .nativePageTask(id: "\(tab):\(historyScope)") {
-            guard ["flow", "history", "settings"].contains(tab) else { return }
+            guard needsHistory else { return }
             while !Task.isCancelled {
                 await loadHistory()
                 do { try await Task.sleep(nanoseconds: tab == "flow" ? 10_000_000_000 : 20_000_000_000) } catch { return }
@@ -146,676 +150,422 @@ struct NativeEnergyPage: View {
         .nativePageActivity(reads: reads)
     }
 
-    private func statusError(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            NativeError(message: message)
+    private func failure(_ message: String) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Notice(text: message, tone: .fail).accessibilityLabel("Error: " + message)
             Button("Retry") { Task { await reload(force: true) } }
         }
     }
 
-    // MARK: - Header & Navigation
+    // MARK: - Header
 
-    private var energyHeader: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 20) {
-                energyHeading.fixedSize()
-                Spacer(minLength: 0)
-                headerActions.fixedSize()
-            }
-            VStack(alignment: .leading, spacing: 12) {
-                energyHeading
-                headerActions.frame(maxWidth: .infinity, alignment: .trailing)
+    @ViewBuilder private var headerActions: some View {
+        Stops(options: [("flow", "Now"), ("history", "History"), ("sensors", "Rails")], selection: view) { tab = $0 }
+            .accessibilityLabel("Energy sections")
+            .padding(.trailing, 6)
+        IconPress(icon: "refresh-cw", help: "Refresh") {
+            Task {
+                await reload(force: true)
+                if needsHistory { await loadHistory() }
             }
         }
-    }
-
-    private var energyHeading: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Energy")
-                .font(Theme.ui(min(42, max(28, (contentWidth + 216 + 2 * density.pageMargin) * 0.038)), weight: .semibold))
-                .tracking(-1.6)
-                .accessibilityAddTraits(.isHeader)
-            Text("Real-time power flow, subsystem rail telemetry, and cumulative consumption.")
-                .font(Theme.ui(12.5))
-                .foregroundStyle(Theme.muted)
-        }
-    }
-
-    private var headerActions: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 7) {
-                NativeStatusDot(color: snapshot.isNull ? Theme.warnFg : Theme.okFg, pulse: !snapshot.isNull)
-                Text(snapshot.isNull ? "Waiting for readings" : "Live · 2s")
-                    .font(Theme.mono(11))
-                    .foregroundStyle(Theme.dim)
-            }
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(Theme.well, in: Capsule())
-
-            Button {
-                exportHistory()
-            } label: {
-                HStack(spacing: 6) {
-                    NativeIcon("download", size: 12, strokeWidth: 1.65)
-                    Text("Export CSV")
-                }
-            }
-            .buttonStyle(T3Button(.outline))
+        IconPress(icon: "sliders-horizontal", help: "Energy preferences", active: showsPreferences) { showsPreferences.toggle() }
+            .popover(isPresented: $showsPreferences, arrowEdge: .bottom) { preferencesPanel }
+        Button("Export CSV", nativeIcon: "download") { exportHistory() }
+            .buttonStyle(Press(.primary))
             .disabled(history["points"].array.isEmpty)
+    }
 
-            Button {
-                Task {
-                    await reload(force: true)
-                    if ["flow", "history", "settings"].contains(tab) { await loadHistory() }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    NativeIcon("refresh-cw", size: 12, strokeWidth: 1.65)
-                    Text("Refresh")
-                }
+    private var rangeStops: some View {
+        Stops(options: Self.rangeOptions, selection: range, spacing: 14) { range = $0 }
+            .accessibilityLabel("Time window")
+    }
+
+    private var statisticStops: some View {
+        Stops(options: [("mean", "Average"), ("max", "Peak"), ("min", "Minimum")], selection: statistic) { statistic = $0 }
+            .accessibilityLabel("Statistic")
+    }
+
+    @ViewBuilder private var customRange: some View {
+        if range == "custom" {
+            HStack(spacing: 20) {
+                DatePicker("From", selection: $from, in: ...through, displayedComponents: .date)
+                DatePicker("Through", selection: $through, in: from...Date(), displayedComponents: .date)
             }
-            .buttonStyle(T3Button(.outline))
+            .datePickerStyle(.compact).font(Theme.ui(12.5)).foregroundStyle(Theme.dim).fixedSize()
         }
     }
 
-    private var tabRail: some View {
-        HStack(spacing: 0) {
-            ForEach(Self.tabs, id: \.self) { value in
-                Button { tab = value } label: {
-                    Text([
-                        "flow": "Overview & Flow",
-                        "history": "History & Export",
-                        "sensors": "Rails & Sensors (\(snapshot["sensors"].array.count))",
-                        "settings": "Preferences"
-                    ][value] ?? value)
-                    .font(Theme.ui(12, weight: tab == value ? .medium : .regular))
-                    .lineLimit(1).minimumScaleFactor(0.85)
-                    .padding(.vertical, 7).frame(maxWidth: .infinity)
-                    .foregroundStyle(tab == value ? Theme.ink : Theme.muted)
-                }
-                .buttonStyle(.plain).pointingHand()
-                .accessibilityAddTraits(tab == value ? [.isSelected] : [])
+    // MARK: - Now
+
+    @ViewBuilder private var nowView: some View {
+        hero
+        powerPath
+        Band(title: "Energy used", spacing: 16) { rangeStops } content: {
+            customRange
+            if let historyError { Notice(text: historyError, tone: .fail).accessibilityLabel("Error: " + historyError) }
+            energyStrip
+            breakdown
+        }
+        Band(title: "Timeline") { statisticStops } content: {
+            Well {
+                NativeLineChart(series: powerSeries(kind: statistic), height: 205, showPoints: false, includeZero: true,
+                                xFormat: { formatAxisDate($0) }, yFormat: { String(format: "%.1f W", $0) })
             }
         }
-        .background(alignment: .leading) {
-            GeometryReader { geometry in
-                if let index = Self.tabs.firstIndex(of: tab) {
-                    RoundedRectangle(cornerRadius: 8).fill(Theme.surface)
-                        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1) }
-                        .frame(width: geometry.size.width / CGFloat(Self.tabs.count))
-                        .offset(x: geometry.size.width / CGFloat(Self.tabs.count) * CGFloat(index))
-                        .animation(reduceMotion || !motionVisible ? nil : .spring(duration: 0.42), value: tab)
-                }
-            }.allowsHitTesting(false).accessibilityHidden(true)
-        }
-        .padding(4)
-        .frame(width: min(520, max(0, contentWidth)))
-        .background(Theme.well, in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Energy sections")
+        consumers
     }
 
-    private var powerSourceBadge: some View {
+    /// The meter's full scale: the supply's limit when the Mac reports one,
+    /// otherwise the next round figure above anything seen so far.
+    private var gaugeMaximum: (value: Double, limit: Bool) {
+        if let budget = NativeHardwareDisplayPolicies.number(snapshot["powerBudgetW"]), budget > 0 { return (budget, true) }
+        let seen = [snapshot["systemLoadW"], history["summary"]["peakSystemLoadW"], sessionStats["peakSystemLoadW"]]
+            .compactMap(NativeHardwareDisplayPolicies.number).max() ?? 0
+        let steps: [Double] = [4, 8, 12, 20, 40, 60, 80, 100, 120, 160, 200, 300, 400, 600, 800]
+        return (steps.first { $0 >= seen * 1.1 } ?? 800, false)
+    }
+
+    private var sourceTag: Tag? {
+        guard !snapshot.isNull else { return nil }
         let mode = snapshot["powerMode"].string
-        let ext = snapshot["externalConnected"].bool
-        let battW = snapshot["batteryPowerW"].double
-        let voltV = snapshot["voltageInV"].double
-        let currA = snapshot["currentInA"].double
-        let label: String = {
-            if snapshot.isNull { return "Telemetry unavailable" }
-            if !batteryPresent || mode == "wall-only" {
-                return String(format: "AC Mains Direct · %.2f V @ %.2f A", voltV, currA)
-            }
-            if ext {
-                if mode == "ac-charging" || battW > 0.2 {
-                    return String(format: "AC Connected · Charging (%+.1f W)", battW)
-                }
-                if mode == "ac-assisting" || battW < -0.2 {
-                    return String(format: "AC Connected · Battery Assisting (%.1f W)", battW)
-                }
-                return "AC Connected · Powering Mac Directly"
-            }
-            return String(format: "Battery Power · %.1f W Draw", abs(battW))
-        }()
-        return HStack(spacing: 8) {
-            NativeStatusDot(color: ext || !batteryPresent ? Theme.okFg : Theme.warnFg)
-            Text(label).font(Theme.mono(11)).foregroundStyle(Theme.dim)
+        let external = snapshot["externalConnected"].bool
+        let flow = snapshot["batteryPowerW"].double
+        let text: String
+        if !batteryPresent || mode == "wall-only" {
+            text = String(format: "AC direct · %.2f V × %.2f A", snapshot["voltageInV"].double, snapshot["currentInA"].double)
+        } else if external {
+            if mode == "ac-charging" || flow > 0.2 { text = String(format: "On AC · charging %+.1f W", flow) }
+            else if mode == "ac-assisting" || flow < -0.2 { text = String(format: "On AC · battery assisting %.1f W", abs(flow)) }
+            else { text = "On AC · powering the Mac directly" }
+        } else {
+            text = String(format: "On battery · %.1f W draw", abs(flow))
         }
-        .padding(.horizontal, 11).padding(.vertical, 6)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-        .overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, lineWidth: 1) }
+        return Tag(text, tone: external || !batteryPresent ? Theme.okFg : Theme.warnFg, dot: true)
     }
 
-    // MARK: - Shared Range Bar
-
-    private var rangeControlBar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    HStack(spacing: 6) {
-                        NativeIcon("clock", size: 13, strokeWidth: 1.65).foregroundStyle(Theme.muted)
-                        Text("Time window").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim)
-                    }
-                    T3Segmented(options: Self.rangeOptions, selection: range) { range = $0 }
-                    Spacer(minLength: 8)
-                    T3Segmented(options: [("mean", "Avg"), ("max", "Peak"), ("min", "Min")], selection: statistic) { statistic = $0 }
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    T3Segmented(options: Self.rangeOptions, selection: range) { range = $0 }
-                    HStack {
-                        T3Segmented(options: [("mean", "Average"), ("max", "Peak"), ("min", "Minimum")], selection: statistic) { statistic = $0 }
-                        Spacer()
-                    }
-                }
-            }
-            if range == "custom" {
-                HStack(spacing: 16) {
-                    DatePicker("From", selection: $from, in: ...through, displayedComponents: .date)
-                    DatePicker("Through", selection: $through, in: from...Date(), displayedComponents: .date)
-                }
-                .font(Theme.ui(12))
-                .padding(10)
-                .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-            }
-        }
-    }
-
-    // MARK: - Tab 1: Overview & Flow
-
-    private var powerFlowTab: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            powerFlowPipelineCard
-            rangeControlBar
-            energySummaryStrip
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 18) {
-                    subsystemBreakdownCard.frame(minWidth: 420, maxWidth: .infinity)
-                    cumulativeEnergyLedgerCard.frame(width: 390)
-                }
-                VStack(alignment: .leading, spacing: 18) {
-                    subsystemBreakdownCard
-                    cumulativeEnergyLedgerCard
-                }
-            }
-            if let historyError { NativeError(message: historyError) }
-            liveTraceCard
-        }
-    }
-
-    private var powerFlowPipelineCard: some View {
-        let wallW = NativeHardwareDisplayPolicies.number(snapshot["wallPowerW"])
-        let sysInW = NativeHardwareDisplayPolicies.number(snapshot["systemPowerInW"])
-        let lossW = NativeHardwareDisplayPolicies.number(snapshot["adapterLossW"])
-        let sysLoadW = NativeHardwareDisplayPolicies.number(snapshot["systemLoadW"])
-        let battW = NativeHardwareDisplayPolicies.number(snapshot["batteryPowerW"])
-        let eff = NativeHardwareDisplayPolicies.number(snapshot["efficiencyPercent"])
-        let voltV = NativeHardwareDisplayPolicies.number(snapshot["voltageInV"])
-        let currA = NativeHardwareDisplayPolicies.number(snapshot["currentInA"])
-        let budgetW = NativeHardwareDisplayPolicies.number(snapshot["powerBudgetW"])
-        let thermalW = snapshot["subsystems"].array.first(where: { $0["id"].string == "thermal" }).flatMap { NativeHardwareDisplayPolicies.number($0["watts"]) }
-        let socW = snapshot["subsystems"].array.first(where: { $0["id"].string == "soc" }).flatMap { NativeHardwareDisplayPolicies.number($0["watts"]) }
-        let hourlyCost = ((wallW ?? sysLoadW ?? 0) / 1000.0) * ratePerKwh
-
-        return Card(padding: 22) {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Text("Real-Time Power Pipeline")
-                                .font(Theme.ui(15, weight: .semibold))
-                                .foregroundStyle(Theme.ink)
-                            Text(batteryPresent ? "Laptop AC / Battery Architecture" : "Desktop Direct AC Architecture")
-                                .font(Theme.mono(10, weight: .medium))
-                                .foregroundStyle(Theme.dim)
-                                .padding(.horizontal, 7).padding(.vertical, 2)
-                                .background(Theme.well, in: Capsule())
-                        }
-                        Text(batteryPresent
-                             ? "Live wattage from AC wall estimate through the DC-in regulator into Mac system load and battery pack."
-                             : "Live wattage from AC wall input through the internal power supply into the 12V DC bus and Apple Silicon rails.")
-                            .font(Theme.ui(12))
-                            .foregroundStyle(Theme.muted)
-                    }
-                    Spacer(minLength: 12)
-                    HStack(spacing: 8) {
-                        if let eff {
-                            metricPill(label: "PSU Efficiency", value: String(format: "%.1f%%", eff), color: eff >= 85 ? Theme.okFg : Theme.warnFg)
-                        }
-                        if let budgetW, budgetW > 0 {
-                            let pct = min(100, max(0, ((sysInW ?? 0) / budgetW) * 100))
-                            metricPill(label: "Power Headroom", value: String(format: "%.0f / %.0f W (%.0f%%)", sysInW ?? 0, budgetW, pct), color: Theme.accent)
-                        }
-                    }
-                }
-
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: contentWidth < 760 ? 2 : 4), spacing: 12) {
-                    pipelineStageCard(
-                        step: "01 · AC INPUT",
-                        icon: "plug-zap",
-                        title: "Wall Power Draw",
-                        watts: NativeHardwareDisplayPolicies.formatWatts(wallW),
-                        primaryMeta: lossW.map { String(format: "Conversion heat loss %.2f W", $0) } ?? "Direct input",
-                        secondaryMeta: eff.map { String(format: "%.1f%% PSU conversion efficiency", $0) } ?? "Efficiency nominal",
-                        accentColor: Theme.pairPalette[0],
-                        fraction: budgetW.map { min(1, max(0, (wallW ?? 0) / max(1, $0))) }
-                    )
-                    pipelineStageCard(
-                        step: "02 · DC BUS",
-                        icon: "plug",
-                        title: "DC-In Supply Rail",
-                        watts: NativeHardwareDisplayPolicies.formatWatts(sysInW),
-                        primaryMeta: String(format: "%.2f V  ×  %.2f A", voltV ?? 0, currA ?? 0),
-                        secondaryMeta: budgetW.map { String(format: "%.0f W ceiling (%.0f W free)", $0, max(0, $0 - (sysInW ?? 0))) } ?? "Regulated main bus",
-                        accentColor: Theme.accent,
-                        fraction: budgetW.map { min(1, max(0, (sysInW ?? 0) / max(1, $0))) }
-                    )
-                    pipelineStageCard(
-                        step: "03 · COMPUTE & BOARD",
-                        icon: "cpu",
-                        title: "Mac System Load",
-                        watts: NativeHardwareDisplayPolicies.formatWatts(sysLoadW),
-                        primaryMeta: String(format: "Burn rate %.1f Wh/h · %@%.3f/h", sysLoadW ?? 0, currency, hourlyCost),
-                        secondaryMeta: bootStats["avgSystemLoadW"].isNull
-                            ? "Hardware average pending"
-                            : String(format: "Since boot avg %.1f W", bootStats["avgSystemLoadW"].double),
-                        accentColor: Theme.okFg,
-                        fraction: budgetW.map { min(1, max(0, (sysLoadW ?? 0) / max(1, $0))) }
-                    )
-                    if batteryPresent {
-                        pipelineStageCard(
-                            step: "04 · BATTERY PACK",
-                            icon: "battery-charging",
-                            title: (battW ?? 0) > 0.05 ? "Battery Charging" : (battW ?? 0) < -0.05 ? "Battery Discharging" : "Battery Resting",
-                            watts: NativeHardwareDisplayPolicies.formatWatts(battW, signed: true),
-                            primaryMeta: String(format: "%.0f%% · %.1f / %.1f Wh", battery["percent"].double, battery["remainingWh"].double, battery["maxCapacityWh"].double),
-                            secondaryMeta: String(format: "%.2f V · %+.2f A%@", battery["voltageV"].double, battery["currentA"].double, battery["temperatureC"].isNull ? "" : String(format: " · %.1f°C", battery["temperatureC"].double)),
-                            accentColor: (battW ?? 0) >= 0 ? Theme.okFg : Theme.warnFg,
-                            fraction: max(0, min(1, battery["percent"].double / 100.0))
-                        )
-                    } else {
-                        pipelineStageCard(
-                            step: "04 · SILICON THERMAL",
-                            icon: "activity",
-                            title: "SoC & Thermal Dissipation",
-                            watts: NativeHardwareDisplayPolicies.formatWatts(socW ?? thermalW ?? sysLoadW),
-                            primaryMeta: String(format: "Thermal zone %.2f W (PHPS)", thermalW ?? 0),
-                            secondaryMeta: String(format: "PSU loss %.2f W · Total heat %.1f W", lossW ?? 0, wallW ?? 0),
-                            accentColor: Theme.pairPalette[1],
-                            fraction: (sysLoadW ?? 0) > 0 ? min(1, max(0, (socW ?? 0) / max(1, sysLoadW ?? 1))) : 0
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    private func metricPill(label: String, value: String, color: Color) -> some View {
-        HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(label).font(Theme.ui(11)).foregroundStyle(Theme.muted)
-            Text(value).font(Theme.mono(11, weight: .semibold)).foregroundStyle(Theme.ink)
-        }
-        .padding(.horizontal, 10).padding(.vertical, 5)
-        .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-    }
-
-    private func pipelineStageCard(step: String, icon: String, title: String, watts: String, primaryMeta: String, secondaryMeta: String, accentColor: Color, fraction: Double?) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Text(step).font(Theme.mono(9.5, weight: .semibold)).foregroundStyle(accentColor)
-                Spacer(minLength: 4)
-                NativeIcon(icon, size: 13, strokeWidth: 1.7).foregroundStyle(accentColor)
-            }
-            Text(title).font(Theme.ui(12.5, weight: .medium)).foregroundStyle(Theme.dim).lineLimit(1)
-            NativeNumberText(text: watts, font: Theme.ui(28, weight: .semibold), color: Theme.ink, isolateLayout: true)
-            if let fraction {
-                CapsuleBar(fraction: min(1, max(0.03, fraction)), color: accentColor)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(primaryMeta).font(Theme.mono(11, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                Text(secondaryMeta).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-        .overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, lineWidth: 1) }
-    }
-
-    private var energySummaryStrip: some View {
+    private var hero: some View {
+        let load = NativeHardwareDisplayPolicies.number(snapshot["systemLoadW"])
+        let wall = NativeHardwareDisplayPolicies.number(snapshot["wallPowerW"])
+        let gauge = gaugeMaximum
         let summary = history["summary"]
-        let windowSysWh = NativeHardwareDisplayPolicies.number(summary["systemEnergyWh"])
-        let windowWallWh = NativeHardwareDisplayPolicies.number(summary["wallEnergyWh"])
-        let windowAvgW = NativeHardwareDisplayPolicies.number(summary["avgSystemLoadW"])
-        let windowMinW = NativeHardwareDisplayPolicies.number(summary["minSystemLoadW"])
-        let windowPeakW = NativeHardwareDisplayPolicies.number(summary["peakSystemLoadW"])
-        let windowP95W = NativeHardwareDisplayPolicies.number(summary["p95SystemLoadW"])
+        let low = NativeHardwareDisplayPolicies.number(summary["minSystemLoadW"])
+        let high = NativeHardwareDisplayPolicies.number(summary["peakSystemLoadW"])
+        let spread: ClosedRange<Double>? = low.flatMap { low in high.flatMap { $0 >= low ? low...$0 : nil } }
+        let hourly = ((wall ?? load ?? 0) / 1000.0) * ratePerKwh
+        var facts: [String] = []
+        if load != nil { facts.append(String(format: "%@%.3f an hour", currency, hourly)) }
+        if !bootStats["avgSystemLoadW"].isNull { facts.append(String(format: "%.1f W average since boot", bootStats["avgSystemLoadW"].double)) }
+        var envelope = ""
+        if let spread {
+            envelope = String(format: "Shaded: %@, %.1f to %.1f W", rangeDisplayName.lowercased(), spread.lowerBound, spread.upperBound)
+            if let mean = NativeHardwareDisplayPolicies.number(summary["avgSystemLoadW"]) { envelope += String(format: " · average %.1f W", mean) }
+            if let p95 = NativeHardwareDisplayPolicies.number(summary["p95SystemLoadW"]) { envelope += String(format: " · 95th percentile %.1f W", p95) }
+        }
+        let endLabel = String(format: gauge.limit ? "%.0f W supply limit" : "%.0f W", gauge.value)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 8) {
+                if load != nil { NativeStatusDot(color: Theme.signal, size: 5, pulse: true) }
+                MicroLabel("System load")
+                Spacer(minLength: 12)
+                if let sourceTag { sourceTag }
+            }
+            .frame(minHeight: 18)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    NativeNumberText(text: figure(load), font: Theme.readout(54), color: load == nil ? Theme.faint : Theme.ink, isolateLayout: true)
+                    MicroLabel("watts", size: 11)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("System load")
+                .accessibilityValue(load == nil ? "Unavailable" : figure(load) + " watts")
+                Spacer(minLength: 16)
+                Text(facts.joined(separator: " · ")).font(Theme.ui(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+            EnergyGauge(value: load, maximum: gauge.value, spread: spread, endLabel: endLabel).padding(.top, 8)
+            if !envelope.isEmpty {
+                Text(envelope).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1).padding(.top, 10)
+            }
+        }
+    }
 
+    /// Wall to supply rail to battery: the stages around the load above.
+    private var powerPath: some View {
+        let wall = NativeHardwareDisplayPolicies.number(snapshot["wallPowerW"])
+        let supply = NativeHardwareDisplayPolicies.number(snapshot["systemPowerInW"])
+        let loss = NativeHardwareDisplayPolicies.number(snapshot["adapterLossW"])
+        let load = NativeHardwareDisplayPolicies.number(snapshot["systemLoadW"])
+        let flow = NativeHardwareDisplayPolicies.number(snapshot["batteryPowerW"])
+        let efficiency = NativeHardwareDisplayPolicies.number(snapshot["efficiencyPercent"])
+        let budget = NativeHardwareDisplayPolicies.number(snapshot["powerBudgetW"])
+        let thermal = subsystemWatts("thermal"), soc = subsystemWatts("soc")
+        var rail = snapshot.isNull ? "" : String(format: "%.2f V × %.2f A", snapshot["voltageInV"].double, snapshot["currentInA"].double)
+        if let budget, budget > 0 { rail += String(format: " · %.0f W free", max(0, budget - (supply ?? 0))) }
+        return ReadoutStrip(minimum: 200) {
+            Readout(label: "Wall", value: figure(wall), unit: "W",
+                    detail: loss.map { String(format: "%.2f W lost in conversion", $0) } ?? "",
+                    size: .medium, tint: EnergySeries.wall, color: wall == nil ? Theme.faint : Theme.ink, isolateLayout: true)
+            Readout(label: "Supply rail", value: figure(supply), unit: "W", detail: rail,
+                    size: .medium, color: supply == nil ? Theme.faint : Theme.ink, isolateLayout: true)
+            if batteryPresent {
+                Readout(label: (flow ?? 0) > 0.05 ? "Battery charging" : (flow ?? 0) < -0.05 ? "Battery discharging" : "Battery resting",
+                        value: figure(flow, "%+.1f"), unit: "W", detail: batteryDetail,
+                        size: .medium, tint: EnergySeries.flow, color: (flow ?? 0) < -0.05 ? Theme.warnFg : Theme.ink, isolateLayout: true)
+            } else {
+                Readout(label: "SoC and thermal", value: figure(soc ?? thermal ?? load), unit: "W",
+                        detail: snapshot.isNull ? "" : String(format: "Thermal zone %.2f W · total heat %.1f W", thermal ?? 0, wall ?? 0),
+                        size: .medium, tint: EnergySeries.flow, color: snapshot.isNull ? Theme.faint : Theme.ink, isolateLayout: true)
+            }
+            Readout(label: "Conversion efficiency", value: figure(efficiency), unit: "%",
+                    detail: bootStats["efficiencyPercent"].isNull ? "" : String(format: "%.1f%% since boot", bootStats["efficiencyPercent"].double),
+                    size: .medium, color: efficiency == nil ? Theme.faint : efficiency! < 85 ? Theme.warnFg : Theme.ink, isolateLayout: true)
+        }
+    }
+
+    private var batteryDetail: String {
+        var text = String(format: "%.0f%% · %.1f of %.1f Wh", battery["percent"].double, battery["remainingWh"].double, battery["maxCapacityWh"].double)
+        if !battery["temperatureC"].isNull { text += String(format: " · %.1f °C", battery["temperatureC"].double) }
+        return text
+    }
+
+    private func subsystemWatts(_ id: String) -> Double? {
+        snapshot["subsystems"].array.first { $0["id"].string == id }.flatMap { NativeHardwareDisplayPolicies.number($0["watts"]) }
+    }
+
+    private func cost(_ wh: Double?) -> String {
+        NativeHardwareDisplayPolicies.formatCost(wh: wh, ratePerKwh: ratePerKwh, currency: currency)
+    }
+
+    private var energyStrip: some View {
+        let summary = history["summary"]
+        let windowWh = NativeHardwareDisplayPolicies.number(summary["systemEnergyWh"])
+        let windowWallWh = NativeHardwareDisplayPolicies.number(summary["wallEnergyWh"])
+        let windowMean = NativeHardwareDisplayPolicies.number(summary["avgSystemLoadW"])
         let bootWh = NativeHardwareDisplayPolicies.number(bootStats["systemEnergyWh"])
         let bootWallWh = NativeHardwareDisplayPolicies.number(bootStats["wallEnergyWh"])
-        let bootAvgW = NativeHardwareDisplayPolicies.number(bootStats["avgSystemLoadW"])
-
-        let allTimeWh = NativeHardwareDisplayPolicies.number(allTimeStats["systemEnergyWh"])
-        let allTimeWallWh = NativeHardwareDisplayPolicies.number(allTimeStats["wallEnergyWh"])
-
-        let basisW = bootAvgW ?? windowAvgW ?? NativeHardwareDisplayPolicies.number(snapshot["systemLoadW"]) ?? 0
-        let wallBasisW = NativeHardwareDisplayPolicies.number(bootStats["avgSystemPowerInW"]) ?? NativeHardwareDisplayPolicies.number(snapshot["wallPowerW"]) ?? basisW
-        let dailyWh = wallBasisW * 24.0
-        let monthlyWh = dailyWh * 30.0
-        let yearlyWh = dailyWh * 365.0
-
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: contentWidth < 760 ? 2 : 4), spacing: 12) {
-            kpiCard(
-                eyebrow: rangeDisplayName.uppercased(),
-                title: "Window Energy Used",
-                value: NativeHardwareDisplayPolicies.formatEnergyWh(windowSysWh),
-                subtitle: String(format: "Wall %@ · Cost %@", NativeHardwareDisplayPolicies.formatEnergyWh(windowWallWh), NativeHardwareDisplayPolicies.formatCost(wh: windowWallWh, ratePerKwh: ratePerKwh, currency: currency)),
-                badge: windowAvgW.map { String(format: "Avg %.1f W", $0) } ?? "\(summary["sampleCount"].int) pts"
-            )
-            kpiCard(
-                eyebrow: "HARDWARE ACCUMULATOR",
-                title: "Energy Since Boot",
-                value: NativeHardwareDisplayPolicies.formatEnergyWh(bootWh),
-                subtitle: String(format: "Wall %@ · Cost %@", NativeHardwareDisplayPolicies.formatEnergyWh(bootWallWh), NativeHardwareDisplayPolicies.formatCost(wh: bootWallWh, ratePerKwh: ratePerKwh, currency: currency)),
-                badge: bootAvgW.map { String(format: "Avg %.1f W", $0) } ?? "Since boot"
-            )
-            kpiCard(
-                eyebrow: rangeDisplayName.uppercased(),
-                title: "Load Envelope (Min / Peak)",
-                value: String(format: "%@ – %@", NativeHardwareDisplayPolicies.formatWatts(windowMinW), NativeHardwareDisplayPolicies.formatWatts(windowPeakW)),
-                subtitle: String(format: "Window average %@ · All-time %@", NativeHardwareDisplayPolicies.formatWatts(windowAvgW), NativeHardwareDisplayPolicies.formatEnergyWh(allTimeWh)),
-                badge: windowP95W.map { String(format: "P95 %.1f W", $0) } ?? "SQLite"
-            )
-            kpiCard(
-                eyebrow: "RUN-RATE ESTIMATE",
-                title: "Projected Consumption",
-                value: String(format: "%.2f kWh/mo", monthlyWh / 1000.0),
-                subtitle: String(format: "Day %@ · Year %.0f kWh · All-time cost %@", NativeHardwareDisplayPolicies.formatEnergyWh(dailyWh), yearlyWh / 1000.0, NativeHardwareDisplayPolicies.formatCost(wh: allTimeWallWh, ratePerKwh: ratePerKwh, currency: currency)),
-                badge: String(format: "%@/mo", NativeHardwareDisplayPolicies.formatCost(wh: monthlyWh, ratePerKwh: ratePerKwh, currency: currency))
-            )
+        let bootMean = NativeHardwareDisplayPolicies.number(bootStats["avgSystemLoadW"])
+        let allWh = NativeHardwareDisplayPolicies.number(allTimeStats["systemEnergyWh"])
+        let allWallWh = NativeHardwareDisplayPolicies.number(allTimeStats["wallEnergyWh"])
+        let basis = bootMean ?? windowMean ?? NativeHardwareDisplayPolicies.number(snapshot["systemLoadW"]) ?? 0
+        let wallBasis = NativeHardwareDisplayPolicies.number(bootStats["avgSystemPowerInW"]) ?? NativeHardwareDisplayPolicies.number(snapshot["wallPowerW"]) ?? basis
+        let monthlyWh = wallBasis * 24.0 * 30.0, yearlyWh = wallBasis * 24.0 * 365.0
+        let window = energyParts(history.isNull ? nil : windowWh), boot = energyParts(bootWh), all = energyParts(state.isNull ? nil : allWh)
+        return ReadoutStrip(minimum: 200) {
+            Readout(label: rangeDisplayName, value: window.value, unit: window.unit,
+                    detail: history.isNull ? "" : cost(windowWallWh) + (windowMean.map { String(format: " · %.1f W average", $0) } ?? ""),
+                    size: .large, color: history.isNull ? Theme.faint : Theme.ink)
+            Readout(label: "Since boot", value: boot.value, unit: boot.unit,
+                    detail: bootWh == nil ? "" : cost(bootWallWh) + (bootMean.map { String(format: " · %.1f W average", $0) } ?? ""),
+                    size: .large, color: bootWh == nil ? Theme.faint : Theme.ink)
+            Readout(label: "All recorded", value: all.value, unit: all.unit,
+                    detail: state.isNull ? "" : cost(allWallWh),
+                    size: .large, color: state.isNull ? Theme.faint : Theme.ink)
+            Readout(label: "At this rate", value: snapshot.isNull ? "--" : String(format: "%.2f", monthlyWh / 1000.0), unit: "kWh a month",
+                    detail: snapshot.isNull ? "" : cost(monthlyWh) + String(format: " · %.0f kWh a year", yearlyWh / 1000.0),
+                    size: .large, color: snapshot.isNull ? Theme.faint : Theme.ink)
         }
     }
 
-    private func kpiCard(eyebrow: String, title: String, value: String, subtitle: String, badge: String) -> some View {
-        Card(padding: 16) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    Text(eyebrow)
-                        .font(Theme.mono(9.5, weight: .semibold))
-                        .foregroundStyle(Theme.muted)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(badge)
-                        .font(Theme.mono(10, weight: .medium))
-                        .foregroundStyle(Theme.dim)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                }
-                Text(title).font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.dim).lineLimit(1)
-                NativeNumberText(text: value, font: Theme.ui(22, weight: .semibold), isolateLayout: true)
-                Text(subtitle).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1)
-            }
-        }
-    }
-
-    private var subsystemBreakdownCard: some View {
-        let subsystems = snapshot["subsystems"].array
-        let sysLoad = max(0.1, snapshot["systemLoadW"].double)
-        let maxRail = max(sysLoad, subsystems.map { $0["watts"].double }.max() ?? sysLoad)
-        return Card(padding: 20) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("AppleSMC Subsystem & Regulator Telemetry")
-                            .font(Theme.ui(14, weight: .semibold))
-                        Text("Live power draw across SoC voltage regulators, memory PMIC, core clusters, and I/O rails")
-                            .font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                    }
-                    Spacer()
-                    Button { tab = "sensors" } label: {
-                        HStack(spacing: 4) {
-                            Text("All \(snapshot["sensors"].array.count) sensors")
-                            NativeIcon("arrow-up-right", size: 11, strokeWidth: 1.65)
-                        }
-                    }.buttonStyle(T3Button(.ghost))
-                }
-                VStack(spacing: 11) {
-                    ForEach(Array(subsystems.enumerated()), id: \.offset) { idx, item in
-                        let watts = max(0, item["watts"].double)
-                        let shareOfLoad = min(1.0, max(0, watts / sysLoad))
-                        let barFraction = min(1.0, max(0, watts / maxRail))
-                        let groupName = item["group"].string
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack(spacing: 8) {
-                                Text(item["label"].string)
-                                    .font(Theme.ui(12, weight: .medium))
-                                    .foregroundStyle(Theme.ink)
-                                    .lineLimit(1)
-                                Text(groupName)
-                                    .font(Theme.mono(9.5))
-                                    .foregroundStyle(Theme.muted)
-                                    .padding(.horizontal, 5).padding(.vertical, 1.5)
-                                    .background(Theme.well, in: RoundedRectangle(cornerRadius: 4))
-                                Spacer(minLength: 8)
-                                Text(String(format: "%.0f%% of load", shareOfLoad * 100))
-                                    .font(Theme.mono(10.5))
-                                    .foregroundStyle(Theme.muted)
-                                Text(String(format: "%.2f W", watts))
-                                    .font(Theme.mono(12, weight: .semibold))
-                                    .foregroundStyle(Theme.ink)
-                                    .frame(width: 68, alignment: .trailing)
-                            }
-                            CapsuleBar(fraction: barFraction, color: Theme.pairPalette[idx % Theme.pairPalette.count])
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var cumulativeEnergyLedgerCard: some View {
+    /// Wall energy, conversion loss and efficiency: detail most visits do not
+    /// need, so it grows from its own control.
+    @ViewBuilder private var breakdown: some View {
         let summary = history["summary"]
-        return Card(padding: 20) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Cumulative Energy Ledger")
-                            .font(Theme.ui(14, weight: .semibold))
-                        Text("Integrated Wh and cost across \(rangeDisplayName.lowercased()), hardware boot, and SQLite rollups")
-                            .font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                    }
-                    Spacer()
+        let columns: [JSONValue] = [summary, bootStats, allTimeStats]
+        Button {
+            withAnimation(reduceMotion ? nil : NativeMotion.toggle) { showsBreakdown.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                NativeIcon(showsBreakdown ? "chevron-down" : "chevron-right", size: 12, strokeWidth: 1.75)
+                Text("Wall energy, loss and efficiency")
+            }
+        }
+        .buttonStyle(Press(.quiet)).padding(.leading, -8).padding(.top, -4)
+        .accessibilityValue(showsBreakdown ? "Expanded" : "Collapsed")
+        if showsBreakdown {
+            VStack(spacing: 0) {
+                LedgerHead {
+                    MicroLabel("Measure").frame(maxWidth: .infinity, alignment: .leading)
+                    MicroLabel(historyRange == "all" ? "All time" : historyRange == "custom" ? "Custom range" : rangeDisplayName).frame(width: 124, alignment: .trailing)
+                    MicroLabel("Since boot").frame(width: 124, alignment: .trailing)
+                    MicroLabel("All recorded").frame(width: 124, alignment: .trailing)
                 }
-                VStack(spacing: 9) {
-                    ledgerSectionHeader(rangeDisplayName)
-                    ledgerRow("System energy consumed", NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number(summary["systemEnergyWh"])))
-                    ledgerRow("Wall energy drawn", NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number(summary["wallEnergyWh"])))
-                    ledgerRow("Adapter / PSU conversion loss", NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number(summary["adapterLossWh"])))
-                    ledgerRow("Window electricity cost", NativeHardwareDisplayPolicies.formatCost(wh: NativeHardwareDisplayPolicies.number(summary["wallEnergyWh"]), ratePerKwh: ratePerKwh, currency: currency))
+                breakdownRow("System energy", columns.map { NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number($0["systemEnergyWh"])) })
+                breakdownRow("Wall energy", columns.map { NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number($0["wallEnergyWh"])) })
+                breakdownRow("Conversion loss", columns.map { NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number($0["adapterLossWh"])) })
+                breakdownRow("Efficiency", [percent(summary["avgEfficiencyPercent"]), percent(bootStats["efficiencyPercent"]), "—"])
+                breakdownRow("Cost", columns.map { cost(NativeHardwareDisplayPolicies.number($0["wallEnergyWh"])) })
+            }
+            .padding(.top, -6)
+        }
+    }
 
-                    Divider().padding(.vertical, 2)
-                    ledgerSectionHeader("Since Hardware Boot")
-                    ledgerRow("Boot system energy", NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number(bootStats["systemEnergyWh"])))
-                    ledgerRow("Boot wall energy", NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number(bootStats["wallEnergyWh"])))
-                    ledgerRow("Boot PSU heat loss", NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number(bootStats["adapterLossWh"])))
-                    ledgerRow("Boot average efficiency", bootStats["efficiencyPercent"].isNull ? "—" : String(format: "%.1f%%", bootStats["efficiencyPercent"].double))
-                    ledgerRow("Boot electricity cost", NativeHardwareDisplayPolicies.formatCost(wh: NativeHardwareDisplayPolicies.number(bootStats["wallEnergyWh"]), ratePerKwh: ratePerKwh, currency: currency))
-
-                    Divider().padding(.vertical, 2)
-                    ledgerSectionHeader("All-Time SQLite Rollups")
-                    ledgerRow("Total system energy", NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number(allTimeStats["systemEnergyWh"])))
-                    ledgerRow("Total wall energy", NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number(allTimeStats["wallEnergyWh"])))
-                    ledgerRow("Total recorded cost", NativeHardwareDisplayPolicies.formatCost(wh: NativeHardwareDisplayPolicies.number(allTimeStats["wallEnergyWh"]), ratePerKwh: ratePerKwh, currency: currency))
+    private func breakdownRow(_ label: String, _ values: [String]) -> some View {
+        LedgerRow(minHeight: 28) {
+            HStack(spacing: 12) {
+                Text(label).font(Theme.ui(12.5)).foregroundStyle(Theme.dim).frame(maxWidth: .infinity, alignment: .leading)
+                ForEach(Array(values.enumerated()), id: \.offset) { index, value in
+                    EnergyFigure(value, color: index == 0 ? Theme.ink : Theme.dim).frame(width: 124, alignment: .trailing)
                 }
             }
         }
+        .accessibilityElement(children: .combine)
     }
 
-    private func ledgerSectionHeader(_ title: String) -> some View {
-        HStack {
-            Text(title.uppercased())
-                .font(Theme.mono(10, weight: .semibold))
-                .foregroundStyle(Theme.dim)
-            Spacer()
-        }
+    private func percent(_ value: JSONValue) -> String {
+        NativeHardwareDisplayPolicies.number(value).map { String(format: "%.1f %%", $0) } ?? "—"
     }
 
-    private func ledgerRow(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            Spacer(minLength: 8)
-            Text(value).font(Theme.mono(12, weight: .medium)).foregroundStyle(Theme.ink)
-        }
-    }
-
-    private var liveTraceCard: some View {
-        Card(padding: 22) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Power Draw Timeline (\(rangeDisplayName))")
-                            .font(Theme.ui(14, weight: .semibold))
-                        Text("System load, wall power and DC-in telemetry · \(history["points"].array.count) buckets")
-                            .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                    }
-                    Spacer(minLength: 8)
-                    Button { tab = "history" } label: {
-                        HStack(spacing: 6) {
-                            Text("Inspect bucket table & Wh chart")
-                            NativeIcon("arrow-up-right", size: 12, strokeWidth: 1.65)
+    private var consumers: some View {
+        let subsystems = snapshot["subsystems"].array
+        let load = max(0.1, snapshot["systemLoadW"].double)
+        let widest = max(load, subsystems.map { $0["watts"].double }.max() ?? load)
+        return Band(title: "Consumers", spacing: 0) {
+            Button("All \(snapshot["sensors"].array.count) sensors") { tab = "sensors" }.buttonStyle(Press(.quiet))
+        } content: {
+            LedgerHead {
+                MicroLabel("Rail").frame(maxWidth: .infinity, alignment: .leading)
+                MicroLabel("Share of load").frame(minWidth: 60, idealWidth: 220, maxWidth: 220, alignment: .leading)
+                Color.clear.frame(width: 40, height: 1)
+                MicroLabel("Watts").frame(width: 64, alignment: .trailing)
+            }
+            if subsystems.isEmpty {
+                Text(state.isNull ? "Reading subsystem rails" : "No subsystem rails reported").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                    .padding(.vertical, 20)
+            }
+            ForEach(Array(subsystems.enumerated()), id: \.offset) { _, item in
+                let watts = max(0, item["watts"].double)
+                LedgerRow(minHeight: 28) {
+                    HStack(spacing: 12) {
+                        HStack(spacing: 8) {
+                            Text(item["label"].string).font(Theme.ui(12.5)).foregroundStyle(Theme.ink).lineLimit(1)
+                            Text(item["group"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1).layoutPriority(-1)
                         }
-                    }.buttonStyle(T3Button(.ghost))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Scale(fraction: min(1, watts / widest), height: 3)
+                            .frame(minWidth: 60, idealWidth: 220, maxWidth: 220)
+                        Text(String(format: "%.0f%%", min(1, watts / load) * 100)).font(Theme.mono(11)).foregroundStyle(Theme.muted)
+                            .frame(width: 40, alignment: .trailing)
+                        Text(String(format: "%.2f", watts)).font(Theme.readout(17)).foregroundStyle(Theme.ink)
+                            .frame(width: 64, alignment: .trailing)
+                    }
                 }
-                NativeLineChart(
-                    series: powerSeries(kind: statistic),
-                    height: 205,
-                    showPoints: false,
-                    includeZero: true,
-                    xFormat: { formatAxisDate($0) },
-                    yFormat: { String(format: "%.1f W", $0) }
-                )
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(item["label"].string)
+                .accessibilityValue(String(format: "%.2f watts, %.0f percent of load", watts, min(1, watts / load) * 100))
             }
         }
     }
 
-    // MARK: - Tab 2: History & Export
+    // MARK: - History
 
-    private var historyTab: some View {
+    @ViewBuilder private var historyView: some View {
         let points = history["points"].array
-        return VStack(alignment: .leading, spacing: 18) {
-            rangeControlBar
-            if let historyError { NativeError(message: historyError) }
-            energySummaryStrip
-            NativeCard(title: "Power draw (\(statistic == "max" ? "Peak" : statistic == "min" ? "Minimum" : "Average") Watts) · \(rangeDisplayName)") {
-                NativeLineChart(
-                    series: powerSeries(kind: statistic),
-                    height: 220,
-                    showPoints: points.count <= 48,
-                    includeZero: true,
-                    xFormat: { formatAxisDate($0) },
-                    yFormat: { String(format: "%.1f W", $0) }
-                )
+        let summary = history["summary"]
+        let used = energyParts(history.isNull ? nil : NativeHardwareDisplayPolicies.number(summary["systemEnergyWh"]))
+        let wallWh = NativeHardwareDisplayPolicies.number(summary["wallEnergyWh"])
+        VStack(alignment: .leading, spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { MicroLabel(rangeDisplayName); Spacer(minLength: 12); rangeStops }
+                VStack(alignment: .leading, spacing: 8) { rangeStops; MicroLabel(rangeDisplayName) }
             }
-            NativeCard(title: "Integrated energy per bucket (Wh)") {
-                NativeLineChart(
-                    series: energyBucketSeries,
-                    height: 195,
-                    showPoints: points.count <= 48,
-                    includeZero: true,
-                    xFormat: { formatAxisDate($0) },
-                    yFormat: { String(format: "%.2f Wh", $0) }
-                )
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    NativeNumberText(text: used.value, font: Theme.readout(54), color: history.isNull ? Theme.faint : Theme.ink)
+                    MicroLabel(used.unit + " used", size: 11)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Energy used, " + rangeDisplayName.lowercased())
+                .accessibilityValue(used.value + " " + used.unit)
+                Spacer(minLength: 16)
+                if !history.isNull {
+                    Text(cost(wallWh) + " · " + NativeHardwareDisplayPolicies.formatEnergyWh(wallWh) + " at the wall")
+                        .font(Theme.ui(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
+                }
             }
-            historyBucketTableCard(points: points)
-            Text("Missing observations remain gaps. \(points.count) buckets in view · ~\(ByteCountFormatter.string(fromByteCount: Int64(history["storage"]["bytes"].double), countStyle: .file)) stored in SQLite.")
-                .font(Theme.ui(11)).foregroundStyle(Theme.muted)
+            .padding(.top, 2)
+            customRange.padding(.top, 10)
+        }
+        if let historyError { Notice(text: historyError, tone: .fail).accessibilityLabel("Error: " + historyError) }
+        ReadoutStrip(minimum: 130) {
+            loadReadout("Average load", summary["avgSystemLoadW"])
+            loadReadout("Minimum", summary["minSystemLoadW"])
+            loadReadout("95th percentile", summary["p95SystemLoadW"])
+            loadReadout("Peak", summary["peakSystemLoadW"])
+        }
+        Band(title: "Power") { statisticStops } content: {
+            Well {
+                NativeLineChart(series: powerSeries(kind: statistic), height: 220, showPoints: points.count <= 48, includeZero: true,
+                                xFormat: { formatAxisDate($0) }, yFormat: { String(format: "%.1f W", $0) })
+            }
+        }
+        Band("Energy per bucket") {
+            Well {
+                NativeLineChart(series: energyBucketSeries, height: 195, showPoints: points.count <= 48, includeZero: true,
+                                xFormat: { formatAxisDate($0) }, yFormat: { String(format: "%.2f Wh", $0) })
+            }
+        }
+        bucketLedger(points)
+    }
+
+    private func loadReadout(_ label: String, _ value: JSONValue) -> some View {
+        let watts = NativeHardwareDisplayPolicies.number(value)
+        return Readout(label: label, value: figure(watts), unit: "W", size: .medium, color: watts == nil ? Theme.faint : Theme.ink)
+    }
+
+    private func bucketLedger(_ points: [JSONValue]) -> some View {
+        let recent = Array(points.suffix(60).reversed())
+        let stored = ByteCountFormatter.string(fromByteCount: Int64(history["storage"]["bytes"].double), countStyle: .file)
+        return Band(title: "Buckets", spacing: 0) {
+            if !recent.isEmpty { Text("\(recent.count) most recent of \(points.count)").font(Theme.ui(11.5)).foregroundStyle(Theme.muted) }
+        } content: {
+            LedgerHead {
+                MicroLabel("Bucket").frame(maxWidth: .infinity, alignment: .leading)
+                MicroLabel("Avg W").frame(width: 64, alignment: .trailing)
+                MicroLabel("Peak W").frame(width: 64, alignment: .trailing)
+                MicroLabel("Wall W").frame(width: 64, alignment: .trailing)
+                MicroLabel("Energy").frame(width: 88, alignment: .trailing)
+                MicroLabel("Cost").frame(width: 72, alignment: .trailing)
+            }
+            if recent.isEmpty {
+                if history.isNull && historyError == nil {
+                    Text("Reading recorded history").font(Theme.ui(12.5)).foregroundStyle(Theme.muted).padding(.vertical, 20)
+                } else {
+                    Blank(icon: "clock", title: "No buckets recorded in this range yet",
+                          detail: "Live power samples are persisted every 10 seconds and rolled up automatically.")
+                }
+            }
+            ForEach(Array(recent.enumerated()), id: \.offset) { _, point in
+                LedgerRow(minHeight: 28) {
+                    HStack(spacing: 12) {
+                        Text(bucketStamp(point["mean"]["date"].double)).font(Theme.mono(11.5)).foregroundStyle(Theme.ink).lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        bucketFigure(point["mean"]["systemLoadW"], Theme.ink)
+                        bucketFigure(point["max"]["systemLoadW"], Theme.dim)
+                        bucketFigure(point["mean"]["wallPowerW"], Theme.dim)
+                        EnergyFigure(NativeHardwareDisplayPolicies.formatEnergyWh(NativeHardwareDisplayPolicies.number(point["systemEnergyWh"])))
+                            .frame(width: 88, alignment: .trailing)
+                        Text(cost(NativeHardwareDisplayPolicies.number(point["wallEnergyWh"]))).font(Theme.readout(17)).foregroundStyle(Theme.muted)
+                            .frame(width: 72, alignment: .trailing)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            if !history.isNull {
+                Text("Missing observations remain gaps. \(points.count) buckets in view · about \(stored) stored.")
+                    .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).padding(.top, 12)
+            }
         }
     }
 
-    private func historyBucketTableCard(points: [JSONValue]) -> some View {
-        let recentPoints = Array(points.suffix(60).reversed())
-        return Card(padding: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Recorded History Buckets")
-                            .font(Theme.ui(14, weight: .semibold))
-                        Text("Showing \(recentPoints.count) most recent time buckets in \(rangeDisplayName.lowercased()). Export CSV for full raw & sensor series.")
-                            .font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                    }
-                    Spacer()
-                    Button {
-                        exportHistory()
-                    } label: {
-                        HStack(spacing: 6) {
-                            NativeIcon("download", size: 12, strokeWidth: 1.65)
-                            Text("Export \(points.count) Buckets (CSV)")
-                        }
-                    }
-                    .buttonStyle(T3Button(.outline))
-                    .disabled(points.isEmpty)
-                }
-                .padding(.horizontal, 18).padding(.vertical, 16)
+    private func bucketFigure(_ value: JSONValue, _ color: Color) -> some View {
+        Text(figure(NativeHardwareDisplayPolicies.number(value), missing: "—")).font(Theme.readout(17)).foregroundStyle(color)
+            .frame(width: 64, alignment: .trailing)
+    }
 
-                Rectangle().fill(Theme.border).frame(height: 1)
-
-                HStack(spacing: 10) {
-                    Text("Bucket Time").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("Avg Load").frame(width: 82, alignment: .trailing)
-                    Text("Peak Load").frame(width: 82, alignment: .trailing)
-                    Text("Avg Wall").frame(width: 82, alignment: .trailing)
-                    Text("Energy Used").frame(width: 92, alignment: .trailing)
-                    Text("Est. Cost").frame(width: 76, alignment: .trailing)
-                }
-                .font(Theme.mono(10.5, weight: .semibold))
-                .foregroundStyle(Theme.muted)
-                .padding(.horizontal, 18).padding(.vertical, 11)
-                .background(Theme.well)
-
-                if recentPoints.isEmpty {
-                    NativeEmptyState(title: "No buckets recorded in this range yet", detail: "Live power samples are persisted every 10 seconds and rolled up automatically.")
-                        .padding(.vertical, 20)
-                } else {
-                    ForEach(Array(recentPoints.enumerated()), id: \.offset) { _, pt in
-                        let ts = pt["mean"]["date"].double
-                        let avgLoad = NativeHardwareDisplayPolicies.number(pt["mean"]["systemLoadW"])
-                        let peakLoad = NativeHardwareDisplayPolicies.number(pt["max"]["systemLoadW"])
-                        let avgWall = NativeHardwareDisplayPolicies.number(pt["mean"]["wallPowerW"])
-                        let sysWh = NativeHardwareDisplayPolicies.number(pt["systemEnergyWh"])
-                        let wallWh = NativeHardwareDisplayPolicies.number(pt["wallEnergyWh"])
-                        Rectangle().fill(Theme.border).frame(height: 1)
-                        HStack(spacing: 10) {
-                            Text(Date(timeIntervalSince1970: ts / 1000).formatted(date: .abbreviated, time: .standard))
-                                .font(Theme.mono(11.5))
-                                .foregroundStyle(Theme.ink)
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(NativeHardwareDisplayPolicies.formatWatts(avgLoad))
-                                .font(Theme.mono(11.5, weight: .medium))
-                                .foregroundStyle(Theme.ink)
-                                .frame(width: 82, alignment: .trailing)
-                            Text(NativeHardwareDisplayPolicies.formatWatts(peakLoad))
-                                .font(Theme.mono(11.5))
-                                .foregroundStyle(Theme.dim)
-                                .frame(width: 82, alignment: .trailing)
-                            Text(NativeHardwareDisplayPolicies.formatWatts(avgWall))
-                                .font(Theme.mono(11.5))
-                                .foregroundStyle(Theme.dim)
-                                .frame(width: 82, alignment: .trailing)
-                            Text(NativeHardwareDisplayPolicies.formatEnergyWh(sysWh))
-                                .font(Theme.mono(11.5, weight: .medium))
-                                .foregroundStyle(Theme.ink)
-                                .frame(width: 92, alignment: .trailing)
-                            Text(NativeHardwareDisplayPolicies.formatCost(wh: wallWh, ratePerKwh: ratePerKwh, currency: currency))
-                                .font(Theme.mono(11.5))
-                                .foregroundStyle(Theme.muted)
-                                .frame(width: 76, alignment: .trailing)
-                        }
-                        .padding(.horizontal, 18).padding(.vertical, 10)
-                    }
-                }
-            }
-        }
+    private func bucketStamp(_ ms: Double) -> String {
+        let date = Date(timeIntervalSince1970: ms / 1000)
+        if ["30m", "1h", "6h"].contains(historyRange) { return date.formatted(date: .omitted, time: .standard) }
+        return date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 
     private func formatAxisDate(_ ms: Double) -> String {
@@ -823,19 +573,19 @@ struct NativeEnergyPage: View {
         if ["30m", "1h", "6h"].contains(historyRange) {
             return d.formatted(date: .omitted, time: .shortened)
         }
-        return d.formatted(date: .abbreviated, time: .shortened)
+        return d.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 
     private func powerSeries(kind: String) -> [NativeChartSeries] {
         let samples = NativeEnergyHistory.discontinuousSamples(history["points"].array, kind: kind)
-        var defs: [(id: String, label: String, key: String)] = [
-            ("systemLoad", "System Load (W)", "systemLoadW"),
-            ("wallPower", "Wall Power (W)", "wallPowerW")
+        var defs: [(id: String, label: String, key: String, color: Color)] = [
+            ("systemLoad", "System load", "systemLoadW", EnergySeries.load),
+            ("wallPower", "Wall power", "wallPowerW", EnergySeries.wall)
         ]
         if batteryPresent {
-            defs.append(("batteryPower", "Battery Flow (W)", "batteryPowerW"))
+            defs.append(("batteryPower", "Battery flow", "batteryPowerW", EnergySeries.flow))
         } else {
-            defs.append(("adapterLoss", "PSU Conversion Loss (W)", "adapterLossW"))
+            defs.append(("adapterLoss", "Conversion loss", "adapterLossW", EnergySeries.flow))
         }
         return defs.map { def in
             NativeChartSeries(
@@ -843,7 +593,8 @@ struct NativeEnergyPage: View {
                 label: def.label,
                 points: samples.map { s in
                     NativeChartPoint(x: s["date"].double, y: NativeHardwareDisplayPolicies.number(s[def.key]))
-                }
+                },
+                color: def.color
             )
         }
     }
@@ -853,199 +604,178 @@ struct NativeEnergyPage: View {
         return [
             NativeChartSeries(
                 id: "systemWh",
-                label: "System Energy (Wh)",
+                label: "System energy",
                 points: points.map { pt in
                     NativeChartPoint(x: pt["mean"]["date"].double, y: NativeHardwareDisplayPolicies.number(pt["systemEnergyWh"]))
-                }
+                },
+                color: EnergySeries.load
             ),
             NativeChartSeries(
                 id: "wallWh",
-                label: "Wall Energy (Wh)",
+                label: "Wall energy",
                 points: points.map { pt in
                     NativeChartPoint(x: pt["mean"]["date"].double, y: NativeHardwareDisplayPolicies.number(pt["wallEnergyWh"]))
-                }
+                },
+                color: EnergySeries.wall
             )
         ]
     }
 
-    // MARK: - Tab 3: Electrical Rails & Sensors
+    // MARK: - Rails and sensors
 
-    private var sensorsTab: some View {
-        let peaks = sessionStats["sensorPeaks"]
-        let avgs = sessionStats["sensorAverages"]
-        let allSensors = snapshot["sensors"].array
-        let powerCount = allSensors.filter { $0["unit"].string == "W" }.count
-        let voltCount = allSensors.filter { $0["unit"].string == "V" }.count
-        let currCount = allSensors.filter { $0["unit"].string == "A" }.count
-
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Electrical Rails & AppleSMC Channels")
-                        .font(Theme.ui(18, weight: .semibold))
-                        .accessibilityAddTraits(.isHeader)
-                    Text("\(allSensors.count) live hardware channels (\(powerCount) Power W · \(voltCount) Voltage V · \(currCount) Current A)")
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                }
-                Spacer()
+    private var sensorsView: some View {
+        let all = snapshot["sensors"].array
+        let power = all.filter { $0["unit"].string == "W" }.count
+        let volts = all.filter { $0["unit"].string == "V" }.count
+        let amps = all.filter { $0["unit"].string == "A" }.count
+        let categories = ["All", "Favorites", "Telemetry", "System Power", "Processor & SoC", "Rails & Ports", "Power (W)", "Voltage (V)", "Current (A)"]
+        return Band(title: "Channels", spacing: 12) {
+            if !all.isEmpty {
+                Text("\(all.count) live · \(power) power · \(volts) voltage · \(amps) current").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
             }
+        } content: {
             HStack(spacing: 10) {
-                T3Field(placeholder: "Filter by SMC key (PMVR, PSTR, VD0R) or rail description…", text: $query, mono: true, leadingIcon: "search")
-                NativeMenuSelect(
-                    title: "Sensor category",
-                    selection: $group,
-                    options: ["All", "Favorites", "Telemetry", "System Power", "Processor & SoC", "Rails & Ports", "Power (W)", "Voltage (V)", "Current (A)"].map { ($0, $0) },
-                    width: 175
+                Entry(placeholder: "Filter by key (PMVR, PSTR, VD0R) or rail", text: $query, mono: true, icon: "search")
+                    .accessibilityLabel("Filter sensors")
+                Pick(title: "Sensor category", selection: $group, options: categories.map { ($0, $0) }, width: 175)
+            }
+            ViewThatFits(in: .horizontal) {
+                sensorLedger(category: true).frame(minWidth: 680, idealWidth: 680, maxWidth: .infinity)
+                sensorLedger(category: false)
+            }
+        }
+    }
+
+    private func sensorLedger(category: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LedgerHead {
+                Color.clear.frame(width: 22, height: 1)
+                MicroLabel("Channel").frame(maxWidth: .infinity, alignment: .leading)
+                if category { MicroLabel("Category").frame(width: 130, alignment: .leading) }
+                MicroLabel("Live").frame(width: 92, alignment: .trailing)
+                MicroLabel("Mean").frame(width: 64, alignment: .trailing)
+                MicroLabel("Peak").frame(width: 64, alignment: .trailing)
+            }
+            ForEach(sensorRows, id: \.self["id"]) { sensor in sensorRow(sensor, category: category) }
+            if sensorRows.isEmpty {
+                if snapshot.isNull {
+                    Text("Reading electrical sensors").font(Theme.ui(12.5)).foregroundStyle(Theme.muted).padding(.vertical, 20)
+                } else {
+                    Blank(icon: "search", title: "No matching electrical sensors", detail: "Try another category or search term.")
+                }
+            }
+        }
+    }
+
+    private func sensorRow(_ sensor: JSONValue, category: Bool) -> some View {
+        let id = sensor["id"].string, unit = sensor["unit"].string
+        let favorite = favorites.contains(id)
+        return LedgerRow(minHeight: 28) {
+            HStack(spacing: 12) {
+                Button {
+                    if !favorites.insert(id).inserted { favorites.remove(id) }
+                    if !runtime.paths.readOnly {
+                        UserDefaults.standard.set(Array(favorites).sorted(), forKey: "uniapi.energy.favorites")
+                    }
+                } label: {
+                    NativeIcon(favorite ? "star.fill" : "star", size: 13, strokeWidth: 1.65)
+                        .foregroundStyle(favorite ? Theme.ink : Theme.faint)
+                        .frame(width: 22, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).pointingHand()
+                .accessibilityLabel(favorite ? "Remove \(id) from favorites" : "Add \(id) to favorites")
+                .help(favorite ? "Remove from favorites" : "Add to favorites")
+                HStack(spacing: 8) {
+                    Tag(id).frame(width: 74, alignment: .leading)
+                    Text(NativeHardwareDisplayPolicies.energySensorName(id)).font(Theme.ui(12.5)).foregroundStyle(Theme.ink).lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if category {
+                    Text(NativeHardwareDisplayPolicies.energySensorGroup(id, unit: unit)).font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
+                        .lineLimit(1).frame(width: 130, alignment: .leading)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    NativeNumberText(text: figure(NativeHardwareDisplayPolicies.number(sensor["value"]), "%.2f", missing: "—"), font: Theme.readout(17))
+                    MicroLabel(unit).frame(width: 12, alignment: .leading)
+                }
+                .frame(width: 92, alignment: .trailing)
+                Text(figure(NativeHardwareDisplayPolicies.number(sessionStats["sensorAverages"][id]), "%.2f", missing: "—"))
+                    .font(Theme.readout(17)).foregroundStyle(Theme.dim).frame(width: 64, alignment: .trailing)
+                Text(figure(NativeHardwareDisplayPolicies.number(sessionStats["sensorPeaks"][id]), "%.2f", missing: "—"))
+                    .font(Theme.readout(17)).foregroundStyle(Theme.muted).frame(width: 64, alignment: .trailing)
+            }
+        }
+    }
+
+    // MARK: - Preferences
+
+    private var preferencesPanel: some View {
+        let storage = history["storage"]
+        let retention = "10-second samples for \(storage["rawDays"].isNull ? 7 : storage["rawDays"].int) days, minutes for \(storage["minuteDays"].isNull ? 90 : storage["minuteDays"].int) days, hours for \(storage["hourlyDays"].isNull ? 365 : storage["hourlyDays"].int) days. Daily totals stay."
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("Energy preferences").font(Theme.display(17)).foregroundStyle(Theme.ink)
+                .accessibilityAddTraits(.isHeader).padding(.bottom, 8)
+            if let error { Notice(text: error, tone: .fail).padding(.bottom, 4) }
+            OptionRow(title: "Sidebar reading", detail: "The live figure beside Energy in the sidebar.") {
+                Pick(
+                    title: "Sidebar badge metric",
+                    selection: Binding(
+                        get: { prefs["badgeMetric"].string.isEmpty ? "systemLoad" : prefs["badgeMetric"].string },
+                        set: { value in Task { await operation("preferences", ["badgeMetric": .string(value)]) } }
+                    ),
+                    options: [
+                        ("systemLoad", "System load"),
+                        ("wallPower", "Wall power"),
+                        ("batteryNet", "Battery net flow"),
+                        ("none", "Hidden")
+                    ],
+                    width: 170
                 )
             }
-            Card(padding: 0) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 12) {
-                        Color.clear.frame(width: 22, height: 1)
-                        Text("Channel / Description").frame(maxWidth: .infinity, alignment: .leading)
-                        Text("Category").frame(width: 130, alignment: .leading)
-                        Text("Live Reading").frame(width: 96, alignment: .trailing)
-                        Text("Mean").frame(width: 90, alignment: .trailing)
-                        Text("Peak").frame(width: 90, alignment: .trailing)
-                    }
-                    .font(Theme.mono(10.5, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
-                    .padding(.horizontal, 18).padding(.vertical, 12)
-                    .background(Theme.well)
-
-                    ForEach(sensorRows, id: \.self["id"]) { sensor in
-                        let id = sensor["id"].string
-                        let unit = sensor["unit"].string
-                        let cat = NativeHardwareDisplayPolicies.energySensorGroup(id, unit: unit)
-                        Rectangle().fill(Theme.border).frame(height: 1)
-                        HStack(spacing: 12) {
-                            Button {
-                                if !favorites.insert(id).inserted { favorites.remove(id) }
-                                if !runtime.paths.readOnly {
-                                    UserDefaults.standard.set(Array(favorites).sorted(), forKey: "uniapi.energy.favorites")
-                                }
-                            } label: {
-                                NativeIcon("star", size: 13, strokeWidth: 1.65)
-                                    .foregroundStyle(favorites.contains(id) ? Theme.warnFg : Theme.muted)
-                            }
-                            .buttonStyle(.plain).frame(width: 22)
-
-                            HStack(spacing: 8) {
-                                Text(id)
-                                    .font(Theme.mono(11, weight: .semibold))
-                                    .foregroundStyle(Theme.ink)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Theme.well, in: RoundedRectangle(cornerRadius: 4))
-                                Text(NativeHardwareDisplayPolicies.energySensorName(id))
-                                    .font(Theme.ui(12.5, weight: .medium))
-                                    .foregroundStyle(Theme.ink)
-                                    .lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                            Text(cat)
-                                .font(Theme.ui(11.5))
-                                .foregroundStyle(Theme.muted)
-                                .lineLimit(1)
-                                .frame(width: 130, alignment: .leading)
-
-                            NativeNumberText(
-                                text: formatSensorValue(NativeHardwareDisplayPolicies.number(sensor["value"]), unit: unit),
-                                font: Theme.mono(13, weight: .semibold)
-                            )
-                            .frame(width: 96, alignment: .trailing)
-
-                            Text(formatSensorValue(NativeHardwareDisplayPolicies.number(avgs[id]), unit: unit))
-                                .font(Theme.mono(11.5))
-                                .foregroundStyle(Theme.dim)
-                                .frame(width: 90, alignment: .trailing)
-
-                            Text(formatSensorValue(NativeHardwareDisplayPolicies.number(peaks[id]), unit: unit))
-                                .font(Theme.mono(11.5))
-                                .foregroundStyle(Theme.muted)
-                                .frame(width: 90, alignment: .trailing)
-                        }
-                        .padding(.horizontal, 18).padding(.vertical, 11)
-                    }
-                    if sensorRows.isEmpty {
-                        NativeEmptyState(title: "No matching electrical sensors", detail: "Try another category or search term.")
-                            .padding(.vertical, 20)
-                    }
+            OptionRow(title: "Electricity tariff", detail: "Prices every cost on this page.") {
+                HStack(spacing: 8) {
+                    Entry(placeholder: "$", text: $currencyText, mono: true, width: 52).accessibilityLabel("Currency")
+                    Entry(placeholder: "0.30", text: $rateText, mono: true, width: 78, onSubmit: saveTariff).accessibilityLabel("Rate per kilowatt hour")
+                    Text("per kWh").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
                 }
             }
+            OptionRow(title: "History on disk", detail: retention, ruled: false) {
+                Text(history.isNull ? "Reading" : "about " + ByteCountFormatter.string(fromByteCount: Int64(storage["bytes"].double), countStyle: .file))
+                    .font(Theme.mono(12)).foregroundStyle(history.isNull ? Theme.muted : Theme.ink)
+            }
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button("Close") { showsPreferences = false }.buttonStyle(Press(.secondary)).keyboardShortcut(.cancelAction)
+                Button("Save tariff", action: saveTariff).buttonStyle(Press(.primary)).disabled(pending || runtime.paths.readOnly)
+            }
+            .padding(.top, 14)
+        }
+        .padding(20).frame(width: 460)
+        .background(Theme.popover).foregroundStyle(Theme.ink).font(Theme.ui(13)).tint(Theme.signal)
+    }
+
+    private func saveTariff() {
+        guard !pending, !runtime.paths.readOnly else { return }
+        if let rate = Double(rateText.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")) {
+            Task { await operation("preferences", ["ratePerKwh": .number(rate), "currency": .string(currencyText)]) }
+        } else {
+            error = "Enter a valid number for electricity rate per kWh"
         }
     }
 
-    private func formatSensorValue(_ value: Double?, unit: String) -> String {
-        guard let value, value.isFinite else { return "—" }
-        return String(format: "%.2f %@", value, unit)
+    // MARK: - Formatting
+
+    private func figure(_ value: Double?, _ format: String = "%.1f", missing: String = "--") -> String {
+        guard let value, value.isFinite else { return missing }
+        return String(format: format, value)
     }
 
-    // MARK: - Tab 4: Preferences
-
-    private var preferencesTab: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Energy Preferences")
-                    .font(Theme.ui(20, weight: .semibold))
-                    .accessibilityAddTraits(.isHeader)
-                Text("Configure sidebar live watt badge, electricity tariff for cost calculations, and SQLite retention.")
-                    .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            }
-            .padding(.bottom, 12)
-
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 50, alignment: .topLeading), count: contentWidth >= 700 ? 2 : 1), alignment: .leading, spacing: 0) {
-                settingRow("Sidebar badge metric", "Choose which live watt reading is shown next to Energy in the sidebar.") {
-                    NativeMenuSelect(
-                        title: "Sidebar badge metric",
-                        selection: Binding(
-                            get: { prefs["badgeMetric"].string.isEmpty ? "systemLoad" : prefs["badgeMetric"].string },
-                            set: { value in Task { await operation("preferences", ["badgeMetric": .string(value)]) } }
-                        ),
-                        options: [
-                            ("systemLoad", "System load (W)"),
-                            ("wallPower", "Wall power (W)"),
-                            ("batteryNet", "Battery net flow (W)"),
-                            ("none", "Hidden")
-                        ],
-                        width: 185
-                    )
-                }
-                settingRow("Electricity tariff", "Used to calculate window, since-boot, all-time, and projected monthly electricity costs.") {
-                    HStack(spacing: 8) {
-                        T3Field(placeholder: "$", text: $currencyText, mono: true).frame(width: 64)
-                        T3Field(placeholder: "0.30", text: $rateText, mono: true).frame(width: 96)
-                        Text("per kWh").font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                        Button("Save") {
-                            if let rate = Double(rateText.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")) {
-                                Task { await operation("preferences", ["ratePerKwh": .number(rate), "currency": .string(currencyText)]) }
-                            } else {
-                                error = "Enter a valid number for electricity rate per kWh"
-                            }
-                        }.disabled(pending || runtime.paths.readOnly)
-                    }
-                }
-                settingRow("History retention & storage", "Detailed 10-second samples for up to \(history["storage"]["rawDays"].isNull ? 7 : history["storage"]["rawDays"].int) days, minute summaries for \(history["storage"]["minuteDays"].isNull ? 90 : history["storage"]["minuteDays"].int) days, and hourly summaries for \(history["storage"]["hourlyDays"].isNull ? 365 : history["storage"]["hourlyDays"].int) days. Daily Wh totals and peaks stay indefinitely.") {
-                    HStack(spacing: 12) {
-                        Text(history.isNull ? "Reading…" : "~" + ByteCountFormatter.string(fromByteCount: Int64(history["storage"]["bytes"].double), countStyle: .file))
-                            .font(Theme.mono(13, weight: .medium))
-                        Button("Export CSV") { exportHistory() }
-                            .disabled(history["points"].array.isEmpty)
-                    }
-                }
-            }
-        }
-    }
-
-    private func settingRow<Control: View>(_ title: String, _ description: String, @ViewBuilder control: () -> Control) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(Theme.ui(14, weight: .medium))
-            Text(description).font(Theme.ui(12.5)).foregroundStyle(Theme.muted).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
-            control()
-        }
-        .padding(.vertical, 24)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+    /// The same thresholds as `formatEnergyWh`, with the unit kept apart so
+    /// it can be set as an engraved label.
+    private func energyParts(_ wh: Double?) -> (value: String, unit: String) {
+        guard let wh, wh.isFinite else { return ("--", "Wh") }
+        if abs(wh) >= 1000 { return (String(format: "%.2f", wh / 1000.0), "kWh") }
+        return (String(format: abs(wh) >= 10 ? "%.1f" : "%.2f", wh), "Wh")
     }
 
     // MARK: - Data Operations
@@ -1112,5 +842,61 @@ struct NativeEnergyPage: View {
             guard response == .OK, let url = panel.url else { return }
             do { try Data(csv.utf8).write(to: url, options: .atomic) } catch { self.error = error.localizedDescription }
         }
+    }
+}
+
+/// The hero meter: the kit `Scale` with the chosen window's range shaded, a
+/// signal needle on the live value and its graduations labelled in watts.
+private struct EnergyGauge: View {
+    var value: Double?
+    var maximum: Double
+    var spread: ClosedRange<Double>?
+    var endLabel: String
+    @Environment(\.nativeReducedMotion) private var reduceMotion
+    @Environment(\.nativeMotionVisible) private var visible
+    private var fraction: Double { NativeMotion.fraction((value ?? 0) / max(maximum, 0.001)) }
+    private var shaded: ClosedRange<Double>? {
+        guard let spread, maximum > 0 else { return nil }
+        return NativeMotion.fraction(spread.lowerBound / maximum)...NativeMotion.fraction(spread.upperBound / maximum)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Scale(fraction: fraction, height: 6, ticks: true, spread: shaded)
+                .overlay(alignment: .topLeading) {
+                    GeometryReader { geometry in
+                        if value != nil {
+                            Theme.signal.frame(width: 2, height: 13)
+                                .offset(x: min(max(0, geometry.size.width - 2), max(0, geometry.size.width * fraction - 1)), y: -3)
+                                .animation(reduceMotion || !visible ? nil : NativeMotion.barUpdate, value: fraction)
+                        }
+                    }
+                }
+            HStack(spacing: 0) {
+                ForEach(0..<4, id: \.self) { index in
+                    Text(String(format: "%.0f", maximum * Double(index) / 4)).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .overlay(alignment: .trailing) { Text(endLabel) }
+            .font(Theme.mono(10.5)).foregroundStyle(Theme.muted)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// A formatted quantity such as "312.4 Wh": condensed numerals with the unit
+/// following as an engraved label. Values without a unit stay whole.
+private struct EnergyFigure: View {
+    var text: String
+    var color: Color = Theme.ink
+    init(_ text: String, color: Color = Theme.ink) { self.text = text; self.color = color }
+    var body: some View {
+        let parts = text.split(separator: " ", maxSplits: 1).map(String.init)
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(parts.first ?? text).font(Theme.readout(17)).foregroundStyle(parts.first == "—" ? Theme.faint : color)
+            if parts.count == 2 { MicroLabel(parts[1]) }
+        }
+        .lineLimit(1)
+        .accessibilityElement(children: .ignore).accessibilityLabel(text)
     }
 }
