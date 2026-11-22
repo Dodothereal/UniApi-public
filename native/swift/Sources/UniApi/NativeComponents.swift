@@ -19,6 +19,7 @@ struct NativePresentedValue: Identifiable {
 struct NativePage<Content: View>: View {
     var title: String
     var subtitle: String
+    var eyebrow: String
     var maxWidth: CGFloat
     var readiness: NativePageReadiness
     var showsHeader: Bool
@@ -29,17 +30,18 @@ struct NativePage<Content: View>: View {
     private let content: Content
     private let actions: AnyView
 
-    init(title: String, subtitle: String = "", maxWidth: CGFloat = 820, readiness: NativePageReadiness = .pending, showsHeader: Bool = true, backTitle: String = "Back", back: (() -> Void)? = nil,
+    init(title: String, subtitle: String = "", eyebrow: String = "", maxWidth: CGFloat = 960, readiness: NativePageReadiness = .pending, showsHeader: Bool = true, backTitle: String = "Back", back: (() -> Void)? = nil,
          @ViewBuilder content: () -> Content) {
-        self.init(title: title, subtitle: subtitle, maxWidth: maxWidth, readiness: readiness, showsHeader: showsHeader, backTitle: backTitle, back: back,
+        self.init(title: title, subtitle: subtitle, eyebrow: eyebrow, maxWidth: maxWidth, readiness: readiness, showsHeader: showsHeader, backTitle: backTitle, back: back,
                   actions: { EmptyView() }, content: content)
     }
 
-    init<Actions: View>(title: String, subtitle: String = "", maxWidth: CGFloat = 820,
+    init<Actions: View>(title: String, subtitle: String = "", eyebrow: String = "", maxWidth: CGFloat = 960,
          readiness: NativePageReadiness = .pending, showsHeader: Bool = true, backTitle: String = "Back", back: (() -> Void)? = nil, @ViewBuilder actions: () -> Actions,
          @ViewBuilder content: () -> Content) {
         self.title = title
         self.subtitle = subtitle
+        self.eyebrow = eyebrow
         self.maxWidth = maxWidth
         self.readiness = readiness
         self.showsHeader = showsHeader
@@ -56,14 +58,14 @@ struct NativePage<Content: View>: View {
                 if let backAction {
                     Button(action: backAction) {
                         HStack(spacing: 6) { NativeIcon("arrow-left", size: 14); Text(backTitle) }
-                    }.buttonStyle(T3Button(.ghost))
+                    }.buttonStyle(Press(.quiet)).padding(.leading, -8)
                 }
                 if showsHeader {
-                    PageHeader(title: title, subtitle: subtitle.isEmpty ? nil : subtitle) { actions }
+                    PageHeader(title: title, subtitle: subtitle.isEmpty ? nil : subtitle, eyebrow: eyebrow) { actions }
                 }
                 content
             }
-            .padding(.horizontal, density.pageMargin).padding(.top, density.pageGap).padding(.bottom, 44)
+            .padding(.horizontal, density.pageMargin).padding(.top, density.pageMargin + 4).padding(.bottom, 56)
             .frame(width: max(0, min(maxWidth, viewport.size.width)), alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
             .nativeEntrance(.page)
@@ -72,8 +74,8 @@ struct NativePage<Content: View>: View {
         .background(Theme.bg)
         .foregroundStyle(Theme.ink)
         .font(Theme.ui(13))
-        .buttonStyle(T3Button(.outline))
-        .tint(Theme.accent)
+        .buttonStyle(Press(.secondary))
+        .tint(Theme.signal)
         .nativeMotionVisibility()
         .background(alignment: .topLeading) {
             if let visit, NativeUIReadiness.shared.enabled {
