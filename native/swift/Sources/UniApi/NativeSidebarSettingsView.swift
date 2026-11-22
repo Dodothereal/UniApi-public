@@ -17,22 +17,21 @@ struct NativeSidebarSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SectionLabel("Sidebar")
-            SettingRow(title: "Show sidebar", desc: "Command-B also toggles the sidebar.") {
+            SettingRow(title: "Show sidebar") {
                 T3Switch(isOn: $sidebarOpen).accessibilityLabel("Show sidebar")
             }
-            SettingRow(title: "Width", desc: "Adjust the sidebar from 180 to 320 points.") {
+            SettingRow(title: "Width") {
                 HStack(spacing: 8) {
                     Slider(value: $sidebarWidth, in: 180...320).frame(width: 140).accessibilityLabel("Sidebar width")
                     Text("\(Int(NativeSidebarLayout.width(sidebarWidth))) pt").font(Theme.mono(11)).frame(width: 48, alignment: .trailing)
                 }
             }
-            SettingRow(title: "Show badges", desc: "Show counts and battery percentage beside pages.") {
+            SettingRow(title: "Counts beside pages") {
                 T3Switch(isOn: $sidebarBadges).accessibilityLabel("Show sidebar badges")
             }
-            DisclosureGroup("Edit sidebar") {
+            DisclosureGroup("Pages and order") {
               VStack(alignment: .leading, spacing: 8) {
-                Text("Drag onto a row: moving up places it before that row; moving down places it after. Use Move for keyboard access. Pages stay within their section.")
+                Text("Drag to reorder within a section.")
                     .font(Theme.ui(12)).foregroundStyle(Theme.muted)
                 VStack(alignment: .leading, spacing: 7) {
                     anchoredRow(.home)

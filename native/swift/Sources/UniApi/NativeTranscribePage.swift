@@ -39,9 +39,7 @@ struct NativeTranscribePage: View {
     var body: some View {
         NativePage(title: selected == nil ? "Transcribe" : (detail["title"].string.isEmpty ? (detail["source"].string.isEmpty ? "Transcription" : detail["source"].string) : detail["title"].string), subtitle: selected == nil ? "Private, on-device transcription with Whisper large-v3-turbo. Install the optional model once; it runs only for a transcription job." : "", readiness: pageError != nil ? .failed : status.isNull || selected != nil && detail.isNull ? .pending : .ready, backTitle: "Transcripts", back: selected == nil ? nil : back, actions: {
             if selected == nil {
-                Button { Task { await reload() } } label: {
-                    HStack(spacing: 6) { NativeIcon("rotate-cw", size: 12); Text("Reload") }
-                }.buttonStyle(T3Button(.outline))
+                T3IconButton(icon: "rotate-cw", help: "Reload") { Task { await reload() } }
             } else { transcriptActions }
         }) {
             if let pageError { NativeError(message: pageError) }
@@ -84,72 +82,61 @@ struct NativeTranscribePage: View {
         }
         .nativePageActivity(reads: reads, suspended: { dropTarget = false })
     }
-    private var input: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            localModelSetup
-            if !status.isNull && !status["ytdlp"].bool {
-                Text("Links need optional yt-dlp. Local WAV, MP3 and M4A files use the built-in decoder; other formats may need ffmpeg.")
-                    .font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            }
-            Card {
-                VStack(alignment: .leading, spacing: 10) {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) { sourceField; sourceActions }
-                        VStack(alignment: .leading, spacing: 8) { sourceField; HStack(spacing: 8) { sourceActions } }
-                    }
-                    Text("Drop audio files on this card. Several at once are fine. Audio stays on this Mac; the local model is released from memory when its job finishes." + (status["runs"].int > 0 ? " Time estimates are learned from \(status["runs"].int) earlier runs." : ""))
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            VStack(spacing: 20) {
-                SettingRow(title: "Language", desc: "Forced when set; Auto lets the recognizer detect it per chunk.") {
-                    Menu {
-                        ForEach(languages, id: \.0) { id, label in Button(label) { language = id } }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text(languages.first(where: { $0.0 == language })?.1 ?? language)
-                            Spacer(minLength: 0)
-                            NativeIcon("chevron-down", size: 12)
-                        }.font(Theme.ui(12)).foregroundStyle(Theme.dim).padding(.horizontal, 11).frame(width: 150, height: 30)
-                            .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1))
-                    }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().pointingHand().accessibilityLabel("Language")
-                }
-                SettingRow(title: "Telegram when done", desc: "One ping per transcript. Configure and enable Telegram delivery in Settings first.") {
-                    T3Switch(isOn: $notify).accessibilityLabel("Telegram when done")
-                }
-            }
-            Rectangle().fill(Theme.border).frame(height: 1).accessibilityHidden(true)
-        }
+    private var languageMenu: some View {
+        Menu {
+            ForEach(languages, id: \.0) { id, label in Button(label) { language = id } }
+        } label: {
+            HStack(spacing: 6) {
+                NativeIcon("globe", size: 13)
+                Text(languages.first(where: { $0.0 == language })?.1 ?? language)
+                NativeIcon("chevron-down", size: 10)
+            }.font(Theme.ui(12.5)).foregroundStyle(Theme.dim).frame(height: 28).contentShape(Rectangle())
+        }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().pointingHand()
+            .help("Language. Auto detects it per chunk.").accessibilityLabel("Language")
     }
-    private var localModelSetup: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    NativeIcon("database", size: 18).foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Local Whisper large-v3-turbo").font(Theme.ui(14, weight: .semibold))
-                        Text("Optional 574 MB model. No account or cloud transcription service. Downloads only when you choose Install.")
-                            .font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+    // The source field is the page. Language and delivery sit under it as
+    // quiet inline controls; the model line only appears while it needs
+    // attention or is doing something.
+    private var input: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { sourceField; sourceActions }
+                VStack(alignment: .leading, spacing: 8) { sourceField; HStack(spacing: 8) { sourceActions } }
+            }
+            HStack(spacing: 18) {
+                languageMenu
+                HStack(spacing: 8) {
+                    T3Switch(isOn: $notify).accessibilityLabel("Telegram when done")
+                    Text("Telegram when done").font(Theme.ui(12.5)).foregroundStyle(notify ? Theme.ink : Theme.muted)
+                }.help("One message per transcript. Set up Telegram in Settings.")
+                Spacer(minLength: 0)
+                if !status.isNull && !status["ytdlp"].bool {
+                    NativeStatusText(text: "Links need yt-dlp", color: Theme.warnFg)
+                        .help("Local WAV, MP3 and M4A files use the built-in decoder; other formats may need ffmpeg.")
+                }
+            }
+            localModelSetup
+        }.padding(.top, 8)
+    }
+    @ViewBuilder private var localModelSetup: some View {
+        let available = status["model"]["available"].bool
+        if !status.isNull && (installingModel || !available || !status["localRuntime"].bool) {
+            VStack(alignment: .leading, spacing: 10) {
+                NativeRule()
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Whisper large-v3-turbo").font(Theme.ui(13.5, weight: .medium))
+                        Text(installingModel ? (modelProgress["message"].string.isEmpty ? "Preparing download" : modelProgress["message"].string)
+                             : available ? "Bundled runtime missing. Reinstall UniApi." : "574 MB, runs on this Mac")
+                            .font(Theme.ui(12)).foregroundStyle(available && !installingModel ? Theme.failFg : Theme.muted)
                     }
                     Spacer(minLength: 12)
-                    if installingModel {
-                        Button("Cancel") { modelTask?.cancel() }.buttonStyle(T3Button(.outline))
-                    } else if status["model"]["available"].bool {
-                        Button("Remove model") { modelAction("model.remove") }.buttonStyle(T3Button(.outline)).disabled(status["model"]["inUse"].bool)
-                    } else {
-                        Button("Install model") { modelAction("model.install") }.buttonStyle(T3Button(.primary)).disabled(status.isNull)
-                    }
+                    if installingModel { Button("Cancel") { modelTask?.cancel() }.buttonStyle(T3Button(.outline)) }
+                    else if !available { Button("Install") { modelAction("model.install") }.buttonStyle(T3Button(.primary)) }
                 }
-                if installingModel {
-                    ProgressView(value: modelProgress["progress"].double).progressViewStyle(.linear)
-                    Text(modelProgress["message"].string.isEmpty ? "Preparing model download…" : modelProgress["message"].string)
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                } else if status["model"]["available"].bool {
-                    Text(status["localRuntime"].bool ? "Installed. Ready for on-device transcription." : "Model installed, but the bundled runtime is missing. Reinstall UniApi.")
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                }
-            }
+                if installingModel { NativeGrowBar(fraction: modelProgress["progress"].double, color: Theme.accent, height: 3) }
+                NativeRule()
+            }.padding(.top, 6)
         }
     }
     private func modelAction(_ operation: String) {
@@ -168,33 +155,27 @@ struct NativeTranscribePage: View {
     }
     @ViewBuilder private var sourceActions: some View {
         Button { Task { await submit(source, upload: false) } } label: {
-            HStack(spacing: 6) { NativeIcon("mic", size: 14); Text(submitting ? "Starting…" : "Transcribe") }
-                .frame(minWidth: 93)
+            HStack(spacing: 6) { NativeIcon("mic", size: 14); Text(submitting ? "Starting" : "Transcribe") }
+                .frame(minWidth: 93, minHeight: 30)
         }.buttonStyle(T3Button(.primary)).disabled(submitting || source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !status["localReady"].bool)
         Button(action: chooseFiles) {
-            HStack(spacing: 6) { NativeIcon("folder-open", size: 14); Text("Files") }
+            HStack(spacing: 6) { NativeIcon("folder-open", size: 14); Text("Files") }.frame(minHeight: 30)
         }.buttonStyle(T3Button(.outline)).accessibilityLabel("Choose files")
     }
     private var history: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionLabel(text: "Transcripts") {
-                NativeNumberText(text: "\(rows.count) \(rows.count == 1 ? "transcript" : "transcripts")", font: Theme.ui(12), color: Theme.muted)
-            }
             if rows.isEmpty {
-                if status.isNull && error == nil { ShimmerText(text: "Loading transcripts …") }
-                else {
-                    VStack(spacing: 8) {
-                        NativeIcon("mic", size: 24).foregroundStyle(Theme.muted).accessibilityHidden(true)
-                        Text("No transcripts yet").font(Theme.ui(14, weight: .medium))
-                        Text("Paste a link above or drop a file on the card.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                    }.frame(maxWidth: .infinity).padding(.vertical, 48)
-                }
+                if status.isNull && error == nil { ShimmerText(text: "Loading transcripts") }
             }
             else {
-                Card(padding: 0) {
+                NativeSection("Transcripts", count: String(rows.count), trailing: {
+                    if status["model"]["available"].bool && !installingModel {
+                        Button("Remove model") { modelAction("model.remove") }.buttonStyle(T3Button(.ghost)).disabled(status["model"]["inUse"].bool)
+                    }
+                }) {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(rows.enumerated()), id: \.element["id"]) { index, row in
-                            if index > 0 { Rectangle().fill(Theme.border).frame(height: 1).accessibilityHidden(true) }
+                            if index > 0 { NativeRule() }
                             NativeTranscriptHistoryRow(row: row, progress: progress[row["job_id"].string] ?? .null,
                                 metadata: historyMetadata(row), onOpen: {
                                     selected = row["id"].string; parts = [:]; detail = .null; Task { await loadDetail() }
@@ -358,11 +339,11 @@ private struct NativeTranscribeSourceField: View {
     @Environment(\.nativeReducedMotion) private var reduceMotion
     var body: some View {
         HStack(spacing: 8) {
-            NativeIcon("link", size: 11).foregroundStyle(Theme.muted).accessibilityHidden(true)
-            TextField("Paste an HTTP(S) link or file path", text: $source)
-                .textFieldStyle(.plain).font(Theme.mono(12)).accessibilityLabel("Transcription source")
+            NativeIcon("link", size: 14).foregroundStyle(Theme.muted).accessibilityHidden(true)
+            TextField("Link or file path", text: $source)
+                .textFieldStyle(.plain).font(Theme.ui(14)).accessibilityLabel("Transcription source")
                 .focused($focused).onSubmit(onSubmit)
-        }.padding(.horizontal, 11).frame(minWidth: 180, maxWidth: .infinity).frame(height: 32)
+        }.padding(.horizontal, 14).frame(minWidth: 180, maxWidth: .infinity).frame(height: 44)
             .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(focused ? Theme.accent.opacity(0.7) : Theme.input, lineWidth: 1))
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: focused)
@@ -388,7 +369,7 @@ private struct NativeTranscriptHistoryRow<Countdown: View>: View {
                         HStack(spacing: 7) {
                             Text(row["title"].string.isEmpty ? row["source"].string : row["title"].string)
                                 .font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                            MonoChip(text: row["source_kind"].string == "url" ? "link" : "file")
+                            NativeIcon(row["source_kind"].string == "url" ? "link" : "file-audio", size: 11).foregroundStyle(Theme.muted)
                             if row["failed_chunks"].int > 0 { MonoChip(text: "\(row["failed_chunks"].int) gaps", color: Theme.warnFg) }
                         }
                         HStack(spacing: 5) {
@@ -407,7 +388,7 @@ private struct NativeTranscriptHistoryRow<Countdown: View>: View {
                         }.frame(width: 168)
                     }
                     RowActionLabel(title: "Open", hovering: hovering, width: 50).accessibilityHidden(true)
-                }.padding(.leading, 14).padding(.trailing, 6).padding(.vertical, 10).contentShape(Rectangle())
+                }.padding(.trailing, 6).padding(.vertical, 11).contentShape(Rectangle())
             }.buttonStyle(.plain).pointingHand()
                 .help(row["source"].string)
             Button(action: onDelete) { NativeIcon("trash-2", size: 13) }

@@ -199,3 +199,30 @@ struct NativeKeyHint: View {
             .background(Theme.subtle2, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
     }
 }
+
+
+/// A settings group: its name sits in a fixed left gutter and the rows align
+/// on a single column beside it, so the eye scans names and controls as two
+/// straight edges. Collapses to a stacked layout when the page is narrow.
+struct NativeGutterGroup<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            NativeRule()
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 24) {
+                    heading.frame(width: 132, alignment: .leading)
+                    rows.frame(minWidth: 380)
+                }
+                VStack(alignment: .leading, spacing: 14) { heading; rows }
+            }.padding(.top, 18).padding(.bottom, 26)
+        }
+    }
+    private var heading: some View {
+        Text(title).font(Theme.ui(13, weight: .semibold)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+    }
+    private var rows: some View {
+        VStack(alignment: .leading, spacing: 16) { content() }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}

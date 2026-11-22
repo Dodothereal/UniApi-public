@@ -32,7 +32,6 @@ struct NativeTelegramSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SectionLabel("Telegram notifications")
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(status).font(Theme.ui(13, weight: .medium)).accessibilityLabel("Telegram status: " + status)

@@ -20,13 +20,12 @@ struct NativeJobsPage: View {
         rows.filter { row in let status = row["status"]?.string ?? ""; return scope == "all" || (scope == "active" ? ["queued", "running"].contains(status) : ["failed", "cancelled"].contains(status)) }
     }
     var body: some View {
-        NativePage(title: "Jobs", subtitle: "Everything that runs in the background: arena matches, transcriptions, benchmark runs. Jobs keep running with the window closed.", readiness: error != nil ? .failed : loaded ? .ready : .pending, actions: {
+        NativePage(title: "Jobs", readiness: error != nil ? .failed : loaded ? .ready : .pending, actions: {
             HStack(spacing: 8) {
-                Button { Task { await reload() } } label: { HStack(spacing: 6) { NativeIcon("rotate-cw", size: 12); Text("Reload") } }
-                T3Segmented(options: [("active", "Active"), ("all", "All"), ("failed", "Failed")], selection: scope) { scope = $0 }
-                Button(pruning ? "Clearing…" : "Clear old jobs…") { confirmPrune = true }
+                T3IconButton(icon: "rotate-cw", help: "Reload") { Task { await reload() } }
+                T3IconButton(icon: "trash-2", help: "Clear finished jobs older than seven days") { confirmPrune = true }
                     .disabled(runtime.paths.readOnly || pruning)
-                    .help("Review removal of completed, failed and cancelled job entries older than seven days")
+                T3Segmented(options: [("active", "Active"), ("all", "All"), ("failed", "Failed")], selection: scope) { scope = $0 }
             }
         }) {
             if let error {
@@ -37,28 +36,15 @@ struct NativeJobsPage: View {
             }
             if let notice { Text(notice).font(Theme.ui(12)).foregroundStyle(Theme.muted) }
             VStack(alignment: .leading, spacing: 12) {
-                SectionLabel(text: scope == "active" ? "Running and queued" : scope == "failed" ? "Failed and cancelled" : "All jobs") {
-                    if loaded || !rows.isEmpty {
-                        NativeNumberText(text: "\(filtered.count) \(filtered.count == 1 ? "job" : "jobs")", font: Theme.ui(12), color: Theme.muted)
-                    } else {
-                        Text("—").font(Theme.ui(12)).foregroundStyle(Theme.muted).accessibilityLabel("Job count unavailable")
-                    }
-                }
                 if !loaded && rows.isEmpty {
-                    if error == nil { ShimmerText(text: "Reading background jobs…").padding(.vertical, 40) }
+                    if error == nil { ShimmerText(text: "Reading jobs").padding(.vertical, 40) }
                 } else if filtered.isEmpty {
-                    VStack(spacing: 0) {
-                        NativeIcon("list-checks", size: 24).foregroundStyle(Theme.muted.opacity(0.8)).padding(.bottom, 10).accessibilityHidden(true)
-                        Text(scope == "active" ? "Nothing running" : "No jobs").font(Theme.ui(14, weight: .medium))
-                        Text("Start a benchmark, an arena match or a transcription and it shows up here.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                            .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: Self.emptyDetailWidth).padding(.top, 4)
-                    }.frame(maxWidth: .infinity).padding(.vertical, 48)
+                    NativeEmptyState(title: scope == "active" ? "Nothing running" : scope == "failed" ? "No failures" : "No jobs", detail: "", icon: "list-checks")
                 } else {
-                    Card(padding: 0) {
+                    VStack(spacing: 0) {
                         LazyVStack(spacing: 0) {
                             ForEach(Array(filtered.enumerated()), id: \.element["id"]) { index, row in
-                                if index > 0 { Rectangle().fill(Theme.border).frame(height: 1) }
+                                if index > 0 { NativeRule() }
                                 NativeJobRow(row: row, cancel: { Task { do { _ = try await runtime.jobs.cancel(row["id"]!.string); await reload() } catch { self.error = error.localizedDescription } } }, compact: false)
                             }
                         }
@@ -129,10 +115,9 @@ struct NativeJobRow: View {
                 NativeStatusDot(color: color, pulse: value["status"] == "running")
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 7) {
-                        Text(value["title"].string).font(Theme.ui(13)).lineLimit(1)
-                        Text(value["status"].string).font(Theme.mono(11)).foregroundStyle(statusForeground).frame(minHeight: 14)
-                            .padding(.horizontal, 6).padding(.vertical, 2).background(statusBackground, in: RoundedRectangle(cornerRadius: 5))
-                        if !compact { Text(value["app"].string).font(Theme.mono(10.5)).foregroundStyle(Theme.muted) }
+                        Text(value["title"].string).font(Theme.ui(13.5, weight: .medium)).lineLimit(1)
+                        if value["status"].string != "done" { Text(value["status"].string.capitalized).font(Theme.ui(12)).foregroundStyle(statusForeground) }
+                        if !compact { Text(value["app"].string.capitalized).font(Theme.ui(12)).foregroundStyle(Theme.muted) }
                     }
                     if live || !value["progress_text"].string.isEmpty {
                         HStack(spacing: 10) {
@@ -148,10 +133,10 @@ struct NativeJobRow: View {
                     if !value["started_at"].isNull {
                         Text(NativeListTimeFormat.duration(max(0, (value["finished_at"].isNull ? Date().timeIntervalSince1970 * 1000 : value["finished_at"].double) - value["started_at"].double)))
                     }
-                }.font(Theme.mono(10.5)).foregroundStyle(Theme.muted).fixedSize()
+                }.font(Theme.num(11.5, weight: .regular)).foregroundStyle(Theme.muted).fixedSize()
                 if live { Button(action: cancel) { NativeIcon("x", size: 14) }.buttonStyle(T3Button(.ghost)).help("Cancel job").accessibilityLabel("Cancel \(value["title"].string)").frame(width: 28) }
                 else { Color.clear.frame(width: 28, height: 1) }
-            }.padding(.horizontal, 14).padding(.vertical, 10).background(hovering ? Theme.subtle : .clear).onHover { hovering = $0 }.animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+            }.padding(.vertical, 11).onHover { hovering = $0 }.animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
             if expanded {
                 Rectangle().fill(Theme.border).frame(height: 1)
                 VStack(alignment: .leading, spacing: 8) {

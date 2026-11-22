@@ -21,28 +21,20 @@ struct NativeSettingsPage: View {
     @State private var reads = NativePageReadScope()
     @State private var subscription: NativePageReadScope.Ticket?
     var body: some View {
-        NativePage(title: "Settings", subtitle: "Appearance, navigation and optional Telegram delivery. Providers are configured in the provider pages.", readiness: error != nil || jobsError != nil || session.error != nil ? .failed : diagnostics.isEmpty ? .pending : .ready, actions: {
-            Button { Task { await reload() } } label: { HStack(spacing: 6) { NativeIcon("rotate-cw", size: 12); Text("Reload") } }
+        NativePage(title: "Settings", readiness: error != nil || jobsError != nil || session.error != nil ? .failed : diagnostics.isEmpty ? .pending : .ready, actions: {
+            T3IconButton(icon: "rotate-cw", help: "Reload") { Task { await reload() } }
         }) {
-            VStack(alignment: .leading, spacing: 20) {
-                SectionLabel("Setup")
-                SettingRow(title: "Guided setup", desc: "Review application basics, provider setup and where optional configuration lives.") {
-                    Button("Show setup") { session.showOnboarding() }
-                }
-            }
-            navigationSettings
-            Rectangle().fill(Theme.border).frame(height: 1)
-            VStack(alignment: .leading, spacing: 16) {
-                SectionLabel("Appearance")
-                SettingRow(title: "Color scheme", desc: "Choose a theme or follow macOS.") {
+            VStack(alignment: .leading, spacing: 0) {
+            NativeGutterGroup(title: "Appearance") {
+                SettingRow(title: "Color scheme") {
                     T3Segmented(options: [("dark", "Dark"), ("light", "Light"), ("auto", "Auto")], selection: appearance) { appearance = $0 }
                         .accessibilityLabel("Color scheme")
                 }
-                SettingRow(title: "Page spacing", desc: "Adjust margins and card padding.") {
+                SettingRow(title: "Spacing") {
                     T3Segmented(options: [("compact", "Compact"), ("standard", "Default"), ("spacious", "Spacious")], selection: density) { density = $0 }
                         .accessibilityLabel("Page spacing")
                 }
-                SettingRow(title: "Motion", desc: "System follows macOS Reduce Motion.") {
+                SettingRow(title: "Motion") {
                     T3Segmented(options: [("system", "System"), ("reduced", "Reduced")], selection: motion) { motion = $0 }
                         .accessibilityLabel("Motion")
                 }
@@ -50,20 +42,15 @@ struct NativeSettingsPage: View {
                     NativeThemeSettingsView().padding(.top, 12)
                 }.font(Theme.ui(12))
             }
-            Rectangle().fill(Theme.border).frame(height: 1)
-            NativeSidebarSettingsView()
-            Rectangle().fill(Theme.border).frame(height: 1)
-            NativeTelegramSettingsView(runtime: runtime)
-            Rectangle().fill(Theme.border).frame(height: 1)
-            VStack(alignment: .leading, spacing: 20) {
-                SectionLabel("Application")
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Status").font(Theme.ui(14, weight: .medium))
-                    Text(statusSummary).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }.frame(maxWidth: .infinity, alignment: .leading)
+            navigationSettings
+            NativeGutterGroup(title: "Sidebar") { NativeSidebarSettingsView() }
+            NativeGutterGroup(title: "Telegram") { NativeTelegramSettingsView(runtime: runtime) }
+            NativeGutterGroup(title: "UniApi") {
+                SettingRow(title: "Setup guide") { Button("Open") { session.showOnboarding() } }
+                Text(statusSummary).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 NativeUpdateSettings(model: session.updates)
-                DisclosureGroup("Diagnostics and storage", isExpanded: $showDiagnostics) {
+                DisclosureGroup("Diagnostics", isExpanded: $showDiagnostics) {
                     VStack(alignment: .leading, spacing: 16) {
                         NativeUIRecordingControls(runtime: runtime)
                         Text(diagnostics + "\nStatus: " + startupStatus).font(Theme.mono(10.5)).foregroundStyle(Theme.muted)
@@ -78,13 +65,14 @@ struct NativeSettingsPage: View {
                                 }
                             }
                         }
-                        storageRow("Data folder", "Results, transcripts, uploads, the database and job state.", runtime.paths.data)
-                        storageRow("Logs", "Local diagnostics and transport failure details.", runtime.paths.logs)
-                        storageRow("Config", "Providers and free API keys, copyable in the provider pages.", runtime.paths.providers)
+                        storageRow("Data folder", "", runtime.paths.data)
+                        storageRow("Logs", "", runtime.paths.logs)
+                        storageRow("Config", "", runtime.paths.providers)
                     }.padding(.top, 12)
                 }.font(Theme.ui(12))
                 if let jobsError { NativeError(message: "Active jobs unavailable: " + jobsError) }
                 if let startupError = session.error { NativeError(message: "Startup failed: " + startupError) }
+            }
             }
             if let error { NativeError(message: error) }
         }.nativePageTask {
@@ -109,12 +97,13 @@ struct NativeSettingsPage: View {
         }.nativePageActivity(reads: reads)
     }
     private var navigationSettings: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SectionLabel("Navigation")
+        NativeGutterGroup(title: "Launch") {
+            SettingRow(title: "Reopen the last page") {
+                T3Switch(isOn: $restoreLastPage).accessibilityLabel("Restore last visited page")
+            }
             SettingRow(
-                title: "Launch page",
-                desc: startPage == "battery" && batterySupported == false ? "Battery is unavailable; fallback is Home. Choosing a page turns off Restore last visited page." : "Choosing a page turns off Restore last visited page.",
-                descVariants: ["Choosing a page turns off Restore last visited page.", "Battery is unavailable; fallback is Home. Choosing a page turns off Restore last visited page."]
+                title: "Open on",
+                desc: startPage == "battery" && batterySupported == false ? "Battery is unavailable here; Home opens instead." : nil
             ) {
                 NativeMenuSelect(
                     title: "Launch page",
@@ -135,9 +124,6 @@ struct NativeSettingsPage: View {
                     options: launchPages.map { ($0.rawValue, $0.title) },
                     width: 170
                 )
-            }
-            SettingRow(title: "Restore last visited page", desc: "On by default. The launch page is used when this is off or no valid previous page is stored.") {
-                T3Switch(isOn: $restoreLastPage).accessibilityLabel("Restore last visited page")
             }
         }
     }
@@ -173,7 +159,6 @@ struct NativeSettingsPage: View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(Theme.ui(14, weight: .medium))
-                Text(detail).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
                 Text(url.path).font(Theme.mono(10.5)).foregroundStyle(Theme.muted)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -190,9 +175,7 @@ private struct NativeUIRecordingControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Performance recording").font(Theme.ui(14, weight: .medium))
-            Text("Record page changes and Statistics header Reload for up to 5 minutes. Timing, process CPU and lifetime peak memory stay on this Mac.")
-                .font(Theme.ui(12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            Text("No prompts, model names or page content. Measures the running app, not startup.")
+            Text("Timing, CPU and peak memory for up to 5 minutes. No prompts, model names or page content.")
                 .font(Theme.ui(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 if recorder.manualRecording {
@@ -211,8 +194,6 @@ private struct NativeUIRecordingControls: View {
                 Text("Automatic read-only recording is active.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
             } else if runtime.paths.readOnly {
                 Text("Manual recording is unavailable in read-only mode.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            } else {
-                Text("Not recording").font(Theme.ui(12)).foregroundStyle(Theme.muted)
             }
             if let error = recorder.recordingError { NativeError(message: error) }
         }
