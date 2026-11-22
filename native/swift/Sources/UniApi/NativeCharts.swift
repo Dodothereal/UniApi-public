@@ -101,6 +101,27 @@ enum NativeChartMath {
 
 /// A chart's name. What the chart measures and how to read it sits behind
 /// the mark beside the name, so the page shows data rather than prose.
+/// An empty plot: the grid a chart would draw on, and two words.
+struct NativeChartEmpty: View {
+    var text: String = "No data"
+    var height: CGFloat = 96
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(0..<4, id: \.self) { index in
+                Theme.grid.frame(height: 1)
+                if index < 3 { Spacer(minLength: 0) }
+            }
+        }
+        .frame(height: height)
+        .overlay(alignment: .topLeading) {
+            Text(text).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint)
+                .padding(.trailing, 8).padding(.bottom, 2).background(Theme.bg).offset(y: -7)
+        }
+        .padding(.top, 7)
+        .accessibilityElement(children: .ignore).accessibilityLabel(text)
+    }
+}
+
 struct NativeChartHeading: View {
     var title: String
     var caption: String = ""
@@ -258,7 +279,7 @@ struct NativeLineChart: View {
         let points = samples
         VStack(alignment: .leading, spacing: 12) {
             if points.isEmpty {
-                NativeEmptyState(title: "No measured points", detail: "Measurements appear here when they are available.", icon: "chart.xyaxis.line")
+                NativeChartEmpty()
             } else {
                 chart(points)
             }
@@ -329,7 +350,7 @@ struct NativeStackedBarChart: View {
         let yDomain = NativeChartMath.domain(sums)
         VStack(alignment: .leading, spacing: 12) {
             if points.isEmpty {
-                NativeEmptyState(title: "No measured columns", detail: "Missing readings remain gaps.", icon: "chart.bar")
+                NativeChartEmpty()
             } else {
                 Chart(points) { point in
                     BarMark(x: .value("Position", point.x), y: .value("Value", point.y))

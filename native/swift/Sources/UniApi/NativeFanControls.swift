@@ -18,9 +18,9 @@ struct NativeFanSpeedCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Text("Fan \(fan["id"].int + 1)").font(Theme.ui(14, weight: .medium))
+                Text("Fan \(fan["id"].int + 1)").font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
                 Spacer(minLength: 8)
-                Text("Hardware mode: \([0, 3].contains(fan["mode"].int) ? "Automatic" : "Forced")").font(Theme.ui(10)).foregroundStyle(Theme.muted)
+                if ![0, 3].contains(fan["mode"].int) { MonoChip(text: "forced", color: Theme.accent).help("The fan controller is holding a forced target") }
             }
             ZStack {
                 NativeFanWind(rpm: fan["actual"].double).nativeMotionVisibility(initiallyVisible: false)
@@ -28,15 +28,15 @@ struct NativeFanSpeedCard: View {
             HStack(spacing: 10) {
                 NativeSpinningFan(rpm: fan["actual"].double).frame(width: 28, height: 28)
                 ZStack {
-                Text(rpm(max(9999, maximum))).font(Theme.ui(32, weight: .medium)).hidden().accessibilityHidden(true)
+                Text(rpm(max(9999, maximum))).font(Theme.num(30)).hidden().accessibilityHidden(true)
                 if editing {
-                    TextField("Actual RPM", text: $text).font(Theme.ui(32, weight: .medium)).textFieldStyle(.plain).focused($fieldFocused).accessibilityLabel("Fan \(fan["id"].int + 1) target RPM").onAppear { fieldFocused = true; DispatchQueue.main.async { (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectAll(nil) } }.onSubmit { commitText() }.onKeyPress(.escape) { editing = false; invalid = false; return .handled }.onChange(of: fieldFocused) { _, focused in if !focused { editing = false; invalid = false } }.onChange(of: text) { _, _ in invalid = false }
+                    TextField("Actual RPM", text: $text).font(Theme.num(30)).textFieldStyle(.plain).focused($fieldFocused).accessibilityLabel("Fan \(fan["id"].int + 1) target RPM").onAppear { fieldFocused = true; DispatchQueue.main.async { (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectAll(nil) } }.onSubmit { commitText() }.onKeyPress(.escape) { editing = false; invalid = false; return .handled }.onChange(of: fieldFocused) { _, focused in if !focused { editing = false; invalid = false } }.onChange(of: text) { _, _ in invalid = false }
                 } else {
-                    Button { if enabled { text = String(format: "%.0f", fan["actual"].double); editing = true } } label: { NativeNumberText(text: rpm(fan["actual"].double), font: Theme.ui(32, weight: .medium), isolateLayout: true) }.buttonStyle(.plain).disabled(!enabled).help("Edit fan target RPM")
+                    Button { if enabled { text = String(format: "%.0f", fan["actual"].double); editing = true } } label: { NativeNumberText(text: rpm(fan["actual"].double), font: Theme.num(30), isolateLayout: true) }.buttonStyle(.plain).disabled(!enabled).help("Edit fan target RPM")
                 }
                 }
-                Text("RPM").font(Theme.ui(10)).foregroundStyle(Theme.muted)
-            }.frame(maxWidth: .infinity).padding(.top, 20).padding(.bottom, 16)
+                Text("RPM").font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 14).padding(.bottom, 10)
             NativeFanSlider(value: Binding(get: { draft ?? target }, set: { editing = false; draft = max(minimum, min(maximum, $0)) }), bounds: minimum...maximum, enabled: enabled, label: "Fan \(fan["id"].int + 1) target RPM", editingChanged: { changed in
                 if !changed, enabled, let draft { apply(draft); self.draft = nil }
             }, keyPressed: { key in
@@ -44,12 +44,12 @@ struct NativeFanSpeedCard: View {
                 guard enabled else { return }
                 let value = key == .start ? minimum : key == .end ? maximum : max(minimum, min(maximum, target + (key == .decrement ? -100 : 100)))
                 draft = nil; apply(value)
-            }).padding(.horizontal, 8).padding(.top, 16)
-            HStack { Text(rpm(minimum) + " RPM"); Spacer(); Text("Target " + rpm(draft ?? target)); Spacer(); Text(rpm(maximum) + " RPM") }.font(Theme.ui(10)).foregroundStyle(Theme.muted).padding(.top, 6).padding(.bottom, 8)
+            }).padding(.top, 10)
+            HStack { Text(rpm(minimum)); Spacer(); Text("Target " + rpm(draft ?? target)).foregroundStyle(draft == nil ? Theme.muted : Theme.accent); Spacer(); Text(rpm(maximum)) }.font(Theme.num(10.5, weight: .regular)).foregroundStyle(Theme.faint).padding(.top, 6).padding(.bottom, 4)
             if invalid { Text("Enter \(Int(minimum))–\(Int(maximum)) RPM.").font(Theme.ui(11)).foregroundStyle(Theme.warnFg).accessibilityAddTraits(.updatesFrequently) }
                 }
             }
-        }.padding(.horizontal, 28).padding(.bottom, 14)
+        }.padding(16)
     }
     private func commitText() { guard enabled, let value = NativeHardwareDisplayPolicies.typedFanRPM(text, minimum: minimum, maximum: maximum) else { invalid = true; return }; apply(value); editing = false; invalid = false }
     private func rpm(_ value: Double) -> String { value.formatted(.number.locale(Locale(identifier: "en_US")).precision(.fractionLength(0))) }
