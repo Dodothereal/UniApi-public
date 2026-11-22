@@ -58,7 +58,7 @@ struct NativeFansPage: View {
     var body: some View {
         GeometryReader { viewport in
         NativePage(title: "Fan Control", maxWidth: 1280, readiness: pageReadiness, tabs: {
-            NativeTabs(options: [("control", "Control"), ("sensors", "Sensors"), ("timeline", "Timeline"), ("curve", "Curve"), ("settings", "Preferences")], selection: tab) { tab = $0 }
+            if state["supported"].bool, state["installed"].bool { NativeTabs(options: [("control", "Control"), ("sensors", "Sensors"), ("timeline", "Timeline"), ("curve", "Curve"), ("settings", "Preferences")], selection: tab) { tab = $0 } }
         }, actions: {
             if tab == "timeline" { T3IconButton(system: "download", help: "Export CSV") { exportHistory() }.disabled(history["points"].array.isEmpty) }
             T3IconButton(system: "refresh-cw", help: "Refresh") { Task { await reload(); if ["control", "timeline", "settings"].contains(tab) { await loadHistory() } } }
@@ -74,7 +74,7 @@ struct NativeFansPage: View {
             if state.isNull {
                 if error == nil && statusReadError == nil { ShimmerText(text: "Loading…") }
             } else if !state["supported"].bool {
-                NativeEmptyState(title: "Mac only", detail: "Fan Control reads the Mac's fan controller.", icon: "fan")
+                NativeEmptyState(title: "No fans", detail: "This Mac does not expose a fan controller.", icon: "fan")
             } else if !state["installed"].bool {
                 NativeEmptyState(title: "Fan reader not installed", detail: "Rebuild the UniApi app to install it.", icon: "fan")
             } else {
