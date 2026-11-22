@@ -235,7 +235,8 @@ private struct NativeDividedRoot: _VariadicView_UnaryViewRoot {
     }
 }
 
-enum NativeSectionStyle { case stacked, margin }
+/// `bare` drops the section name: the surrounding view already names it.
+enum NativeSectionStyle { case stacked, margin, bare }
 private struct NativeSectionStyleKey: EnvironmentKey { static let defaultValue = NativeSectionStyle.stacked }
 extension EnvironmentValues {
     var nativeSectionStyle: NativeSectionStyle {
@@ -286,6 +287,18 @@ struct NativeSection<Trailing: View, Content: View>: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .environment(\.nativeSectionStyle, .stacked)
             }
+        } else if style == .bare {
+            VStack(alignment: .leading, spacing: 18) {
+                if !detail.isEmpty || Trailing.self != EmptyView.self {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(detail).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        trailing
+                    }
+                }
+                content
+            }
+            .environment(\.nativeSectionStyle, .stacked)
         } else {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
