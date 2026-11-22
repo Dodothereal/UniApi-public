@@ -185,7 +185,8 @@ struct NativeStatsPage: View {
                 NativeStatsProgressLabel(progress: state.readProgress, hasContent: current["loaded"].bool)
             }
             if current["loaded"].bool, selectedModel == nil, current["warnings"].array.isEmpty,
-               nativeStatsGrand(current["derived"]["summary"]["totals"]) == 0, current["derived"]["summary"]["models"].int == 0 {
+               nativeStatsGrand(current["derived"]["summary"]["totals"]) == 0, current["derived"]["summary"]["models"].int == 0,
+               currentBenchmark["spend"]["calls"].int == 0, currentBenchmark["trend"].array.isEmpty {
                 EmptyState(icon: "chart-line", title: "No usage" + (range == 0 ? "" : " in the last \(range) days") + (source == "all" ? "" : " from " + nativeStatsSourceName(source)), detail: "")
             } else if current["loaded"].bool {
                 NativeStatsContents(payload: current, benchmark: currentBenchmark, detail: selectedModel != nil, selectModel: { model in detailRange = range; selectedModel = model }, selectSource: { source = $0 }, availableWidth: width)
