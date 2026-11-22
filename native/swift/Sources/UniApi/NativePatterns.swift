@@ -89,7 +89,11 @@ struct NativeInspectorSplit<Main: View, Inspector: View>: View {
         GeometryReader { geometry in
             let stacked = geometry.size.width < stackBelow
             HStack(spacing: 0) {
-                if !(stacked && open) { main().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading) }
+                if !(stacked && open) {
+                    // A fixed width: content wider than its share is clipped, never pushed over the inspector.
+                    main().frame(width: max(0, geometry.size.width - (open ? width : 0)), alignment: .topLeading)
+                        .frame(maxHeight: .infinity, alignment: .topLeading).clipped()
+                }
                 if open {
                     inspector()
                         .frame(width: stacked ? geometry.size.width : width)

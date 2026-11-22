@@ -132,7 +132,7 @@ struct NativeStatsPage: View {
                     NativeInspectorSplit(open: inspectedRow != nil, width: 340, onClose: { inspected = nil }, main: {
                         VStack(alignment: .leading, spacing: 0) {
                             if !state.error.isEmpty { NativeError(message: state.error).padding(.horizontal, density.pageMargin).padding(.vertical, 8) }
-                            NativeStatsModelTable(models: current["derived"]["models"].array, lifetime: current["derived"]["isLifetime"].bool, colors: current["colors"], selection: $inspected)
+                            NativeStatsModelTable(models: current["derived"]["models"].array, lifetime: current["derived"]["isLifetime"].bool, colors: current["colors"], compact: inspectedRow != nil, selection: $inspected)
                         }
                     }, inspector: {
                         if let row = inspectedRow { modelInspector(row) }
@@ -415,6 +415,8 @@ private struct NativeStatsLedger: View {
 /// Every model the selected apps used, one sortable row each.
 private struct NativeStatsModelTable: View {
     let models: [JSONValue], lifetime: Bool, colors: JSONValue
+    /// Beside an open inspector: the meter and the columns the inspector repeats are dropped.
+    var compact = false
     @Binding var selection: String?
     @AppStorage("uniapi.stats.metric") private var sort = "tokens"
     @State private var descending = true
@@ -429,7 +431,7 @@ private struct NativeStatsModelTable: View {
         }
     }
     private var columns: [(key: String, title: String, width: CGFloat)] {
-        [("tokens", "Tokens", 92), ("output", "Output", 84)] + (lifetime ? [] : [("messages", "Responses", 92)]) + [("sessions", "Sessions", 80), ("days", "Days", 60)]
+        [("tokens", "Tokens", 92), ("output", "Output", 84)] + (lifetime ? [] : [("messages", "Responses", 92)]) + (compact ? [] : [("sessions", "Sessions", 80), ("days", "Days", 60)])
     }
     private var sorted: [JSONValue] {
         models.sorted { a, b in
@@ -442,7 +444,7 @@ private struct NativeStatsModelTable: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
                 heading("model", "Model").frame(maxWidth: .infinity, alignment: .leading)
-                Color.clear.frame(width: 132)
+                if !compact { Color.clear.frame(width: 132) }
                 ForEach(columns, id: \.key) { column in heading(column.key, column.title).frame(width: column.width, alignment: .trailing) }
                 Color.clear.frame(width: 24)
             }.frame(height: 32).padding(.horizontal, density.pageMargin)
@@ -460,7 +462,7 @@ private struct NativeStatsModelTable: View {
                                     if row["viaProxy"].bool { MonoChip(text: "proxy", color: Theme.warnFg) }
                                     if row["pruned"].bool { MonoChip(text: "pruned") }
                                 }.frame(maxWidth: .infinity, alignment: .leading)
-                                NativeTickMeter(fraction: value(row, sort == "model" ? "tokens" : sort) / top, color: Theme.ink, height: 8).frame(width: 108).padding(.horizontal, 12)
+                                if !compact { NativeTickMeter(fraction: value(row, sort == "model" ? "tokens" : sort) / top, color: Theme.ink, height: 8).frame(width: 108).padding(.horizontal, 12) }
                                 ForEach(columns, id: \.key) { column in
                                     Text(column.key == "sessions" || column.key == "days" ? "\(Int(value(row, column.key)))" : nativeStatsCount(value(row, column.key)))
                                         .font(Theme.num(Theme.textXs, weight: column.key == sort ? .medium : .regular))
