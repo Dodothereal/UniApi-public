@@ -24,7 +24,6 @@ struct NativeActivityPage: View {
     @State private var interval = 2
     @State private var paused = false
     @State private var selected: String?
-    @State private var expanded = Set<String>()
     @State private var held: [JSONValue]?
     @State private var hover = false
     @FocusState private var tableFocused: Bool
@@ -35,7 +34,6 @@ struct NativeActivityPage: View {
     @State private var notice: String?
     @State private var information = false
     @State private var contentWidth: CGFloat = 820
-    @State private var details: NativePresentedValue?
     private var snapshot: JSONValue { status["snapshot"] }
     private var fresh: Bool { !snapshot.isNull && status["error"].isNull && error == nil }
     private var groups: [JSONValue] {
@@ -56,8 +54,7 @@ struct NativeActivityPage: View {
         return snapshot.isNull ? .pending : .ready
     }
     var body: some View {
-        GeometryReader { viewport in
-        NativePage(title: "Activity", maxWidth: 1280, readiness: pageReadiness, tabs: {
+        NativePage(title: "Activity", maxWidth: .infinity, readiness: pageReadiness, scrolls: false, tabs: {
             NativeTabs(options: [("apps", "Apps"), ("all", "All processes")], selection: view) { view = $0 }
         }, actions: {
             searchField.frame(width: 200)
@@ -65,12 +62,11 @@ struct NativeActivityPage: View {
                 Button("1 s") { interval = 1 }; Button("2 s") { interval = 2 }; Button("5 s") { interval = 5 }
             }.fixedSize().help("Sampling interval").accessibilityLabel("Sampling interval")
             T3IconButton(system: paused ? "play" : "pause", help: paused ? "Resume" : "Pause", active: paused) { paused.toggle() }
-            T3IconButton(system: "refresh-cw", help: "Refresh") { Task { await reload(force: true) } }
             T3IconButton(system: "info", help: "How Activity measures") { information = true }
         }) {
-            activityContent
-        }
-        .onChange(of: max(0, min(1280, viewport.size.width) - 2 * density.pageMargin), initial: true) { _, width in contentWidth = width }
+            NativeInspectorSplit(open: selection != nil, width: 340, onClose: { selected = nil }, main: { activityContent }, inspector: {
+                if let selection { inspector(selection) }
+            })
         }
         .nativePageTask(id: "\(interval):\(paused)") {
             guard !paused else { return }
@@ -99,91 +95,123 @@ struct NativeActivityPage: View {
         }
     }
     @ViewBuilder private var activityContent: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if let error { errorFeedback(error) }
-            if !status["error"].string.isEmpty { errorFeedback(status["error"].string) }
-            if status.isNull {
-                if error == nil { ShimmerText(text: "Loading…") }
-            } else if !status["supported"].bool {
-                NativeEmptyState(title: "Mac only", detail: "Activity reads macOS process telemetry.", icon: "activity")
-            } else if !status["installed"].bool {
-                NativeEmptyState(title: "Helper not built", detail: "Build the local Activity helper, then reload. No administrator password is needed.", icon: "activity")
-            } else if snapshot.isNull {
+        if status.isNull || snapshot.isNull && status["supported"].bool && status["installed"].bool {
+            NativePane(centered: false) {
+                if let error { errorFeedback(error) }
+                if !status["error"].string.isEmpty { errorFeedback(status["error"].string) }
                 if error == nil && status["error"].string.isEmpty { ShimmerText(text: "Loading…") }
-            } else {
-                Group {
-                    if contentWidth >= 620 { HStack(alignment: .top, spacing: 0) { overviewCards } }
-                    else { VStack(spacing: 0) { overviewCards } }
-                }.background(Theme.surface).clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
-                if let notice {
-                    HStack(spacing: 12) {
-                        Text(notice).font(Theme.ui(12)).foregroundStyle(Theme.dim).textSelection(.enabled).accessibilityAddTraits(.updatesFrequently)
-                        Spacer(minLength: 0)
-                        T3IconButton(system: "x", help: "Dismiss message", size: 12) { self.notice = nil }
+            }
+        } else if !status["supported"].bool {
+            NativePane(centered: false) { NativeEmptyState(title: "Mac only", detail: "Activity reads macOS process telemetry.", icon: "activity") }
+        } else if !status["installed"].bool {
+            NativePane(centered: false) { NativeEmptyState(title: "Helper not built", detail: "Build the local Activity helper, then reload. No administrator password is needed.", icon: "activity") }
+        } else {
+            GeometryReader { geometry in
+                VStack(alignment: .leading, spacing: 0) {
+                    loadStrip(compact: geometry.size.width < 640)
+                    if let error { errorFeedback(error).padding(.horizontal, density.pageMargin).padding(.vertical, 8) }
+                    if !status["error"].string.isEmpty { errorFeedback(status["error"].string).padding(.horizontal, density.pageMargin).padding(.vertical, 8) }
+                    if let notice {
+                        HStack(spacing: 12) {
+                            Text(notice).font(Theme.ui(12)).foregroundStyle(Theme.dim).textSelection(.enabled).accessibilityAddTraits(.updatesFrequently)
+                            Spacer(minLength: 0)
+                            T3IconButton(system: "x", help: "Dismiss message", size: 12) { self.notice = nil }
+                        }.padding(.horizontal, density.pageMargin).frame(height: 36)
+                            .overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
+                    }
+                    activityTable
+                    HStack(spacing: 12) { tableCaption; Spacer(minLength: 12); sampleStamp }
+                        .font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.faint)
+                        .padding(.horizontal, density.pageMargin).frame(height: 28)
+                        .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
+                }
+                .onChange(of: geometry.size.width, initial: true) { _, width in contentWidth = max(0, width - 2 * density.pageMargin) }
+            }
+        }
+    }
+    /// The whole Mac in one band: what the table below adds up to.
+    private func loadStrip(compact: Bool) -> some View {
+        HStack(spacing: 0) {
+            load("CPU", value: snapshot["cpuPercent"], detail: "\(snapshot["logicalCpus"].int) cores", points: history.map { ($0.time, $0.cpu) }, color: Theme.accent,
+                 flag: !fresh ? "No readings" : paused ? "Paused" : "")
+            Theme.rule.frame(width: 1).padding(.vertical, 12)
+            load("Memory", value: snapshot["memoryPercent"], detail: "\(bytes(snapshot["memoryUsed"])) of \(bytes(snapshot["totalMemory"]))", points: history.map { ($0.time, $0.memory) }, color: Theme.ink,
+                 flag: ["", "normal", "nominal"].contains(snapshot["pressure"].string) ? "" : snapshot["pressure"].string.capitalized + " pressure")
+                .padding(.leading, 20)
+            if !compact {
+                Theme.rule.frame(width: 1).padding(.vertical, 12)
+                VStack(alignment: .leading, spacing: 5) {
+                    fact("Processes", "\(snapshot["processCount"].int)")
+                    fact("Compressed", bytes(snapshot["compressedBytes"]))
+                    fact("Swap", bytes(snapshot["swapUsed"]))
+                }.frame(width: 168).padding(.leading, 20)
+                    .help("\(snapshot["sampledCount"].int) comparable samples, \(snapshot["omitted"].int) unavailable")
+            }
+        }
+        .padding(.horizontal, density.pageMargin).frame(height: 84)
+        .overlay(alignment: .bottom) { Theme.border.frame(height: 1) }
+    }
+    private func fact(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label).font(Theme.ui(11)).foregroundStyle(Theme.muted)
+            Spacer(minLength: 4)
+            Text(value).font(Theme.num(11, weight: .medium)).foregroundStyle(Theme.dim)
+        }
+    }
+    private func load(_ title: String, value: JSONValue, detail: String, points: [(Date, Double?)], color: Color, flag: String) -> some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(title).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
+                    if !flag.isEmpty { Text(flag).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.warnFg) }
+                }
+                NativeNumberText(text: value.isNull || !fresh ? "—" : String(format: "%.1f%%", value.double), font: Theme.num(24), isolateLayout: true)
+                Text(detail).font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted).lineLimit(1)
+            }.frame(width: 128, alignment: .leading)
+            Chart {
+                ForEach([0, 50, 100], id: \.self) { level in RuleMark(y: .value("Grid", level)).foregroundStyle(Theme.rule).lineStyle(StrokeStyle(lineWidth: 0.7)) }
+                ForEach(Array(points.enumerated()), id: \.offset) { index, point in
+                    if let reading = point.1 {
+                        LineMark(x: .value("Time", point.0), y: .value("Percent", reading), series: .value("Segment", segment(points, index)))
+                            .foregroundStyle(color).lineStyle(StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round)).interpolationMethod(.monotone)
                     }
                 }
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 12) { selectionTitle; Spacer(minLength: 8); selectionActions }.frame(height: 44)
-                    activityTable
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 12) { tableCaption; Spacer(minLength: 12); contextLabels; sampleStamp }
-                        VStack(alignment: .leading, spacing: 4) { tableCaption; contextLabels; sampleStamp }
-                    }.font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.faint).padding(.top, 10)
-                }
-            }
+            }.chartYScale(domain: 0...100).chartXScale(domain: Date().addingTimeInterval(-120)...Date()).chartXAxis(.hidden).chartYAxis(.hidden).chartLegend(.hidden)
+                .frame(height: 44).padding(.trailing, 20)
+                .accessibilityLabel(title + " over the last two minutes")
         }.frame(maxWidth: .infinity, alignment: .leading)
-            .sheet(item: $details) { item in activityDetails(item.value) }
-    }
-    @ViewBuilder private var overviewCards: some View {
-        overview("CPU", value: snapshot["cpuPercent"], points: history.map { ($0.time, $0.cpu) }, color: Theme.accent)
-        overview("Memory", value: snapshot["memoryPercent"], points: history.map { ($0.time, $0.memory) }, color: Theme.ink)
-    }
-    private var contextLabels: some View {
-        Text("\(snapshot["processCount"].int) processes · compressed \(bytes(snapshot["compressedBytes"])) · swap \(bytes(snapshot["swapUsed"]))")
-            .help("\(snapshot["sampledCount"].int) comparable samples, \(snapshot["omitted"].int) unavailable")
     }
     private var searchField: some View {
         T3Field(placeholder: "Filter", text: $search, leadingIcon: "search").accessibilityLabel("Filter apps or process IDs")
     }
-    private var selectionTitle: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(selection?["name"].string ?? (selected == nil ? "No selection" : "Exited")).font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(selection == nil ? Theme.faint : Theme.ink).lineLimit(1)
-            if let selection { Text(!selection["protectedReason"].isNull ? selection["protectedReason"].string : selection["processes"].isNull ? "PID \(selection["pid"].int)" : "\(selection["processes"].array.count) processes").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.muted).lineLimit(1) }
-        }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-    private var selectionActions: some View {
-        HStack(spacing: 6) {
-            T3IconButton(system: "info", help: "Selection details") { if let selection { details = NativePresentedValue(value: selection) } }.disabled(selection == nil)
-            Button("Quit") { request(mode: "quit") }.disabled(!canAct)
-            Button("Force quit") { request(mode: "force") }.buttonStyle(T3Button(.destructive)).disabled(!canAct)
-        }.fixedSize()
-    }
     private var activityTable: some View {
-        VStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 0) {
-                        sortHeading("Name", key: "name").frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 28)
-                        sortHeading("CPU", key: "cpu").frame(width: 110, alignment: .trailing)
-                        sortHeading("Memory", key: "memory").frame(width: 142, alignment: .trailing)
-                        HStack(spacing: 2) {
-                            sortHeading("Disk I/O", key: "disk")
-                            Menu { Button("Disk I/O") { sort = "disk" }; Button("Disk read") { sort = "read" }; Button("Disk write") { sort = "write" } } label: { NativeIcon("chevron-down", size: 10) }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().accessibilityLabel("Additional disk sort options")
-                        }.frame(width: 108, alignment: .trailing)
-                        Color.clear.frame(width: 42)
-                    }.font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).frame(height: 30)
+        ScrollView(.horizontal) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 0) {
+                    sortHeading("Name", key: "name").frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 30)
+                    sortHeading("CPU", key: "cpu").frame(width: 110, alignment: .trailing)
+                    sortHeading("Memory", key: "memory").frame(width: 142, alignment: .trailing)
+                    HStack(spacing: 2) {
+                        sortHeading("Disk I/O", key: "disk")
+                        Menu { Button("Disk I/O") { sort = "disk" }; Button("Disk read") { sort = "read" }; Button("Disk write") { sort = "write" } } label: { NativeIcon("chevron-down", size: 10) }
+                            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().accessibilityLabel("Disk column")
+                    }.frame(width: 108, alignment: .trailing)
+                    Color.clear.frame(width: 24)
+                }.font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).frame(height: 32)
+                ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(displayed, id: \.self["id"]) { group in
-                            activityRow(group, individual: false)
-                            if expanded.contains(group["id"].string) { ForEach(group["processes"].array, id: \.self["id"]) { activityRow($0, individual: true) } }
+                        ForEach(displayed, id: \.self["id"]) { group in activityRow(group, individual: false) }
+                        if displayed.isEmpty {
+                            Theme.rule.frame(height: 1)
+                            Text(search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No open apps" : "No match")
+                                .font(Theme.ui(12)).foregroundStyle(Theme.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 16)
                         }
-                        if displayed.isEmpty { Text(search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No open apps" : "No match").font(Theme.ui(12)).foregroundStyle(Theme.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 28).padding(.vertical, 16).overlay(alignment: .top) { Theme.rule.frame(height: 1) } }
-                    }.opacity(fresh ? 1 : 0.55).onHover { hover = $0; updateFreeze() }.focusable().focused($tableFocused)
+                    }.opacity(fresh ? 1 : 0.55).onHover { hover = $0; updateFreeze() }.focusable().focusEffectDisabled().focused($tableFocused)
                         .onChange(of: tableFocused) { _, _ in updateFreeze() }.onChange(of: focusedControl) { _, _ in updateFreeze() }
-                }.frame(width: max(580, contentWidth))
+                }.scrollContentBackground(.hidden)
             }
-            Theme.rule.frame(height: 1)
+            .padding(.horizontal, density.pageMargin)
+            .frame(width: max(560, contentWidth) + 2 * density.pageMargin)
         }
     }
     private func sortHeading(_ title: String, key: String) -> some View {
@@ -200,61 +228,97 @@ struct NativeActivityPage: View {
     private func errorFeedback(_ message: String) -> some View {
         HStack { NativeError(message: message); Button("Retry") { Task { await reload(force: true) } } }
     }
-    private func activityDetails(_ captured: JSONValue) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(captured["name"].string).font(Theme.ui(Theme.textBase, weight: .semibold))
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    detailRow("CPU, whole Mac", percent(captured["cpuPercent"]))
-                    detailRow("Memory", bytes(captured["memoryBytes"]) + " / " + percent(captured["memoryPercent"]))
-                    detailRow("Disk reads", rate(captured["readPerSecond"]))
-                    detailRow("Disk writes", rate(captured["writePerSecond"]))
-                    if captured["processes"].isNull {
-                        detailRow("Process / parent", "\(captured["pid"].int) / \(captured["ppid"].int)")
-                        detailRow("Threads", captured["threads"].isNull ? "—" : captured["threads"].string)
-                        detailRow("Memory source", captured["memoryKind"].string)
-                    } else {
-                        detailRow("Bundle", captured["bundleId"].string.isEmpty ? "Background process" : captured["bundleId"].string)
-                        detailRow("Processes", String(captured["processes"].array.count))
+    /// Everything about the selected app or process, and the only place it can be quit.
+    private func inspector(_ row: JSONValue) -> some View {
+        let group = !row["processes"].isNull
+        let parent = group ? nil : snapshot["groups"].array.first { $0["processes"].array.contains { $0["id"].string == row["id"].string } }
+        return NativeInspector(title: row["name"].string,
+                               caption: group ? (row["bundleId"].string.isEmpty ? "Background" : row["bundleId"].string) : "PID \(row["pid"].int)",
+                               icon: group && row["kind"].string == "app" ? "app-window" : "cpu", onClose: { selected = nil }) {
+            if let parent {
+                Button { selected = parent["id"].string } label: {
+                    HStack(spacing: 5) { NativeIcon("arrow-left", size: 12); Text(parent["name"].string) }.font(Theme.ui(Theme.textXs, weight: .medium))
+                }.buttonStyle(.plain).foregroundStyle(Theme.link).pointingHand().accessibilityLabel("Back to " + parent["name"].string)
+            }
+            if !row["protectedReason"].isNull {
+                HStack(spacing: 6) { NativeIcon("lock", size: 12); Text(row["protectedReason"].string) }
+                    .font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(spacing: 0) {
+                NativeFact(label: "CPU", value: percent(fresh ? row["cpuPercent"] : .null))
+                NativeFact(label: "Memory", value: bytes(fresh ? row["memoryBytes"] : .null) + " · " + percent(fresh ? row["memoryPercent"] : .null))
+                NativeFact(label: "Disk read", value: rate(fresh ? row["readPerSecond"] : .null))
+                NativeFact(label: "Disk write", value: rate(fresh ? row["writePerSecond"] : .null))
+                if !group {
+                    NativeFact(label: "Parent", value: "PID \(row["ppid"].int)")
+                    NativeFact(label: "Threads", value: row["threads"].isNull ? "—" : row["threads"].string)
+                    NativeFact(label: "Memory source", value: row["memoryKind"].string)
+                }
+            }
+            if row["partial"].bool || row["memoryKind"].string == "resident" {
+                Text("Some readings are unavailable or fall back to resident memory.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if group {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("\(row["processes"].array.count) " + (row["processes"].array.count == 1 ? "process" : "processes"))
+                        .font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted).padding(.bottom, 6)
+                    ForEach(row["processes"].array, id: \.self["id"]) { process in
+                        Theme.rule.frame(height: 1)
+                        Button { selected = process["id"].string } label: {
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(process["name"].string).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                                    Text(process["pid"].string).font(Theme.num(10.5, weight: .regular)).foregroundStyle(Theme.muted)
+                                }
+                                Spacer(minLength: 6)
+                                Text(percent(fresh ? process["cpuPercent"] : .null)).frame(width: 52, alignment: .trailing)
+                                Text(bytes(fresh ? process["memoryBytes"] : .null)).frame(width: 68, alignment: .trailing)
+                                NativeIcon("chevron-right", size: 11).foregroundStyle(Theme.faint)
+                            }.font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.dim).frame(minHeight: 38).contentShape(Rectangle())
+                        }.buttonStyle(.plain).pointingHand().opacity(process["exited"].bool ? 0.45 : 1)
+                            .accessibilityLabel(process["name"].string + ", process " + process["pid"].string)
                     }
-                    if captured["partial"].bool || captured["memoryKind"].string == "resident" { Text("Some readings are unavailable or use resident memory as a fallback. Missing counters remain unavailable.").foregroundStyle(Theme.muted) }
-                    if !captured["protectedReason"].isNull { Text(captured["protectedReason"].string).foregroundStyle(Theme.warnFg) }
-                    let members = captured["processes"].isNull ? [captured] : captured["processes"].array
-                    ForEach(members, id: \.self["id"]) { row in Text("PID \(row["pid"].int) · \(row["memoryKind"].string) · \(row["path"].string)").font(Theme.mono(10)).foregroundStyle(Theme.muted).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
-                }.font(Theme.ui(12)).frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(maxHeight: 430)
-            HStack { Spacer(); Button("Done") { details = nil }.keyboardShortcut(.cancelAction) }
-        }.padding(24).frame(width: 560).background(Theme.bg)
+                    Theme.rule.frame(height: 1)
+                }
+            } else if !row["path"].string.isEmpty {
+                Text(row["path"].string).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
+        } actions: {
+            Button("Quit") { request(mode: "quit") }.buttonStyle(T3Button(.outline)).disabled(!canAct)
+            Button("Force quit") { request(mode: "force") }.buttonStyle(T3Button(.destructive)).disabled(!canAct)
+        }
     }
-    private func detailRow(_ title: String, _ value: String) -> some View { HStack(alignment: .top, spacing: 20) { Text(title).foregroundStyle(Theme.muted); Spacer(minLength: 0); Text(value).multilineTextAlignment(.trailing).textSelection(.enabled) } }
     private var selection: JSONValue? { guard let selected else { return nil }; return snapshot["groups"].array.first { $0["id"].string == selected } ?? snapshot["groups"].array.flatMap { $0["processes"].array }.first { $0["id"].string == selected } }
     private var canAct: Bool { !runtime.paths.readOnly && fresh && !acting && selection != nil && selection!["protectedReason"].isNull }
     private func column(_ text: String, width: CGFloat) -> some View { Text(text).padding(.trailing, 12).frame(width: width, alignment: .trailing) }
     private func activityRow(_ row: JSONValue, individual: Bool) -> some View {
         let exited = row["exited"].bool
         return NativeActivityRowSurface(selected: selected == row["id"].string, individual: individual, exited: exited) {
-            HStack(spacing: 0) {
-                HStack(spacing: 9) {
-                    if !individual { Button { if !expanded.insert(row["id"].string).inserted { expanded.remove(row["id"].string) } } label: { NativeIcon(expanded.contains(row["id"].string) ? "chevron-down" : "chevron-right", size: 12).frame(width: 22, height: 28) }.buttonStyle(.plain).focused($focusedControl, equals: "expand:" + row["id"].string).accessibilityLabel("\(expanded.contains(row["id"].string) ? "Collapse" : "Expand") \(row["name"].string)") }
-                    else { Color.clear.frame(width: 22, height: 1) }
-                    if !individual { NativeIcon(row["kind"].string == "app" ? "app-window" : "cpu", size: 15).foregroundStyle(Theme.muted).frame(width: 20, height: 30).background(Color.clear, in: RoundedRectangle(cornerRadius: Theme.radiusMd)).overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Color.clear, lineWidth: 1) } }
-                    Button { selected = row["id"].string } label: {
-                        VStack(alignment: .leading, spacing: 4) {
+            Button { selected = selected == row["id"].string ? nil : row["id"].string } label: {
+                HStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        NativeIcon(row["kind"].string == "app" ? "app-window" : "cpu", size: 15).foregroundStyle(Theme.muted).frame(width: 20).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 5) {
-                                Text(row["name"].string).lineLimit(1).font(Theme.ui(individual ? Theme.textXs : Theme.textSm, weight: individual ? .regular : .medium))
-                                if !row["protectedReason"].isNull { NativeIcon("lock", size: 10).help(row["protectedReason"].string) }
-                                if row["partial"].bool || row["memoryKind"].string == "resident" { NativeIcon("info", size: 10).help("Partial or resident-memory fallback") }
-                                if exited { Text("Exited").foregroundStyle(Theme.muted) }
+                                Text(row["name"].string).lineLimit(1).font(Theme.ui(Theme.textSm, weight: .medium))
+                                if !row["protectedReason"].isNull { NativeIcon("lock", size: 10).foregroundStyle(Theme.muted).help(row["protectedReason"].string) }
+                                if exited { Text("Exited").font(Theme.ui(11)).foregroundStyle(Theme.muted) }
                             }
-                            Text(individual ? row["pid"].string : row["kind"].string == "app" ? "\(row["processes"].array.count) \(row["processes"].array.count == 1 ? "process" : "processes")" : "Background").font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted)
-                        }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).focused($focusedControl, equals: "select:" + row["id"].string).disabled(exited)
-                }.padding(.leading, individual ? 14 : 0).padding(.trailing, 12).frame(maxWidth: .infinity, alignment: .leading)
-                meter(fresh ? row["cpuPercent"] : .null, width: 86, color: Theme.accent).padding(.horizontal, 12).frame(width: 110)
-                VStack(alignment: .trailing, spacing: 2) { meter(fresh ? row["memoryPercent"] : .null, width: 118, color: Theme.ink); Text(bytes(fresh ? row["memoryBytes"] : .null)).font(Theme.num(10, weight: .regular)).foregroundStyle(Theme.muted) }.padding(.horizontal, 12).frame(width: 142)
-                Text(rate(fresh ? diskRate(row) : .null)).font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted).padding(.horizontal, 12).frame(width: 108, alignment: .trailing)
-                Button { selected = row["id"].string; action = confirmation(row, mode: "force", individual: individual) } label: { NativeIcon("x", size: 10) }.buttonStyle(.plain).frame(width: 42, height: 28).focused($focusedControl, equals: "force:" + row["id"].string).disabled(runtime.paths.readOnly || !fresh || acting || exited || !row["protectedReason"].isNull).accessibilityLabel("Force quit \(row["name"].string)").help(row["protectedReason"].isNull ? "Force quit" : row["protectedReason"].string)
-            }.frame(minHeight: individual ? 36 : 48)
+                            Text(row["kind"].string == "app" ? "\(row["processes"].array.count) \(row["processes"].array.count == 1 ? "process" : "processes")" : "Background")
+                                .font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted)
+                        }
+                    }.padding(.trailing, 12).frame(maxWidth: .infinity, alignment: .leading)
+                    meter(fresh ? row["cpuPercent"] : .null, width: 86, color: Theme.accent).padding(.horizontal, 12).frame(width: 110)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        meter(fresh ? row["memoryPercent"] : .null, width: 118, color: Theme.ink)
+                        Text(bytes(fresh ? row["memoryBytes"] : .null)).font(Theme.num(10, weight: .regular)).foregroundStyle(Theme.muted)
+                    }.padding(.horizontal, 12).frame(width: 142)
+                    Text(rate(fresh ? diskRate(row) : .null)).font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted).padding(.horizontal, 12).frame(width: 108, alignment: .trailing)
+                    NativeIcon("chevron-right", size: 12).foregroundStyle(selected == row["id"].string ? Theme.ink : Theme.faint).frame(width: 24).accessibilityHidden(true)
+                }.frame(minHeight: 48).contentShape(Rectangle())
+            }.buttonStyle(.plain).focused($focusedControl, equals: "select:" + row["id"].string).disabled(exited)
+                .accessibilityLabel(row["name"].string).accessibilityAddTraits(selected == row["id"].string ? [.isSelected] : [])
         }
     }
     private func meter(_ value: JSONValue, width: CGFloat, color: Color) -> some View {
