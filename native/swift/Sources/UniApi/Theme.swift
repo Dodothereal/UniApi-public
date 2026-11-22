@@ -96,7 +96,7 @@ enum Theme {
     // ---- ink -------------------------------------------------------------
     static var ink: Color { token(.text, light: 0x131416, dark: 0xF0F1F2) }
     static var dim: Color { token(.secondaryText, light: 0x44474C, dark: 0xB0B4BA) }
-    static var muted: Color { token(.mutedText, light: 0x73767C, dark: 0x7F848C) }
+    static var muted: Color { token(.mutedText, light: 0x676A70, dark: 0x7F848C) }
     static let faint = adaptive(light: 0xA9ABAF, dark: 0x53585F)
     /// Text and glyphs on an ink-filled control.
     static var onInk: Color { canvas }
@@ -107,7 +107,7 @@ enum Theme {
 
     // ---- signal and status -----------------------------------------------
     /// The needle: live, now, selected, focused. Never a data series.
-    static var signal: Color { token(.accent, light: 0xE5480C, dark: 0xFF5A1F) }
+    static var signal: Color { token(.accent, light: 0xD4420B, dark: 0xFF5A1F) }
     static var link: Color { token(.highlight, light: 0xB93A06, dark: 0xFF9466) }
     static var onAccent: Color { token(.onAccent, light: 0xFFFFFF, dark: 0x160B05) }
     static var ok: Color { token(.success, light: 0x1F9D57, dark: 0x35C77A) }

@@ -37,7 +37,7 @@ instruments, not a dashboard of boxes. Five rules hold on every screen.
 | Hover, pressed | `Theme.hover`, `Theme.pressed` | white 5%, 9% | black 4.5%, 8% |
 | Text | `Theme.ink`, `.dim`, `.muted`, `.faint` | `#F0F1F2` to `#53585F` | `#131416` to `#A9ABAF` |
 | Hairlines | `Theme.rule`, `Theme.ruleStrong` | white 9%, 17% | black 10%, 20% |
-| Signal | `Theme.signal` | `#FF5A1F` | `#E5480C` |
+| Signal | `Theme.signal` | `#FF5A1F` | `#D4420B` |
 | Status | `Theme.ok`, `.warn`, `.fail` and their `Fg` text variants | | |
 | Plots | `Theme.track`, `.grid`, `.baseline`, `.crosshair`, `Theme.pairPalette` | | |
 

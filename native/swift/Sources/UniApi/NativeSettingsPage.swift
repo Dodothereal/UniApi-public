@@ -308,7 +308,7 @@ struct SettingsRow<Control: View>: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink)
                 if !detail.isEmpty {
-                    Text(detail).font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                    Text(detail).font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

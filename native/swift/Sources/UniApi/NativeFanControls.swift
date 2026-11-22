@@ -64,7 +64,7 @@ struct NativeFanInstrument: View {
     }
 
     private var dial: some View {
-        Dial(fraction: fraction(fan["actual"].double), size: 148, needle: false) {
+        Dial(fraction: fraction(fan["actual"].double), size: 148, target: fraction(draft ?? target), tracking: draft != nil) {
             VStack(spacing: 2) {
                 ZStack {
                     Text(rpm(max(9999, maximum))).font(Theme.readout(34)).hidden().accessibilityHidden(true)
@@ -80,13 +80,6 @@ struct NativeFanInstrument: View {
                 MicroLabel("RPM")
             }
             .offset(y: 4)
-        }
-        .overlay {
-            // The kit needle follows the reading; here it marks the target.
-            Theme.signal.frame(width: 2, height: 15).offset(y: -148 / 2 + 9.5)
-                .rotationEffect(.degrees(-120 + 240 * fraction(draft ?? target)))
-                .animation(reduceMotion || !visible || draft != nil ? nil : NativeMotion.barUpdate, value: target)
-                .accessibilityHidden(true)
         }
     }
     private func commitText() { guard enabled, let value = NativeHardwareDisplayPolicies.typedFanRPM(text, minimum: minimum, maximum: maximum) else { invalid = true; return }; apply(value); editing = false; invalid = false }

@@ -286,7 +286,7 @@ struct OptionRow<Control: View>: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink)
                 if !detail.isEmpty {
-                    Text(detail).font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                    Text(detail).font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -649,24 +649,32 @@ struct Dial<Center: View>: View {
     var color: Color = Theme.ink
     var size: CGFloat = 148
     var needle = true
+    /// Where the needle sits when it marks a set point instead of the reading.
+    var target: Double? = nil
+    /// True while the target is being dragged: the needle follows the hand.
+    var tracking = false
     @ViewBuilder var center: () -> Center
     @Environment(\.nativeReducedMotion) private var reduceMotion
     @Environment(\.nativeMotionVisible) private var visible
 
     var body: some View {
         let value = NativeMotion.fraction(fraction)
+        let mark = target.map(NativeMotion.fraction) ?? value
+        let motion = reduceMotion || !visible ? nil : NativeMotion.barUpdate
         ZStack {
             DialTicks(count: 40, major: 5).fill(Theme.faint)
             DialArc(to: 1).stroke(Theme.track, style: StrokeStyle(lineWidth: 3, lineCap: .butt)).padding(11)
             DialArc(to: value).stroke(color, style: StrokeStyle(lineWidth: 3, lineCap: .butt)).padding(11)
+                .animation(motion, value: value)
             if needle {
                 Theme.signal.frame(width: 2, height: 15).offset(y: -size / 2 + 9.5)
-                    .rotationEffect(.degrees(-120 + 240 * value))
+                    .rotationEffect(.degrees(-120 + 240 * mark))
+                    .animation(tracking ? nil : motion, value: mark)
+                    .accessibilityHidden(true)
             }
             center()
         }
         .frame(width: size, height: size)
-        .animation(reduceMotion || !visible ? nil : NativeMotion.barUpdate, value: value)
     }
 }
 
