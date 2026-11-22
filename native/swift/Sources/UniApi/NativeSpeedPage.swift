@@ -333,7 +333,7 @@ struct NativeSpeedPage: View {
         HStack(spacing: 12) {
             Text("Report").font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink)
             Text(all.isEmpty ? "No recorded model outcomes yet" : "\(all.count) recorded " + (all.count == 1 ? "outcome" : "outcomes"))
-                .font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
+                .font(Theme.ui(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
             Spacer(minLength: 8)
             if !all.isEmpty { BenchDisclosure(title: showReport ? "Hide" : "Show", open: fold($showReport)) }
         }
@@ -581,7 +581,7 @@ private struct SpeedFreeReport: View {
             .padding(.vertical, 12)
             LedgerHead {
                 MicroLabel("Model").frame(maxWidth: .infinity, alignment: .leading)
-                MicroLabel("Answered in").frame(width: 80, alignment: .trailing)
+                MicroLabel("Answered").frame(width: 80, alignment: .trailing)
             }
             // A retained model can already hold a complete sweep. Offscreen
             // outcomes stay out of the first layout and are realized as read.

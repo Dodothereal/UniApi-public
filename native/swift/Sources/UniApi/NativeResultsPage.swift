@@ -31,7 +31,7 @@ struct NativeResultsPage: View {
         return runs.first { $0["id"].string == state.scope }.map { runStamp($0) + " · " + $0["tier"].string } ?? state.scope
     }
     private var eyebrow: String {
-        if state.payload.isNull { return "Benchmark" }
+        if state.payload.isNull || runs.isEmpty { return "Benchmark" }
         if history { return "All-time best · " + (runs.count == 1 ? "1 run" : "\(runs.count) runs") }
         guard let run = runs.first(where: { $0["id"].string == state.payload["scope"].string }) else { return scopeLabel }
         return (state.scope == "latest" ? "Latest run · " : "Run · ") + runStamp(run) + " · " + run["tier"].string
@@ -45,12 +45,7 @@ struct NativeResultsPage: View {
             if state.busy || state.payload.isNull {
                 if state.error.isEmpty { placeholder(title: "Reading results", muted: true) }
             } else if cells.isEmpty {
-                placeholder(title: "Nothing measured", muted: false)
-                Band(title: "Ranking", spacing: 0) { EmptyView() } content: {
-                    ResultsLedger(cells: [], history: history, width: contentWidth, ranking: $ranking, open: state.choose)
-                    Blank(icon: "chart-bar", title: "No results in this scope",
-                          detail: "Arm some pairs on Speed and start a run. The scoreboard fills in as tests finish.")
-                }
+                unmeasured
             } else {
                 if cells.contains(where: \.browser) { Notice(text: BenchmarkMath.browserNote) }
                 if history { ResultsRecords(cells: cells, runs: runs.count, open: state.choose) }
@@ -76,6 +71,28 @@ struct NativeResultsPage: View {
         Binding(get: { flag.wrappedValue }, set: { open in
             if reduceMotion { flag.wrappedValue = open } else { withAnimation(.easeOut(duration: 0.18)) { flag.wrappedValue = open } }
         })
+    }
+    /// The scoreboard at rest: the same readouts the winner fills, reading nothing.
+    private var unmeasured: some View {
+        let filtered = !state.family.isEmpty && !state.payload["cells"].object.isEmpty
+        return VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 6) {
+                MicroLabel(filtered ? state.family : scopeLabel)
+                Text("Nothing measured").font(Theme.display()).tracking(-0.4).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                Text(filtered ? "No pair in this scope belongs to that model family."
+                     : runs.isEmpty ? "Arm some pairs on Speed and start a run. The scoreboard fills in as tests finish."
+                     : "This scope holds no finished tests. Pick another run above, or start a new one.")
+                    .font(Theme.ui(12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            ReadoutStrip(minimum: 150) {
+                Readout(label: "Output speed", value: "—", unit: "tok/s", size: .hero, color: Theme.faint)
+                Readout(label: "First token", value: "—", unit: "ms", size: .hero, color: Theme.faint)
+            }
+            .accessibilityHidden(true)
+            if filtered {
+                Button("Show all models", nativeIcon: "list-checks") { state.chooseFamily("") }.buttonStyle(Press(.secondary))
+            }
+        }
     }
     private func placeholder(title: String, muted: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -412,7 +429,7 @@ private struct ResultsRecords: View {
         let latency = benchParts(nativeBenchReading(first?.ttft, format: nativeBenchMilliseconds))
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 6) {
-                MicroLabel("All-time best")
+                MicroLabel("Record holders")
                 Text(runs == 1 ? "Records from 1 run" : "Records across \(runs) runs").font(Theme.display()).tracking(-0.4).foregroundStyle(Theme.ink)
                     .accessibilityAddTraits(.isHeader)
                 Text("Each record can come from a different run. Reliability pools every test, failures included.")
@@ -617,6 +634,16 @@ private struct ResultsRawRow: View {
     private var title: String {
         [row["provider_name"].string, row["model"].string, row["test"].string, row["ok"].bool ? "ok" : row["error_class"].string].joined(separator: " · ")
     }
+    private var test: String {
+        let size = row["req"]["ctx_tokens"].double
+        return row["test"].string + (size > 0 ? " " + nativeBenchTokens(size) : "")
+    }
+    /// The two numbers a measurement exists for, so the list reads without opening rows.
+    private var reading: String {
+        let first = row["timing_ms"]["ttft"].double, speed = row["tps"]["decode"].double
+        return [first > 0 ? nativeBenchMilliseconds(first) : "", speed > 0 ? nativeBenchSpeed(speed) + " tok/s" : ""]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             LedgerRow(minHeight: 32, ruled: !open, action: { open.toggle() }) {
@@ -626,10 +653,11 @@ private struct ResultsRawRow: View {
                     Text(row["model"].string).font(Theme.mono(11.5)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
                     Text(row["provider_name"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1).layoutPriority(-1)
                     Spacer(minLength: 8)
-                    Text(row["test"].string).font(Theme.mono(11)).foregroundStyle(Theme.dim).lineLimit(1)
+                    Text(test).font(Theme.mono(11)).foregroundStyle(Theme.dim).lineLimit(1).frame(width: 96, alignment: .leading)
+                    Text(reading).font(Theme.mono(11)).foregroundStyle(Theme.ink).lineLimit(1).frame(width: 150, alignment: .trailing)
                     Text(row["ok"].bool ? "ok" : row["error_class"].string.replacingOccurrences(of: "_", with: " "))
                         .font(Theme.mono(11)).foregroundStyle(row["ok"].bool ? Theme.okFg : Theme.warnFg).lineLimit(1)
-                        .frame(width: 96, alignment: .trailing)
+                        .frame(width: 76, alignment: .trailing)
                 }
             }
             .accessibilityLabel(title).accessibilityValue(open ? "Expanded" : "Collapsed")
