@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 import UniApiCore
 import UniApiPresentation
 
@@ -55,21 +54,36 @@ struct NativeActivityPage: View {
         if !status["supported"].bool || !status["installed"].bool { return .ready }
         return snapshot.isNull ? .pending : .ready
     }
+    private var eyebrow: String {
+        if status.isNull && error == nil { return "Reading activity" }
+        if !fresh { return "Readings unavailable" }
+        return paused ? "Paused" : "Live · every \(interval) s"
+    }
+    private var live: Bool { fresh && !paused }
+    // Columns the ledger can afford at this width.
+    private var showsBars: Bool { contentWidth >= 660 }
+    private var showsDisk: Bool { contentWidth >= 440 }
+    private var cpuWidth: CGFloat { showsBars ? 112 : 64 }
+    private var memoryWidth: CGFloat { showsBars ? 140 : 76 }
+
     var body: some View {
         GeometryReader { viewport in
-        NativePage(title: "Activity", subtitle: "A clearer view of what your Mac is using.", maxWidth: 1500, readiness: pageReadiness, actions: {
-            HStack(spacing: 8) {
-                Menu {
-                    Button("1 s") { interval = 1 }; Button("2 s") { interval = 2 }; Button("5 s") { interval = 5 }
-                } label: { HStack(spacing: 6) { Text("\(interval) s"); NativeIcon("chevron-down", size: 12) }.font(Theme.ui(12)).padding(.horizontal, 10).frame(height: 30).background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd)).overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1) } }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().accessibilityLabel("Refresh frequency")
-                Button { paused.toggle() } label: { HStack(spacing: 6) { NativeIcon(paused ? "play" : "pause", size: 12); Text(paused ? "Resume" : "Pause") }.frame(width: 66) }
-                Button { Task { await reload(force: true) } } label: { NativeIcon("refresh-cw", size: 13) }.help("Refresh").accessibilityLabel("Refresh")
-                Button { information = true } label: { NativeIcon("info", size: 14) }.buttonStyle(T3Button(.ghost)).help("How Activity measurements work").accessibilityLabel("How Activity measurements work")
+        NativePage(title: "Activity", eyebrow: eyebrow, readiness: pageReadiness, actions: {
+            Pick(title: "Refresh frequency", selection: $interval, options: [(1, "Every 1 s"), (2, "Every 2 s"), (5, "Every 5 s")])
+            IconPress(icon: "refresh-cw", help: "Refresh") { Task { await reload(force: true) } }
+            IconPress(icon: "info", help: "How Activity measurements work", active: information) { information = true }
+            Button { paused.toggle() } label: {
+                HStack(spacing: 6) {
+                    NativeIcon(paused ? "play" : "pause", size: 13, strokeWidth: 1.75)
+                    ZStack { Text("Resume").hidden(); Text(paused ? "Resume" : "Pause") }
+                }
             }
+            .buttonStyle(Press(.primary))
+            .accessibilityLabel(paused ? "Resume" : "Pause")
         }) {
             activityContent
         }
-        .onChange(of: max(0, min(1500, viewport.size.width) - 2 * density.pageMargin), initial: true) { _, width in contentWidth = width }
+        .onChange(of: max(0, min(960, viewport.size.width) - 2 * density.pageMargin), initial: true) { _, width in contentWidth = width }
         }
         .nativePageTask(id: "\(interval):\(paused)") {
             guard !paused else { return }
@@ -77,235 +91,383 @@ struct NativeActivityPage: View {
         }
         .nativePageActivity(reads: reads, suspended: { hover = false; tableFocused = false; focusedControl = nil; resetFreeze() })
         .onChange(of: search) { _, _ in resetFreeze() }.onChange(of: sort) { _, new in descending = new != "name"; resetFreeze() }.onChange(of: descending) { _, _ in resetFreeze() }.onChange(of: view) { _, _ in resetFreeze() }
-        .sheet(isPresented: $information) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Activity measurements").font(Theme.ui(18, weight: .semibold))
-                Text("CPU is a share of all logical cores. Counters are converted from Mach ticks before comparing elapsed time. The first sample and gaps have no rate.")
-                Text("Memory uses physical footprint where available, then resident memory with a visible fallback marker. Reclaimable file cache and purgeable pages are excluded from the whole-Mac memory total.")
-                Text("Helpers belong to a living app through ancestry or an unambiguous bundle path. Shared system hosts stay separate. Row order holds while the table has pointer or keyboard focus; exited rows remain disabled until it releases.")
-                Button("Done") { information = false }.keyboardShortcut(.cancelAction)
-            }.padding(24).frame(width: 580).background(Theme.bg)
-        }
-        .sheet(isPresented: Binding(get: { !action.isNull }, set: { if !$0 { action = .null } })) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(action["mode"].string == "force" ? "Force quit selected activity?" : "Quit selected activity?").font(Theme.ui(18, weight: .semibold))
-                Text("\(action["name"].string) · \(action["count"].int) \(action["count"].int == 1 ? "process" : "processes")").font(Theme.ui(13, weight: .medium))
-                Text(action["mode"].string == "force" ? "Force quit can discard unsaved work." : "A normal quit lets the application ask to save its work.")
-                HStack { Button("Cancel") { action = .null }.keyboardShortcut(.defaultAction); Spacer(); Button(action["mode"].string == "force" ? "Force quit" : "Quit", role: .destructive) { let pending = action; action = .null; Task { await terminate(pending) } } }
-            }.padding(24).frame(width: 500).background(Theme.bg)
-        }
+        .sheet(isPresented: $information) { informationSheet }
+        .sheet(isPresented: Binding(get: { !action.isNull }, set: { if !$0 { action = .null } })) { confirmationSheet }
     }
+
+    // MARK: - Page
+
     @ViewBuilder private var activityContent: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        Group {
             if let error { errorFeedback(error) }
             if !status["error"].string.isEmpty { errorFeedback(status["error"].string) }
-            if status.isNull {
-                if error == nil { ShimmerText(text: "Reading your Mac's activity…").padding(.vertical, 48) }
-            } else if !status["supported"].bool {
-                NativeEmptyState(title: "Made for Mac", detail: "Activity uses macOS process telemetry and is available on Mac only.", icon: "activity")
-            } else if !status["installed"].bool {
-                NativeEmptyState(title: "Activity needs its local helper", detail: "Build the local Activity helper, then reload this page. No administrator password is needed.", icon: "activity")
-            } else if snapshot.isNull {
-                if error == nil && status["error"].string.isEmpty {
-                    ShimmerText(text: "Reading your Mac's activity…").padding(.vertical, 48)
-                }
+            if !status.isNull && !status["supported"].bool {
+                Blank(icon: "activity", title: "Made for Mac", detail: "Activity uses macOS process telemetry and is available on Mac only.")
+            } else if !status.isNull && !status["installed"].bool {
+                Blank(icon: "activity", title: "Activity needs its local helper", detail: "Build the local Activity helper, then reload this page. No administrator password is needed.")
             } else {
-                if contentWidth >= 620 {
-                    HStack(alignment: .top, spacing: 14) { overviewCards }
-                } else { VStack(spacing: 14) { overviewCards } }
-                Group {
-                    if contentWidth >= 620 { HStack(spacing: 12) { contextLabels } }
-                    else { VStack(alignment: .leading, spacing: 8) { contextLabels } }
-                }.font(Theme.ui(11)).foregroundStyle(Theme.dim).padding(.top, -8)
-                if contentWidth >= 620 {
-                    HStack(spacing: 12) { scopePicker; Spacer(minLength: 12); searchField.frame(width: 300) }
-                } else { VStack(alignment: .leading, spacing: 12) { scopePicker; searchField } }
-                VStack(alignment: .leading, spacing: 12) {
-                    if contentWidth >= 620 { HStack(spacing: 12) { selectionTitle; Spacer(minLength: 8); selectionActions } }
-                    else { VStack(alignment: .leading, spacing: 10) { selectionTitle; HStack { Spacer(minLength: 0); selectionActions } } }
-                }.padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 62).background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusMd)).padding(.top, -6)
-                if let notice {
-                    HStack(spacing: 12) {
-                        Text(notice).font(Theme.ui(12)).foregroundStyle(Theme.dim).textSelection(.enabled).accessibilityAddTraits(.updatesFrequently)
-                        Spacer(minLength: 0)
-                        Button { self.notice = nil } label: { NativeIcon("x", size: 12) }.buttonStyle(T3Button(.ghost)).accessibilityLabel("Dismiss message")
-                    }.padding(12).background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
+                // The same structure before the first sample, so nothing
+                // moves when the readings arrive.
+                ColumnFlow(minimum: 300, spacing: 32, rowSpacing: 28, maxColumns: 2) {
+                    cpuMeter
+                    memoryMeter
                 }
-                activityTable
-                if contentWidth < 580 {
-                    Text("Scroll horizontally for memory, disk and actions.").font(Theme.ui(11)).foregroundStyle(Theme.muted)
-                }
-                ViewThatFits(in: .horizontal) {
-                    HStack { tableCaption; Spacer(minLength: 12); sampleStamp }
-                    VStack(alignment: .leading, spacing: 4) { tableCaption; sampleStamp }
-                }.font(Theme.ui(10.5)).foregroundStyle(Theme.muted).padding(.top, -10)
-                Text("Percentages use the whole Mac. Memory uses physical footprint when available; shared and system memory mean app rows do not add up to the total. A dash means no comparable or accessible measurement, never zero usage.")
-                    .font(Theme.ui(11)).foregroundStyle(Theme.muted).lineSpacing(4).fixedSize(horizontal: false, vertical: true).padding(.top, -8)
+                processLedger
             }
-        }.frame(maxWidth: .infinity, alignment: .leading)
-            .sheet(item: $details) { item in activityDetails(item.value) }
+        }
+        .sheet(item: $details) { item in activityDetails(item.value) }
     }
-    @ViewBuilder private var overviewCards: some View {
-        overview("CPU", value: snapshot["cpuPercent"], points: history.map { ($0.time, $0.cpu) }, color: Theme.accent)
-        overview("Memory", value: snapshot["memoryPercent"], points: history.map { ($0.time, $0.memory) }, color: Theme.ok)
-    }
-    @ViewBuilder private var contextLabels: some View {
-        Text("\(snapshot["processCount"].int) processes · \(snapshot["sampledCount"].int) comparable samples · \(snapshot["omitted"].int) unavailable")
-        if contentWidth >= 620 { Spacer(minLength: 8) }
-        Text("Compressed \(bytes(snapshot["compressedBytes"])) · Swap \(bytes(snapshot["swapUsed"]))")
-    }
-    private var scopePicker: some View { T3Segmented(options: [("apps", "Apps"), ("all", "All activity")], selection: view) { view = $0 } }
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            NativeIcon("search", size: 14).foregroundStyle(Theme.muted)
-            TextField("Search apps or process IDs", text: $search).textFieldStyle(.plain).font(Theme.ui(12)).accessibilityLabel("Search apps or process IDs")
-            if !search.isEmpty { Button { search = "" } label: { NativeIcon("x", size: 12) }.buttonStyle(.plain).accessibilityLabel("Clear search") }
-        }.padding(.horizontal, 10).frame(height: 34).background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd)).overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1) }
-    }
-    private var selectionTitle: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(selection?["name"].string ?? (selected == nil ? "Select an app to manage it" : "This selection has exited")).font(Theme.ui(12.5, weight: .medium)).lineLimit(1)
-            Text(selection.map { !$0["protectedReason"].isNull ? $0["protectedReason"].string : $0["processes"].isNull ? "PID \($0["pid"].int)" : "\($0["processes"].array.count) processes grouped together" } ?? "Or use the × on any row to force quit").font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1)
-        }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-    private var selectionActions: some View {
-        HStack(spacing: 6) {
-            Button { if let selection { details = NativePresentedValue(value: selection) } } label: { NativeIcon("info", size: 14) }.buttonStyle(T3Button(.ghost)).disabled(selection == nil).help("Selection details").accessibilityLabel("Selection details")
-            Button("Quit") { request(mode: "quit") }.disabled(!canAct)
-            Button("Force quit") { request(mode: "force") }.buttonStyle(T3Button(.destructive)).disabled(!canAct)
-        }.fixedSize()
-    }
-    private var activityTable: some View {
-        Card(padding: 0) {
-            ScrollView(.horizontal) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 0) {
-                        sortHeading("Name", key: "name").frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 20)
-                        sortHeading("CPU", key: "cpu").frame(width: 110, alignment: .trailing)
-                        sortHeading("Memory", key: "memory").frame(width: 142, alignment: .trailing)
-                        HStack(spacing: 2) {
-                            sortHeading("Disk I/O", key: "disk")
-                            Menu { Button("Disk I/O") { sort = "disk" }; Button("Disk read") { sort = "read" }; Button("Disk write") { sort = "write" } } label: { NativeIcon("chevron-down", size: 10) }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().accessibilityLabel("Additional disk sort options")
-                        }.frame(width: 108, alignment: .trailing)
-                        Color.clear.frame(width: 42)
-                    }.font(Theme.ui(11.5, weight: .medium)).foregroundStyle(Theme.muted).frame(height: 38).background(Theme.surface)
-                    LazyVStack(spacing: 0) {
-                        ForEach(displayed, id: \.self["id"]) { group in
-                            activityRow(group, individual: false)
-                            if expanded.contains(group["id"].string) { ForEach(group["processes"].array, id: \.self["id"]) { activityRow($0, individual: true) } }
-                        }
-                        if displayed.isEmpty { Text(search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No open apps were found." : "No apps or processes match your search.").font(Theme.ui(12)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, 44) }
-                    }.opacity(fresh ? 1 : 0.55).onHover { hover = $0; updateFreeze() }.focusable().focused($tableFocused)
-                        .onChange(of: tableFocused) { _, _ in updateFreeze() }.onChange(of: focusedControl) { _, _ in updateFreeze() }
-                }.frame(width: max(580, contentWidth))
-            }
-        }.padding(.top, -8)
-    }
-    private func sortHeading(_ title: String, key: String) -> some View {
-        let active = sort == key || key == "disk" && ["read", "write"].contains(sort)
-        return Button { if sort == key { descending.toggle() } else { sort = key } } label: {
-            HStack(spacing: 4) { Text(title); if active { NativeIcon(descending ? "arrow-down" : "arrow-up", size: 12) } }
-                .foregroundStyle(active ? Theme.ink : Theme.muted)
-        }.buttonStyle(.plain).padding(.trailing, key == "name" ? 0 : 12).help("Sort by \(title)").accessibilityLabel("Sort by \(title)").accessibilityValue(active ? descending ? "Descending" : "Ascending" : "Not sorted")
-    }
-    private var tableCaption: some View { Text(held != nil ? "Row positions held while you use the list." : paused ? "Readings paused. Resume to see changes." : "Live readings. Expand an app to see its processes.") }
-    private var sampleStamp: some View {
-        Text(snapshot["timestamp"].isNull ? "Sample time unavailable" : "Sampled " + Date(timeIntervalSince1970: snapshot["timestamp"].double / 1000).formatted(.dateTime.hour().minute().second()))
-    }
+
     private func errorFeedback(_ message: String) -> some View {
-        HStack { NativeError(message: message); Button("Retry") { Task { await reload(force: true) } } }
-    }
-    private func activityDetails(_ captured: JSONValue) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(captured["name"].string).font(Theme.ui(18, weight: .semibold))
-            Text("Details from the selected sample.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    detailRow("CPU, whole Mac", percent(captured["cpuPercent"]))
-                    detailRow("Memory", bytes(captured["memoryBytes"]) + " / " + percent(captured["memoryPercent"]))
-                    detailRow("Disk reads", rate(captured["readPerSecond"]))
-                    detailRow("Disk writes", rate(captured["writePerSecond"]))
-                    if captured["processes"].isNull {
-                        detailRow("Process / parent", "\(captured["pid"].int) / \(captured["ppid"].int)")
-                        detailRow("Threads", captured["threads"].isNull ? "—" : captured["threads"].string)
-                        detailRow("Memory source", captured["memoryKind"].string)
-                    } else {
-                        detailRow("Bundle", captured["bundleId"].string.isEmpty ? "Background process" : captured["bundleId"].string)
-                        detailRow("Processes", String(captured["processes"].array.count))
-                    }
-                    if captured["partial"].bool || captured["memoryKind"].string == "resident" { Text("Some readings are unavailable or use resident memory as a fallback. Missing counters remain unavailable.").foregroundStyle(Theme.muted) }
-                    if !captured["protectedReason"].isNull { Text(captured["protectedReason"].string).foregroundStyle(Theme.warnFg) }
-                    let members = captured["processes"].isNull ? [captured] : captured["processes"].array
-                    ForEach(members, id: \.self["id"]) { row in Text("PID \(row["pid"].int) · \(row["memoryKind"].string) · \(row["path"].string)").font(Theme.mono(10)).foregroundStyle(Theme.muted).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
-                }.font(Theme.ui(12)).frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(maxHeight: 430)
-            HStack { Spacer(); Button("Done") { details = nil }.keyboardShortcut(.cancelAction) }
-        }.padding(24).frame(width: 560).background(Theme.bg)
-    }
-    private func detailRow(_ title: String, _ value: String) -> some View { HStack(alignment: .top, spacing: 20) { Text(title).foregroundStyle(Theme.muted); Spacer(minLength: 0); Text(value).multilineTextAlignment(.trailing).textSelection(.enabled) } }
-    private var selection: JSONValue? { guard let selected else { return nil }; return snapshot["groups"].array.first { $0["id"].string == selected } ?? snapshot["groups"].array.flatMap { $0["processes"].array }.first { $0["id"].string == selected } }
-    private var canAct: Bool { !runtime.paths.readOnly && fresh && !acting && selection != nil && selection!["protectedReason"].isNull }
-    private func column(_ text: String, width: CGFloat) -> some View { Text(text).padding(.trailing, 12).frame(width: width, alignment: .trailing) }
-    private func activityRow(_ row: JSONValue, individual: Bool) -> some View {
-        let exited = row["exited"].bool
-        return NativeActivityRowSurface(selected: selected == row["id"].string, individual: individual, exited: exited) {
-            HStack(spacing: 0) {
-                HStack(spacing: 9) {
-                    if !individual { Button { if !expanded.insert(row["id"].string).inserted { expanded.remove(row["id"].string) } } label: { NativeIcon(expanded.contains(row["id"].string) ? "chevron-down" : "chevron-right", size: 12).frame(width: 22, height: 28) }.buttonStyle(.plain).focused($focusedControl, equals: "expand:" + row["id"].string).accessibilityLabel("\(expanded.contains(row["id"].string) ? "Collapse" : "Expand") \(row["name"].string)") }
-                    else { Color.clear.frame(width: 22, height: 1) }
-                    if !individual { NativeIcon(row["kind"].string == "app" ? "app-window" : "cpu", size: 15).foregroundStyle(Theme.dim).frame(width: 30, height: 30).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusMd)).overlay { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, lineWidth: 1) } }
-                    Button { selected = row["id"].string } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 5) {
-                                Text(row["name"].string).lineLimit(1).font(Theme.ui(individual ? 11.5 : 12.5, weight: individual ? .regular : .medium))
-                                if !row["protectedReason"].isNull { NativeIcon("lock", size: 10).help(row["protectedReason"].string) }
-                                if row["partial"].bool || row["memoryKind"].string == "resident" { NativeIcon("info", size: 10).help("Partial or resident-memory fallback") }
-                                if exited { Text("Exited").foregroundStyle(Theme.muted) }
-                            }
-                            Text(individual ? row["pid"].string : row["kind"].string == "app" ? "\(row["processes"].array.count) \(row["processes"].array.count == 1 ? "process" : "processes")" : "Background").font(Theme.ui(10.5)).foregroundStyle(Theme.muted)
-                        }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).focused($focusedControl, equals: "select:" + row["id"].string).disabled(exited)
-                }.padding(.leading, individual ? 18 : 6).padding(.trailing, 12).frame(maxWidth: .infinity, alignment: .leading)
-                meter(fresh ? row["cpuPercent"] : .null, width: 86, color: Theme.accent).padding(.horizontal, 12).frame(width: 110)
-                VStack(alignment: .trailing, spacing: 2) { meter(fresh ? row["memoryPercent"] : .null, width: 118, color: Theme.ok); Text(bytes(fresh ? row["memoryBytes"] : .null)).font(Theme.mono(10)).foregroundStyle(Theme.muted) }.padding(.horizontal, 12).frame(width: 142)
-                Text(rate(fresh ? diskRate(row) : .null)).font(Theme.mono(11)).foregroundStyle(Theme.muted).padding(.horizontal, 12).frame(width: 108, alignment: .trailing)
-                Button { selected = row["id"].string; action = confirmation(row, mode: "force", individual: individual) } label: { NativeIcon("x", size: 10) }.buttonStyle(.plain).frame(width: 42, height: 28).focused($focusedControl, equals: "force:" + row["id"].string).disabled(runtime.paths.readOnly || !fresh || acting || exited || !row["protectedReason"].isNull).accessibilityLabel("Force quit \(row["name"].string)").help(row["protectedReason"].isNull ? "Force quit" : row["protectedReason"].string)
-            }.frame(minHeight: individual ? 40 : 56)
+        HStack(alignment: .center, spacing: 10) {
+            Notice(text: message, tone: .fail).accessibilityLabel("Error: " + message)
+            Button("Retry") { Task { await reload(force: true) } }
         }
     }
-    private func meter(_ value: JSONValue, width: CGFloat, color: Color) -> some View {
-        ZStack(alignment: .trailing) { GeometryReader { geometry in if !value.isNull { HStack(spacing: 0) { Spacer(minLength: 0); RoundedRectangle(cornerRadius: 3).fill(color.opacity(0.1)).frame(width: geometry.size.width * max(0, min(1, value.double / 100))) } } }; Text(value.isNull ? "—" : percent(value)).font(Theme.mono(12)).padding(.horizontal, 7) }.frame(width: width, height: 35)
+
+    // MARK: - Readings
+
+    private var cpuMeter: some View {
+        ActivityMeter(title: "CPU", reading: reading(snapshot["cpuPercent"]), live: live,
+                      lines: snapshot.isNull ? [] : ["\(snapshot["logicalCpus"].int) logical cores", "100% is the whole Mac"],
+                      points: history.map { ($0.time, $0.cpu) }) { EmptyView() }
     }
-    private func overview(_ title: String, value: JSONValue, points: [(Date, Double?)], color: Color) -> some View {
-        Card {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 8) {
-                    NativeIcon(title == "CPU" ? "cpu" : "memory-stick", size: 16)
-                    Text(title).font(Theme.ui(13, weight: .medium))
-                    Spacer(minLength: 8)
-                    if title == "CPU" { HStack(spacing: 6) { if fresh && !paused { NativeStatusDot(color: Theme.okFg, size: 5) }; Text(!fresh ? "Readings unavailable" : paused ? "Paused" : "Live") }.font(Theme.ui(11)).foregroundStyle(Theme.muted) }
-                    else { Text("Pressure: " + snapshot["pressure"].string).font(Theme.ui(11)).foregroundStyle(snapshot["pressure"].string == "critical" ? Theme.failFg : ["warning", "warn"].contains(snapshot["pressure"].string) ? Theme.warnFg : Theme.muted) }
+
+    private var memoryMeter: some View {
+        let pressure = snapshot["pressure"].string
+        let tone = pressure == "critical" ? Theme.failFg : ["warning", "warn"].contains(pressure) ? Theme.warnFg : Theme.okFg
+        return ActivityMeter(title: "Memory", reading: reading(snapshot["memoryPercent"]), live: live,
+                             lines: snapshot.isNull ? [] : ["\(bytes(snapshot["memoryUsed"])) of \(bytes(snapshot["totalMemory"]))",
+                                                           "\(bytes(snapshot["compressedBytes"])) compressed · \(bytes(snapshot["swapUsed"])) swap"],
+                             points: history.map { ($0.time, $0.memory) }) {
+            if !pressure.isEmpty { Tag("pressure " + pressure, tone: tone, dot: true) }
+        }
+    }
+
+    private func reading(_ value: JSONValue) -> String? {
+        value.isNull || !fresh ? nil : String(format: "%.1f", locale: Locale(identifier: "en_US"), value.double)
+    }
+
+    // MARK: - Ledger
+
+    private var processLedger: some View {
+        Band(title: "Processes", spacing: 0) {
+            scopePicker
+            if contentWidth >= 520 { searchField.frame(width: 232) }
+        } content: {
+            if contentWidth < 520 { searchField.padding(.bottom, 10) }
+            if let notice {
+                HStack(alignment: .center, spacing: 6) {
+                    Notice(text: notice).accessibilityAddTraits(.updatesFrequently)
+                    IconPress(icon: "x", help: "Dismiss message") { self.notice = nil }
                 }
-                HStack(spacing: 18) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        NativeNumberText(text: value.isNull || !fresh ? "—" : String(format: "%.1f%%", value.double), font: Theme.ui(32, weight: .semibold), isolateLayout: true)
-                        Text(title == "CPU" ? "\(snapshot["logicalCpus"].int) logical cores\n100% = the whole Mac" : "\(bytes(snapshot["memoryUsed"])) used\nof \(bytes(snapshot["totalMemory"])) installed").font(Theme.ui(11)).foregroundStyle(Theme.muted).lineSpacing(3)
-                    }.frame(minWidth: 110, alignment: .leading)
-                    VStack(spacing: 3) {
-                        HStack(spacing: 3) {
-                            Chart {
-                                ForEach([0, 50, 100], id: \.self) { level in RuleMark(y: .value("Grid", level)).foregroundStyle(Theme.border).lineStyle(StrokeStyle(lineWidth: 0.7)) }
-                                ForEach(Array(points.enumerated()), id: \.offset) { index, point in if let reading = point.1 { LineMark(x: .value("Time", point.0), y: .value("Percent", reading), series: .value("Segment", segment(points, index))).foregroundStyle(color).lineStyle(StrokeStyle(lineWidth: 1.65)) } }
-                            }.chartYScale(domain: 0...100).chartXScale(domain: Date().addingTimeInterval(-120)...Date()).chartXAxis(.hidden).chartYAxis(.hidden).chartLegend(.hidden)
-                            VStack { Text("100"); Spacer(minLength: 0); Text("0") }.font(Theme.ui(8)).foregroundStyle(Theme.muted)
+                .padding(.bottom, 10)
+            }
+            LedgerHead {
+                sortHeading("Name", key: "name").frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 18)
+                sortHeading("CPU %", key: "cpu", trailing: true).frame(width: cpuWidth, alignment: .trailing)
+                sortHeading("Memory", key: "memory", trailing: true).frame(width: memoryWidth, alignment: .trailing)
+                if showsDisk {
+                    HStack(spacing: 2) {
+                        sortHeading("Disk I/O", key: "disk", trailing: true)
+                        Menu {
+                            ForEach([("disk", "Disk I/O"), ("read", "Disk read"), ("write", "Disk write")], id: \.0) { key, title in
+                                Button { sort = key } label: {
+                                    if sort == key { Label { Text(title) } icon: { NativeIcon("check", size: 14) } } else { Text(title) }
+                                }
+                            }
+                        } label: {
+                            NativeIcon("chevron-down", size: 10, strokeWidth: 1.75).foregroundStyle(Theme.muted)
+                                .frame(width: 14, height: 24).contentShape(Rectangle())
                         }
-                        HStack { Text("2 min ago"); Spacer(); Text("Now") }.font(Theme.ui(8)).foregroundStyle(Theme.muted)
-                    }.frame(height: 94)
+                        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                        .accessibilityLabel("Additional disk sort options")
+                    }
+                    .frame(width: 92, alignment: .trailing)
                 }
+                Color.clear.frame(width: 28, height: 1)
+            }
+            LazyVStack(spacing: 0) {
+                ForEach(displayed, id: \.self["id"]) { group in
+                    activityRow(group, individual: false)
+                    if expanded.contains(group["id"].string) { ForEach(group["processes"].array, id: \.self["id"]) { activityRow($0, individual: true) } }
+                }
+                if displayed.isEmpty { emptyRows }
+            }
+            .opacity(fresh || snapshot.isNull ? 1 : 0.55).onHover { hover = $0; updateFreeze() }.focusable().focused($tableFocused).focusEffectDisabled()
+            .onChange(of: tableFocused) { _, _ in updateFreeze() }.onChange(of: focusedControl) { _, _ in updateFreeze() }
+            if !snapshot.isNull {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { tableCaption; Spacer(minLength: 12); sampleStamp }
+                    VStack(alignment: .leading, spacing: 4) { tableCaption; sampleStamp }
+                }
+                .font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1).padding(.top, 12)
             }
         }
     }
-    private func segment(_ points: [(Date, Double?)], _ index: Int) -> Int { NativeHardwareDisplayPolicies.activityHistorySegments(points.map { (time: $0.0.timeIntervalSince1970 * 1000, value: $0.1) })[index] }
+
+    @ViewBuilder private var emptyRows: some View {
+        if snapshot.isNull {
+            if error == nil && status["error"].string.isEmpty {
+                Text("Reading processes").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 20)
+            }
+        } else if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Blank(icon: "search", title: "No apps or processes match your search")
+        } else if view == "apps" {
+            Blank(icon: "app-window", title: "No open apps were found", detail: "Background processes are listed under All activity.",
+                  actionTitle: "Show all activity", actionIcon: "activity", primary: false) { view = "all" }
+        } else {
+            Blank(icon: "activity", title: "No processes were found")
+        }
+    }
+
+    private var scopePicker: some View {
+        Stops(options: [("apps", "Apps"), ("all", "All activity")], selection: view) { view = $0 }
+            .accessibilityLabel("Scope")
+    }
+
+    private var searchField: some View {
+        Entry(placeholder: "Search apps or process IDs", text: $search, icon: "search")
+            .accessibilityLabel("Search apps or process IDs")
+            .overlay(alignment: .trailing) {
+                if !search.isEmpty {
+                    Button { search = "" } label: {
+                        NativeIcon("x", size: 12, strokeWidth: 1.75).foregroundStyle(Theme.muted)
+                            .frame(width: 26, height: 28).background(Theme.field).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).pointingHand().padding(.trailing, 2).accessibilityLabel("Clear search")
+                }
+            }
+    }
+
+    private func sortHeading(_ title: String, key: String, trailing: Bool = false) -> some View {
+        let active = sort == key || key == "disk" && ["read", "write"].contains(sort)
+        let arrow = NativeIcon(descending ? "arrow-down" : "arrow-up", size: 10, strokeWidth: 2).foregroundStyle(Theme.signal)
+        return Button { if sort == key { descending.toggle() } else { sort = key } } label: {
+            HStack(spacing: 3) {
+                if active && trailing { arrow }
+                MicroLabel(title, color: active ? Theme.ink : Theme.muted)
+                if active && !trailing { arrow }
+            }
+            .frame(height: 24).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointingHand()
+        .help("Sort by \(title)").accessibilityLabel("Sort by \(title)").accessibilityValue(active ? descending ? "Descending" : "Ascending" : "Not sorted")
+    }
+
+    private var tableCaption: some View { Text(held != nil ? "Row positions held while you use the list." : paused ? "Readings paused. Resume to see changes." : "Expand an app to see its processes. Right-click a row to quit it.") }
+    private var sampleStamp: some View {
+        Text("\(snapshot["processCount"].int) processes · \(snapshot["sampledCount"].int) comparable · \(snapshot["omitted"].int) unavailable · " + (snapshot["timestamp"].isNull ? "sample time unavailable" : "sampled " + Date(timeIntervalSince1970: snapshot["timestamp"].double / 1000).formatted(.dateTime.hour().minute().second())))
+    }
+
+    private func activityRow(_ row: JSONValue, individual: Bool) -> some View {
+        let id = row["id"].string, name = row["name"].string
+        let exited = row["exited"].bool, open = expanded.contains(id)
+        let cpu = fresh ? row["cpuPercent"] : JSONValue.null
+        let memoryShare = fresh ? row["memoryPercent"] : JSONValue.null
+        let app = row["kind"].string == "app"
+        let members = row["processes"].array.count
+        // Apps always state their size; a background group only when it is more than its one process.
+        let caption = individual ? "pid " + row["pid"].string : app || members > 1 ? "\(members) \(members == 1 ? "process" : "processes")" : ""
+        return ActivityRowSurface(selected: selected == id, exited: exited) { hovering in
+            HStack(spacing: 0) {
+                if individual {
+                    Color.clear.frame(width: 34, height: 1)
+                } else {
+                    Button { if !expanded.insert(id).inserted { expanded.remove(id) } } label: {
+                        NativeIcon(open ? "chevron-down" : "chevron-right", size: 12, strokeWidth: 1.75).foregroundStyle(Theme.muted)
+                            .frame(width: 18, height: 28, alignment: .leading).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).pointingHand().focused($focusedControl, equals: "expand:" + id)
+                    .accessibilityLabel("\(open ? "Collapse" : "Expand") \(name)")
+                }
+                Button { selected = id } label: {
+                    HStack(spacing: 12) {
+                        HStack(spacing: 6) {
+                            Text(name).font(Theme.ui(12.5, weight: individual || !app ? .regular : .medium))
+                                .foregroundStyle(individual ? Theme.dim : Theme.ink).lineLimit(1)
+                            if !row["protectedReason"].isNull {
+                                NativeIcon("lock", size: 10, strokeWidth: 1.75).foregroundStyle(Theme.muted).help(row["protectedReason"].string)
+                            }
+                            if row["partial"].bool || row["memoryKind"].string == "resident" {
+                                NativeIcon("info", size: 10, strokeWidth: 1.75).foregroundStyle(Theme.muted).help("Partial or resident-memory fallback")
+                            }
+                            if exited { Tag("exited") }
+                            if !caption.isEmpty { Text(caption).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1).layoutPriority(-1) }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(spacing: 8) {
+                            if showsBars { Scale(fraction: cpu.isNull ? 0 : cpu.double / 100, height: 3).frame(width: 56) }
+                            Text(cpu.isNull ? "—" : percent(cpu).replacingOccurrences(of: "%", with: "")).font(Theme.readout(17))
+                                .foregroundStyle(cpu.isNull ? Theme.faint : cpu.double >= 0.1 ? Theme.ink : Theme.muted)
+                                .lineLimit(1).frame(width: 48, alignment: .trailing)
+                        }
+                        .frame(width: cpuWidth, alignment: .trailing)
+                        HStack(spacing: 8) {
+                            if showsBars { Scale(fraction: memoryShare.isNull ? 0 : memoryShare.double / 100, height: 3).frame(width: 56) }
+                            ActivityQuantity(text: bytes(fresh ? row["memoryBytes"] : .null), unitWidth: 20).frame(width: 76, alignment: .trailing)
+                        }
+                        .frame(width: memoryWidth, alignment: .trailing)
+                        .help(memoryShare.isNull ? "" : percent(memoryShare) + " of installed memory")
+                        if showsDisk {
+                            let disk = fresh ? diskRate(row) : JSONValue.null
+                            ActivityQuantity(text: rate(disk), unitWidth: 36, color: disk.double > 0 ? Theme.ink : Theme.muted).frame(width: 92, alignment: .trailing)
+                        }
+                    }
+                    .frame(minHeight: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).focused($focusedControl, equals: "select:" + id).disabled(exited)
+                .accessibilityAddTraits(selected == id ? .isSelected : [])
+                Menu { rowActions(row, individual: individual) } label: {
+                    NativeIcon("ellipsis", size: 14, strokeWidth: 1.75).foregroundStyle(Theme.muted)
+                        .frame(width: 28, height: 28, alignment: .trailing).contentShape(Rectangle())
+                }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                .opacity(hovering || selected == id || focusedControl == "menu:" + id ? 1 : 0)
+                .focused($focusedControl, equals: "menu:" + id)
+                .accessibilityLabel("Actions for \(name)").help("Details, quit or force quit")
+            }
+        }
+        .contextMenu { rowActions(row, individual: individual) }
+    }
+
+    /// Quit and force quit live here, never as a bare button in the row, and
+    /// both still pass through the confirmation sheet.
+    @ViewBuilder private func rowActions(_ row: JSONValue, individual: Bool) -> some View {
+        let name = row["name"].string
+        let blocked = runtime.paths.readOnly || !fresh || acting || row["exited"].bool || !row["protectedReason"].isNull
+        Button("Details") { selected = row["id"].string; details = NativePresentedValue(value: row) }
+            .accessibilityLabel("Selection details")
+        Divider()
+        Button("Quit \(name)…") { selected = row["id"].string; action = confirmation(row, mode: "quit", individual: individual) }.disabled(blocked)
+        Button("Force quit \(name)…") { selected = row["id"].string; action = confirmation(row, mode: "force", individual: individual) }.disabled(blocked)
+        if !row["protectedReason"].isNull {
+            Divider()
+            Text(row["protectedReason"].string)
+        }
+    }
+
+    // MARK: - Sheets
+
+    private var informationSheet: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("How Activity measures").font(Theme.display(17)).accessibilityAddTraits(.isHeader)
+            VStack(spacing: 0) {
+                informationRow("CPU", "A share of all logical cores, so 100% is the whole Mac. Counters are converted from Mach ticks before comparing elapsed time. The first sample and gaps have no rate.")
+                informationRow("Memory", "Physical footprint where available, then resident memory with a visible fallback marker. Reclaimable file cache and purgeable pages are excluded from the whole-Mac total, and shared and system memory mean app rows do not add up to it.")
+                informationRow("Grouping", "Helpers belong to a living app through ancestry or an unambiguous bundle path. Shared system hosts stay separate.")
+                informationRow("Held rows", "Row order holds while the list has pointer or keyboard focus. Exited rows remain, disabled, until it releases.")
+                informationRow("Dashes", "A dash means no comparable or accessible measurement, never zero usage.", ruled: false)
+            }
+            .padding(.top, 12)
+            HStack {
+                Spacer(minLength: 0)
+                Button("Done") { information = false }.buttonStyle(Press(.primary)).keyboardShortcut(.cancelAction)
+            }
+            .padding(.top, 16)
+        }
+        .padding(24).frame(width: 560).sheetGround()
+    }
+
+    private func informationRow(_ title: String, _ text: String, ruled: Bool = true) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            MicroLabel(title).frame(width: 96, alignment: .leading)
+            Text(text).font(Theme.ui(12.5)).foregroundStyle(Theme.dim).lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 11)
+        .overlay(alignment: .bottom) { if ruled { Rule() } }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var confirmationSheet: some View {
+        let force = action["mode"].string == "force"
+        return VStack(alignment: .leading, spacing: 0) {
+            Text((force ? "Force quit " : "Quit ") + action["name"].string + "?").font(Theme.display(17))
+                .lineLimit(2).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
+            Text("\(action["count"].int) \(action["count"].int == 1 ? "process" : "processes")")
+                .font(Theme.mono(11.5)).foregroundStyle(Theme.muted).padding(.top, 8)
+            Text(force ? "Force quit can discard unsaved work." : "A normal quit lets the application ask to save its work.")
+                .font(Theme.ui(13)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button("Cancel") { action = .null }.buttonStyle(Press(.secondary)).keyboardShortcut(.defaultAction)
+                Button(force ? "Force quit" : "Quit", role: .destructive) { let pending = action; action = .null; Task { await terminate(pending) } }
+                    .buttonStyle(Press(force ? .danger : .primary))
+            }
+            .padding(.top, 22)
+        }
+        .padding(24).frame(width: 440).sheetGround()
+    }
+
+    private func activityDetails(_ captured: JSONValue) -> some View {
+        let single = captured["processes"].isNull
+        let members = single ? [captured] : captured["processes"].array
+        let memory = ActivityQuantity.parts(bytes(captured["memoryBytes"]))
+        let read = ActivityQuantity.parts(rate(captured["readPerSecond"])), write = ActivityQuantity.parts(rate(captured["writePerSecond"]))
+        return VStack(alignment: .leading, spacing: 0) {
+            MicroLabel((single ? "Process" : captured["kind"].string == "app" ? "App" : "Background group") + " · selected sample")
+            Text(captured["name"].string).font(Theme.display(17)).lineLimit(1).accessibilityAddTraits(.isHeader).padding(.top, 6)
+            ReadoutStrip(minimum: 104) {
+                Readout(label: "CPU", value: percent(captured["cpuPercent"]).replacingOccurrences(of: "%", with: ""), unit: captured["cpuPercent"].isNull ? "" : "%", detail: "of the whole Mac", size: .medium)
+                Readout(label: "Memory", value: memory.0, unit: memory.1, detail: captured["memoryPercent"].isNull ? "" : percent(captured["memoryPercent"]) + " of installed", size: .medium)
+                Readout(label: "Disk reads", value: read.0, unit: read.1, size: .medium)
+                Readout(label: "Disk writes", value: write.0, unit: write.1, size: .medium)
+            }
+            .padding(.top, 18)
+            VStack(spacing: 0) {
+                if single {
+                    detailRow("Process / parent", "\(captured["pid"].int) / \(captured["ppid"].int)")
+                    detailRow("Threads", captured["threads"].isNull ? "—" : captured["threads"].string)
+                    detailRow("Memory source", captured["memoryKind"].string)
+                } else {
+                    detailRow("Bundle", captured["bundleId"].string.isEmpty ? "Background process" : captured["bundleId"].string)
+                    detailRow("Processes", String(captured["processes"].array.count))
+                }
+            }
+            .padding(.top, 18)
+            if captured["partial"].bool || captured["memoryKind"].string == "resident" {
+                Notice(text: "Some readings are unavailable or use resident memory as a fallback. Missing counters remain unavailable.").padding(.top, 12)
+            }
+            if !captured["protectedReason"].isNull { Notice(text: captured["protectedReason"].string, tone: .warn).padding(.top, 12) }
+            MicroLabel("Executables").padding(.top, 18).padding(.bottom, 8)
+            ViewThatFits(in: .vertical) {
+                memberList(members)
+                ScrollView { memberList(members) }
+            }
+            .frame(maxHeight: 190, alignment: .top)
+            HStack {
+                Spacer(minLength: 0)
+                Button("Done") { details = nil }.buttonStyle(Press(.primary)).keyboardShortcut(.cancelAction)
+            }
+            .padding(.top, 18)
+        }
+        .padding(24).frame(width: 560).sheetGround()
+    }
+
+    private func memberList(_ members: [JSONValue]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(members, id: \.self["id"]) { row in
+                Text(verbatim: "PID \(row["pid"].int) · \(row["memoryKind"].string) · \(row["path"].string)").font(Theme.mono(10.5)).foregroundStyle(Theme.muted)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func detailRow(_ title: String, _ value: String) -> some View {
+        LedgerRow(minHeight: 28) {
+            HStack(alignment: .firstTextBaseline, spacing: 20) {
+                Text(title).font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+                Text(value).font(Theme.mono(11.5)).foregroundStyle(Theme.ink).multilineTextAlignment(.trailing).textSelection(.enabled)
+            }
+        }
+    }
+
+    // MARK: - Formatting and operations
+
     private func percent(_ value: JSONValue) -> String { value.isNull ? "—" : value.double > 0 && value.double < 0.1 ? "<0.1%" : String(format: "%.1f%%", locale: Locale(identifier: "en_US"), value.double) }
     private func bytes(_ value: JSONValue) -> String {
         guard !value.isNull, value.double.isFinite else { return "—" }
@@ -319,7 +481,6 @@ struct NativeActivityPage: View {
     private func updateFreeze() { if hover || tableFocused || focusedControl != nil { if held == nil { held = groups } } else { held = nil } }
     private func resetFreeze() { held = nil; updateFreeze() }
     private func confirmation(_ row: JSONValue, mode: String, individual: Bool) -> JSONValue { ["id": row["id"], "mode": .string(mode), "process": .bool(individual), "name": row["name"], "count": .number(Double(individual ? 1 : row["processes"].array.count))] }
-    private func request(mode: String) { guard canAct, let selection else { return }; action = confirmation(selection, mode: mode, individual: selection["processes"].isNull) }
     private func reload(force: Bool = false) async {
         guard let service = session.activity, let ticket = reads.begin("status") else { return }
         do {
@@ -343,15 +504,167 @@ struct NativeActivityPage: View {
     }
 }
 
-private struct NativeActivityRowSurface<Content: View>: View {
-    let selected: Bool, individual: Bool, exited: Bool
-    @ViewBuilder var content: () -> Content
-    @State private var hovering = false
+private extension View {
+    /// Sheets do not sit inside a `NativePage`, so they restate its ground,
+    /// ink and control defaults.
+    func sheetGround() -> some View {
+        background(Theme.canvas).foregroundStyle(Theme.ink).font(Theme.ui(13)).tint(Theme.signal)
+    }
+}
+
+/// One whole-Mac reading with the last two minutes beside it: the label hangs
+/// from a ticked rule as a `Readout` does, the trace is a strip-chart on the
+/// canvas rather than a boxed plot.
+private struct ActivityMeter<Accessory: View>: View {
+    let title: String
+    let reading: String?
+    let live: Bool
+    let lines: [String]
+    let points: [(Date, Double?)]
+    @ViewBuilder var accessory: () -> Accessory
+
     var body: some View {
-        VStack(spacing: 0) {
-            Rectangle().fill(Theme.border).frame(height: 1)
-            content()
-        }.background(selected ? Theme.accent.opacity(0.09) : hovering ? Theme.subtle : individual ? Theme.well : .clear)
-            .opacity(exited ? 0.45 : 1).onHover { hovering = $0 }
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                Rule()
+                Theme.ink.frame(width: 2, height: 7)
+            }
+            .frame(height: 7, alignment: .top).padding(.bottom, 9)
+            HStack(alignment: .center, spacing: 8) {
+                if live { NativeStatusDot(color: Theme.signal, size: 5, pulse: true) }
+                MicroLabel(title)
+                Spacer(minLength: 8)
+                accessory()
+            }
+            .frame(height: 18)
+            HStack(alignment: .bottom, spacing: 24) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        NativeNumberText(text: reading ?? "--", font: Theme.readout(54), color: reading == nil ? Theme.faint : Theme.ink, isolateLayout: true)
+                        MicroLabel("%", size: 11)
+                    }
+                    ForEach(lines, id: \.self) { line in
+                        Text(line).font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                }
+                .frame(minWidth: 150, alignment: .leading).fixedSize()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(title)
+                .accessibilityValue(([reading.map { $0 + " percent" } ?? "Unavailable"] + lines).joined(separator: ", "))
+                ActivityTrace(points: points, live: live).frame(maxWidth: .infinity)
+            }
+            .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+}
+
+/// The last two minutes of one percentage, drawn to the same gap rule as the
+/// readings: a missing sample breaks the line instead of bridging it.
+private struct ActivityTrace: View {
+    let points: [(Date, Double?)]
+    let live: Bool
+    private static let span: TimeInterval = 120
+
+    private var samples: [(x: Double, y: Double, segment: Int)] {
+        let segments = NativeHardwareDisplayPolicies.activityHistorySegments(points.map { (time: $0.0.timeIntervalSince1970 * 1000, value: $0.1) })
+        let now = Date()
+        return points.enumerated().compactMap { index, point in
+            guard let value = point.1, value.isFinite else { return nil }
+            let x = 1 - now.timeIntervalSince(point.0) / Self.span
+            guard x >= 0 else { return nil }
+            return (min(1, x), max(0, min(1, value / 100)), segments[index])
+        }
+    }
+
+    var body: some View {
+        let samples = samples
+        VStack(spacing: 3) {
+            HStack(alignment: .top, spacing: 6) {
+                GeometryReader { geometry in
+                    let size = geometry.size
+                    ZStack(alignment: .topLeading) {
+                        Theme.grid.frame(height: 1)
+                        Theme.grid.frame(height: 1).offset(y: size.height / 2)
+                        Theme.baseline.frame(height: 1).offset(y: size.height - 1)
+                        ActivityTraceShape(samples: samples).stroke(Theme.ink, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                        if let last = samples.last {
+                            Circle().fill(live ? Theme.signal : Theme.muted).frame(width: 5, height: 5)
+                                .position(x: last.x * size.width, y: (1 - last.y) * (size.height - 1))
+                        }
+                    }
+                }
+                .frame(height: 64)
+                VStack(alignment: .trailing) {
+                    Text("100"); Spacer(minLength: 0); Text("0")
+                }
+                .font(Theme.mono(10.5)).foregroundStyle(Theme.faint).frame(width: 22, height: 64, alignment: .trailing)
+            }
+            HStack(spacing: 6) {
+                VStack(spacing: 4) {
+                    TickScale(divisions: 24, major: 6, minorHeight: 2, majorHeight: 4).fill(Theme.faint).frame(height: 4)
+                    HStack { MicroLabel("2 min ago", color: Theme.faint); Spacer(minLength: 0); MicroLabel("Now", color: Theme.faint) }
+                }
+                Color.clear.frame(width: 22, height: 1)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct ActivityTraceShape: Shape {
+    var samples: [(x: Double, y: Double, segment: Int)]
+    func path(in rect: CGRect) -> Path {
+        var path = Path(), segment: Int?
+        for sample in samples {
+            let point = CGPoint(x: rect.minX + sample.x * rect.width, y: rect.minY + (1 - sample.y) * (rect.height - 1))
+            if segment == sample.segment { path.addLine(to: point) } else { path.move(to: point); segment = sample.segment }
+        }
+        return path
+    }
+}
+
+/// A formatted amount such as "22.5 MB": condensed numerals, then the unit as
+/// an engraved label in a fixed slot so the digits of a column share an edge.
+private struct ActivityQuantity: View {
+    var text: String
+    var unitWidth: CGFloat
+    var color: Color = Theme.ink
+    static func parts(_ text: String) -> (String, String) {
+        let pieces = text.split(separator: " ", maxSplits: 1).map(String.init)
+        return (pieces.first ?? text, pieces.count > 1 ? pieces[1] : "")
+    }
+    var body: some View {
+        let parts = Self.parts(text)
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(parts.0).font(Theme.readout(17)).foregroundStyle(parts.0 == "—" ? Theme.faint : color)
+            MicroLabel(parts.1).frame(width: unitWidth, alignment: .leading)
+        }
+        .lineLimit(1)
+        .accessibilityElement(children: .ignore).accessibilityLabel(text)
+    }
+}
+
+/// A ledger line that hosts its own controls. It draws as `LedgerRow` does
+/// (hover and selection bleed into the margin, selected rows carry the signal
+/// tick) and tells its content when the pointer is over it.
+private struct ActivityRowSurface<Content: View>: View {
+    let selected: Bool, exited: Bool
+    @ViewBuilder var content: (Bool) -> Content
+    @State private var hovering = false
+    @Environment(\.nativeReducedMotion) private var reduceMotion
+    var body: some View {
+        content(hovering)
+            .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous)
+                    .fill(selected ? Theme.pressed : hovering ? Theme.hover : .clear)
+                    .padding(.horizontal, -8)
+            }
+            .overlay(alignment: .leading) { if selected { Theme.signal.frame(width: 2, height: 14).offset(x: -8) } }
+            .overlay(alignment: .bottom) { Rule() }
+            .opacity(exited ? 0.45 : 1)
+            .onHover { hovering = $0 }
+            .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
     }
 }
