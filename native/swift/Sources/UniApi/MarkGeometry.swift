@@ -47,15 +47,19 @@ enum MarkGeometry {
 
     // ---- colors ----------------------------------------------------------
 
-    static let tileTop: UInt32    = 0x16181D
-    static let tileBottom: UInt32 = 0x0A0B0E
+    static let tileTop: UInt32    = 0x1B1D21
+    static let tileBottom: UInt32 = 0x0C0D0F
     static let tileBorder: UInt32 = 0xFFFFFF
     static let borderAlpha: CGFloat = 0.10
-    static let spineColor: UInt32 = 0xF2F5FA           // Theme.ink, near enough
+    static let spineColor: UInt32 = 0xF0F1F2           // Theme.ink on graphite
 
-    /// Theme.pairPalette[0], Theme.accent, then a dimmed accent - the longest
-    /// track is also the brightest, which is what makes it read as a winner.
-    static let barColors: [UInt32] = [0x51A2FF, 0x346BF1, 0x3B5488]
+    /// The longest track is the reading: it alone carries the signal color.
+    /// The other two are ink, the shorter one dimmer.
+    static let barColors: [UInt32] = [0xFF5A1F, 0xF0F1F2, 0x7F848C]
+
+    /// Corner radius of the spine and tracks as a fraction of their thickness.
+    /// Nearly square, like the ticks used across the app.
+    static let endRadius: CGFloat = 0.18
 
     static func rgb(_ hex: UInt32) -> (r: CGFloat, g: CGFloat, b: CGFloat) {
         (CGFloat((hex >> 16) & 0xFF) / 255.0,

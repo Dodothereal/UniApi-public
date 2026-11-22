@@ -25,14 +25,14 @@ struct UniApiMark: View {
                     )
             }
 
-            Capsule()
+            RoundedRectangle(cornerRadius: b * MarkGeometry.spineW * MarkGeometry.endRadius, style: .continuous)
                 .fill(Color(hex: MarkGeometry.spineColor))
                 .frame(width: b * MarkGeometry.spineW, height: b * MarkGeometry.spineH)
                 .position(x: b * (MarkGeometry.spineX + MarkGeometry.spineW / 2),
                           y: b * (MarkGeometry.spineY + MarkGeometry.spineH / 2))
 
             ForEach(Array(MarkGeometry.bars.enumerated()), id: \.offset) { i, bar in
-                Capsule()
+                RoundedRectangle(cornerRadius: b * MarkGeometry.barH * MarkGeometry.endRadius, style: .continuous)
                     .fill(Color(hex: MarkGeometry.barColors[i % MarkGeometry.barColors.count]))
                     .frame(width: b * (bar.right - MarkGeometry.barX), height: b * MarkGeometry.barH)
                     .position(x: b * ((MarkGeometry.barX + bar.right) / 2), y: b * bar.cy)
@@ -54,8 +54,8 @@ struct UniApiWordmark: View {
         HStack(spacing: 7) {
             UniApiMark(size: markSize)
             HStack(spacing: 0) {
-                Text("Uni").font(Theme.ui(textSize, weight: .bold))
-                Text("Api").font(Theme.ui(textSize, weight: .regular))
+                Text("Uni").font(Theme.heading(textSize, weight: .bold))
+                Text("Api").font(Theme.heading(textSize, weight: .regular))
             }
             .foregroundStyle(color)
         }

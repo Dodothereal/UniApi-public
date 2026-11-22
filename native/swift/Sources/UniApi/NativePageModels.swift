@@ -26,29 +26,37 @@ import UniApiPresentation
     }
 }
 
-/// Pointer movement must not invalidate the shell's selected chart hierarchy.
-private struct NativeSidebarHover<Content: View>: View {
+/// One index row. Pointer movement stays inside the row so it cannot
+/// invalidate the shell's selected chart hierarchy.
+/// The travelling marker is supplied by the shell so a single
+/// shape can move between rows; hover stays local to the row.
+struct NativeShellRow<Label: View, Marker: View>: View {
     let selected: Bool
+    let rail: Bool
+    let help: String
     let action: () -> Void
-    @ViewBuilder var content: () -> Content
+    @ViewBuilder var label: () -> Label
+    @ViewBuilder var marker: () -> Marker
     @State private var hovered = false
     @Environment(\.nativeReducedMotion) private var reduceMotion
     var body: some View {
         Button(action: action) {
-            content()
-                .background(selected ? Theme.sidebarAccent : hovered ? Theme.subtle : .clear)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
+            label()
+                .background {
+                    ZStack {
+                        if hovered && !selected {
+                            RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous).fill(Theme.hover)
+                        }
+                        marker()
+                    }
+                }
                 .contentShape(Rectangle())
-        }.buttonStyle(.plain).pointingHand()
-            .onHover { hovered = $0 }
-            .animation(reduceMotion ? nil : NativeMotion.hover, value: hovered)
-            .animation(reduceMotion ? nil : NativeMotion.hover, value: selected)
-            .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-}
-
-extension View {
-    func nativeSidebarRow(selected: Bool, action: @escaping () -> Void) -> some View {
-        NativeSidebarHover(selected: selected, action: action) { self }
+        }
+        .buttonStyle(.plain).pointingHand()
+        .onHover { hovered = $0 }
+        .animation(reduceMotion ? nil : NativeMotion.hover, value: hovered)
+        .accessibilityLabel(help)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .help(rail ? help : "")
     }
 }

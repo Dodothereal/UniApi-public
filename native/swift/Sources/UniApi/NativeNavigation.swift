@@ -95,7 +95,9 @@ enum NativeInstalledPages {
 
 /// Sidebar layout resets do not change appearance, sidebar open state, density or motion.
 enum NativeSidebarLayout {
-    static let defaultWidth = 216.0
+    static let defaultWidth = 212.0
+    /// Collapsed, the index stays as an icon rail wide enough to clear the window controls.
+    static let railWidth = 68.0
     static func width(_ value: Double) -> Double { value.isFinite ? min(320, max(180, value)) : defaultWidth }
     static func pages(_ stored: String) -> [NativeDestination] {
         var result: [NativeDestination] = []
@@ -135,6 +137,9 @@ struct NativeShell: View {
     @State private var reads = NativePageReadScope()
     @State private var workOwner = NativePageWorkOwner()
     @State private var subscribed = false
+    @State private var paletteOpen = false
+    @State private var marker = NativeShell.initialDestination
+    @Namespace private var markerSpace
     @StateObject private var notices = NativeNoticeCenter()
     @StateObject private var pageModels: NativePageModels
     init(runtime: NativeRuntime) { self.runtime = runtime; _pageModels = StateObject(wrappedValue: NativePageModels(runtime: runtime)) }
@@ -161,19 +166,10 @@ struct NativeShell: View {
     var body: some View {
         HStack(spacing: 0) {
             sidebar
-                .frame(width: NativeSidebarLayout.width(sidebarWidth))
-                .frame(width: sidebarOpen ? NativeSidebarLayout.width(sidebarWidth) : 0, alignment: .leading)
-                .clipped().opacity(sidebarOpen ? 1 : 0)
-            if sidebarOpen { Theme.sidebarBorder.frame(width: 1) }
+                .frame(width: sidebarOpen ? NativeSidebarLayout.width(sidebarWidth) : NativeSidebarLayout.railWidth, alignment: .leading)
+                .clipped()
+            Theme.rule.frame(width: 1)
             VStack(alignment: .leading, spacing: 0) {
-                if !sidebarOpen {
-                    HStack(spacing: 7) {
-                        UniApiWordmark(markSize: 18, textSize: 13)
-                        Button(action: toggleSidebar) { NativeIcon("panel-left", size: 15) }
-                            .buttonStyle(.plain).help("Toggle sidebar (Command-B)")
-                        Spacer()
-                    }.padding(.horizontal, 16).frame(height: 40)
-                }
                 if session.presentation.retainsPage { NativeInstalledPages.page(destination, runtime: runtime, models: pageModels, resultsRun: resultsRun, navigate: navigate)
                     .id(destination.rawValue + ":" + String(pageReload) + ":" + String(session.presentation.generation))
                     .environment(\.nativePageVisit, visit)
@@ -186,12 +182,19 @@ struct NativeShell: View {
         }
         .background(Theme.bg).foregroundStyle(Theme.ink)
         .overlay(alignment: .topTrailing) { NativeNoticeHost(center: notices) }
+        .overlay {
+            if paletteOpen {
+                NativeCommandPalette(items: paletteItems) { paletteOpen = false }
+                    .transition(reduceMotion ? .identity : .opacity.combined(with: .offset(y: -6)))
+            }
+        }
         .preferredColorScheme(scheme)
         .environment(\.nativeInterfaceDensity, NativeInterfaceDensity(rawValue: density) ?? .standard)
         .environment(\.nativeReducedMotion, reduceMotion)
         .environment(\.nativeBatterySupported, batterySupported)
         .environment(\.nativeMotionVisible, session.presented && session.pageActive)
         .onAppear { visit = NativeUIReadiness.shared.begin(destination) }
+        .onChange(of: destination) { _, page in if marker != page { marker = page } }
         .onChange(of: session.presentation.generation) { _, _ in pageModels.discard() }
         .task(id: pageActive, priority: .utility) {
             guard pageActive, destination != .stats else { return }
@@ -226,7 +229,14 @@ struct NativeShell: View {
         // narrower viewport; a second SwiftUI minimum would crop both edges.
         .frame(minWidth: 0, idealWidth: 1150, maxWidth: .infinity, minHeight: 0, idealHeight: 840, maxHeight: .infinity, alignment: .topLeading)
         .background {
-            Button("Toggle sidebar", action: toggleSidebar).keyboardShortcut("b", modifiers: .command).hidden().accessibilityHidden(true)
+            Group {
+                Button("Toggle sidebar", action: toggleSidebar).keyboardShortcut("b", modifiers: .command)
+                Button("Jump to", action: togglePalette).keyboardShortcut("k", modifiers: .command)
+                ForEach(Array(shortcutPages.enumerated()), id: \.element) { index, page in
+                    Button(page.title) { open(page) }
+                        .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
+                }
+            }.hidden().accessibilityHidden(true)
         }
         .task {
             // Register before initial reads so a badge edge cannot land in the gap.
@@ -269,77 +279,162 @@ struct NativeShell: View {
             }
         }
     }
+    /// Visible destinations in the order the index shows them.
+    private var visiblePages: [NativeDestination] {
+        let grouped = NativeSidebarLayout.pages(sidebarOrder).filter {
+            NativeInstalledPages.destinations.contains($0)
+                && NativeShellPolicy.admits($0.rawValue, batterySupported: batterySupported)
+                && NativeNavigationPreferences.isSidebarVisible($0.rawValue, hiddenPages: sidebarHidden)
+        }
+        let sections = NativeSidebarLayout.orderedSections(sidebarOrder)
+        return [.home] + sections.flatMap { section in grouped.filter { $0.section == section } } + [.jobs, .settings]
+    }
+    private var shortcutPages: [NativeDestination] { Array(visiblePages.prefix(9)) }
+    private var rail: Bool { !sidebarOpen }
+
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                UniApiWordmark(markSize: 18, textSize: 13); Spacer()
-                Button(action: toggleSidebar) { NativeIcon("panel-left", size: 15) }
-                    .buttonStyle(.plain).foregroundStyle(Theme.muted).help("Toggle sidebar (Command-B)")
-            }.frame(height: 40).padding(.horizontal, 16)
+            Group {
+                if rail {
+                    VStack(spacing: 6) {
+                        UniApiMark(size: 22)
+                        IconPress(icon: "panel-left", help: "Expand the index (Command-B)", action: toggleSidebar)
+                        IconPress(icon: "search", help: "Jump to (Command-K)", action: togglePalette)
+                    }.frame(maxWidth: .infinity)
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 0) {
+                            UniApiWordmark(markSize: 20, textSize: 13)
+                            Spacer(minLength: 0)
+                            IconPress(icon: "panel-left", help: "Collapse the index (Command-B)", action: toggleSidebar)
+                        }.padding(.leading, 6)
+                        Button(action: togglePalette) {
+                            HStack(spacing: 8) {
+                                NativeIcon("search", size: 13, strokeWidth: 1.75)
+                                Text("Jump to").font(Theme.ui(12.5))
+                                Spacer(minLength: 0)
+                                KeyCap("\u{2318}K")
+                            }
+                            .foregroundStyle(Theme.muted).padding(.horizontal, 9).frame(height: 28)
+                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous).strokeBorder(Theme.rule, lineWidth: 1))
+                            .contentShape(Rectangle())
+                        }.buttonStyle(.plain).pointingHand().accessibilityLabel("Jump to a page or command")
+                    }
+                }
+            }
+            .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 12)
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: rail ? 10 : 18) {
                     navigationRow(.home)
                     ForEach(NativeSidebarLayout.orderedSections(sidebarOrder), id: \.self) { section in
-                        let pages = NativeSidebarLayout.pages(sidebarOrder).filter {
-                            $0.section == section
-                                && NativeInstalledPages.destinations.contains($0)
-                                && NativeShellPolicy.admits($0.rawValue, batterySupported: batterySupported)
-                                && NativeNavigationPreferences.isSidebarVisible($0.rawValue, hiddenPages: sidebarHidden)
-                        }
+                        let pages = visiblePages.filter { $0.section == section }
                         if !pages.isEmpty {
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(section.uppercased()).font(Theme.ui(10.5, weight: .medium)).tracking(0.84).foregroundStyle(Theme.muted).padding(.horizontal, 8).padding(.top, 2).padding(.bottom, 4)
+                                if rail { Rule().padding(.horizontal, 14).padding(.bottom, 9) }
+                                else { MicroLabel(section).padding(.horizontal, 10).padding(.bottom, 6) }
                                 ForEach(pages) { navigationRow($0) }
                             }
                         }
                     }
-                }.padding(.horizontal, 8).padding(.vertical, 8)
+                }.padding(.horizontal, 10).padding(.bottom, 10)
             }
-            VStack(spacing: 1) { navigationRow(.jobs); navigationRow(.settings) }.padding(.horizontal, 8).padding(.vertical, 8)
-            Divider().padding(.horizontal, 10)
-            footer.padding(.horizontal, 14).padding(.bottom, 14)
+            .scrollIndicators(.never)
+            VStack(spacing: 1) { navigationRow(.jobs); navigationRow(.settings) }.padding(.horizontal, 10).padding(.vertical, 8)
+            Rule()
+            footer.padding(.horizontal, rail ? 0 : 16).padding(.vertical, 12)
         }.background(Theme.sidebarBG)
     }
     private var footer: some View {
         let shim = NativeShellPolicy.shim(routeStatus)
-        return VStack(alignment: .leading, spacing: 7) {
-            NativeUpdateSidebarButton(model: session.updates).padding(.bottom, 3)
-            HStack(spacing: 7) {
-                NativeStatusDot(color: shim.state == .up ? Theme.okFg : shim.state == .down ? Theme.failFg : shim.state == .legacy ? Theme.warnFg : Theme.muted)
-                Text(shim.text).font(Theme.ui(11)).foregroundStyle(shim.state == .down ? Theme.failFg : Theme.muted)
+        let color = shim.state == .up ? Theme.okFg : shim.state == .down ? Theme.failFg : shim.state == .legacy ? Theme.warnFg : Theme.muted
+        let route = NativeShellPolicy.route(routeStatus).name
+        return Group {
+            if rail {
+                NativeStatusDot(color: color).frame(maxWidth: .infinity).frame(height: 16)
+                    .help("Claude Code: " + route + ". " + shim.text)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    NativeUpdateSidebarButton(model: session.updates)
+                    MicroLabel("Claude Code route")
+                    Text(route).font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                    HStack(spacing: 6) {
+                        NativeStatusDot(color: color)
+                        Text(shim.text).font(Theme.ui(11)).foregroundStyle(shim.state == .down ? Theme.failFg : Theme.muted).lineLimit(1)
+                    }
+                    if let error = session.error { Text("Startup failed: " + error).font(Theme.ui(10)).foregroundStyle(Theme.failFg).textSelection(.enabled) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            Text("Claude Code: " + NativeShellPolicy.route(routeStatus).name).font(Theme.ui(11)).foregroundStyle(Theme.dim).lineLimit(1).truncationMode(.middle)
-            if let error = session.error { Text("Startup failed: " + error).font(Theme.ui(10)).foregroundStyle(Theme.failFg).textSelection(.enabled) }
         }
     }
+    private func reading(_ page: NativeDestination) -> String {
+        guard sidebarBadges else { return "" }
+        if page == .jobs { return activeJobs > 0 ? String(activeJobs) : "" }
+        if [.code, .arena].contains(page) { return badges[page.rawValue].int > 0 ? badges[page.rawValue].string : "" }
+        if page == .battery { return badges["battery"].isNull ? "" : badges["battery"].string + "%" }
+        if page == .energy { return badges["energy"].isNull ? "" : badges["energy"].string }
+        return ""
+    }
     private func navigationRow(_ page: NativeDestination) -> some View {
+        let selected = destination == page
+        let value = reading(page)
+        return NativeShellRow(selected: selected, rail: rail, help: page.title, action: { open(page) }) {
             HStack(spacing: 9) {
-                if page == .fans {
-                    NativeSpinningFan(rpm: fansSpinning ? 1250 : 0, size: 15).nativeMotionVisibility(initiallyVisible: false).frame(width: 15, height: 15)
-                } else { NativeIcon(page.symbol, size: 15, strokeWidth: 1.75) }
-                Text(page.title).font(Theme.ui(13, weight: destination == page ? .medium : .regular))
-                Spacer()
-                if sidebarBadges {
-                    if page == .jobs && activeJobs > 0 { Text(String(activeJobs)).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
-                    if [.code, .arena].contains(page), badges[page.rawValue].int > 0 { Text(badges[page.rawValue].string).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
-                    if page == .battery, !badges["battery"].isNull { Text(badges["battery"].string + "%").font(Theme.mono(10)).foregroundStyle(Theme.muted) }
-                    if page == .energy, !badges["energy"].isNull, !badges["energy"].string.isEmpty { Text(badges["energy"].string).font(Theme.mono(10)).foregroundStyle(Theme.muted) }
+                Group {
+                    if page == .fans {
+                        NativeSpinningFan(rpm: fansSpinning ? 1250 : 0, size: 15).nativeMotionVisibility(initiallyVisible: false)
+                    } else { NativeIcon(page.symbol, size: 15, strokeWidth: 1.6) }
+                }.frame(width: 15, height: 15)
+                if !rail {
+                    Text(page.title).font(Theme.ui(13, weight: selected ? .medium : .regular)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    if !value.isEmpty { Text(value).font(Theme.mono(10.5)).foregroundStyle(selected ? Theme.dim : Theme.muted).lineLimit(1) }
                 }
-            }.padding(.horizontal, 8).frame(height: 32)
-                .foregroundStyle(destination == page ? Theme.sidebarInk : Theme.sidebarMuted)
-            .nativeSidebarRow(selected: destination == page) {
-                if page == .results { resultsRun = nil }; navigate(page)
             }
+            .padding(.horizontal, rail ? 0 : 10)
+            .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28, alignment: rail ? .center : .leading)
+            .foregroundStyle(selected ? Theme.ink : Theme.dim)
+            .overlay(alignment: .topTrailing) {
+                if rail, !value.isEmpty { Circle().fill(Theme.signal).frame(width: 4, height: 4).offset(x: -12, y: 5) }
+            }
+        } marker: {
+            if marker == page {
+                RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous).fill(Theme.sidebarAccent)
+                    .overlay(alignment: .leading) { Theme.signal.frame(width: 2, height: 14) }
+                    .matchedGeometryEffect(id: "marker", in: markerSpace)
+            }
+        }
+    }
+    private func open(_ page: NativeDestination) {
+        if page == .results { resultsRun = nil }
+        navigate(page)
+    }
+    private var paletteItems: [NativeCommandPalette.Item] {
+        var items = visiblePages.enumerated().map { index, page in
+            NativeCommandPalette.Item(id: "page." + page.rawValue, title: page.title, group: page.section.isEmpty ? "Go to" : page.section,
+                                      icon: page.symbol, key: index < 9 ? "\u{2318}" + String(index + 1) : "") { open(page) }
+        }
+        items.append(.init(id: "command.sidebar", title: sidebarOpen ? "Collapse the index" : "Expand the index", group: "Command", icon: "panel-left", key: "\u{2318}B") { toggleSidebar() })
+        items.append(.init(id: "command.reload", title: "Reload this page", group: "Command", icon: "refresh-cw", key: "") {
+            NotificationCenter.default.post(name: .nativePageReload, object: nil)
+        })
+        for (value, title, icon) in [("dark", "Appearance: Graphite", "moon"), ("light", "Appearance: Paper", "sun"), ("auto", "Appearance: Match macOS", "monitor")] where appearance != value {
+            items.append(.init(id: "command.appearance." + value, title: title, group: "Command", icon: icon, key: "") { appearance = value })
+        }
+        return items
+    }
+    private func togglePalette() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { paletteOpen.toggle() }
     }
     private func navigate(_ page: NativeDestination) {
         guard NativeShellPolicy.admits(page.rawValue, batterySupported: batterySupported) else { return }
         if page != destination { NativePagePanels.shared.invalidatePresentation(); visit = NativeUIReadiness.shared.begin(page) }
-        // Only local selection/entrance effects animate, never the complete new chart tree.
+        // The page itself appears at once; only the index marker travels.
         NativeMotion.withoutAnimation { destination = page }
+        withAnimation(reduceMotion ? nil : NativeMotion.marker) { marker = page }
         UserDefaults.standard.set(page.rawValue, forKey: "uniapi-native-page")
     }
     private func toggleSidebar() {
-        withAnimation(reduceMotion ? nil : .spring(duration: 0.34, bounce: 0.08)) { sidebarOpen.toggle() }
+        withAnimation(reduceMotion ? nil : NativeMotion.sidebar) { sidebarOpen.toggle() }
         UserDefaults.standard.set(sidebarOpen, forKey: "uniapi-sidebar")
     }
     private func refreshBadges() async {

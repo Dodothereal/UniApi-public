@@ -25,7 +25,9 @@ enum NativeMotion {
     static let number = Animation.spring(NativeNumberHost.transitionSpring)
     static let bar = Animation.spring(duration: 0.6)
     static let barUpdate = Animation.spring(duration: 0.5)
-    static let sidebar = Animation.spring(duration: 0.34, bounce: 0.08)
+    static let sidebar = Animation.spring(duration: 0.3, bounce: 0.04)
+    /// The index marker travelling between rows.
+    static let marker = Animation.spring(duration: 0.26, bounce: 0.12)
     static let isolation = Animation.easeOut(duration: 0.25)
     static let cycle: Double = 2.2
 
