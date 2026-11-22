@@ -275,7 +275,8 @@ private struct NativeStatsContents: View {
     private var t: JSONValue { d["summary"]["totals"] }
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 24) {
-            if !detail, nativeStatsGrand(t) == 0, t["messages"].double == 0 {
+            let benchmarked = view == "speed" && payload["source"].string == "all" && (benchmark["spend"]["calls"].int > 0 || !benchmark["trend"].array.isEmpty)
+            if !detail, nativeStatsGrand(t) == 0, t["messages"].double == 0, !benchmarked {
                 ForEach(Array(payload["warnings"].array.enumerated()), id: \.offset) { _, warning in NativeError(message: warning.string) }
                 NativeEmptyState(title: "No usage recorded", detail: payload["source"].string == "all" ? "Sessions from Claude Code, Codex, Antigravity, Z Code and OpenCode on this Mac are counted here." : "Try another range or source.", icon: "chart-line")
             } else {
