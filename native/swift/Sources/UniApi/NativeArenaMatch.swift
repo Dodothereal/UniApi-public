@@ -28,7 +28,7 @@ struct NativeArenaMatch: View {
             Stops(options: [("Result", "Result"), ("Transcript", "Transcript"), ("Files", "Files")], selection: tab) { tab = $0 }
                 .accessibilityLabel("Contestant content")
         } content: {
-            ColumnFlow(minimum: 300, spacing: 24, rowSpacing: 28, maxColumns: 4) {
+            ColumnFlow(minimum: 280, spacing: 24, rowSpacing: 28, maxColumns: 4) {
                 ForEach(match["slots"].array, id: \.self) { slot in
                     NativeArenaSlot(runtime: runtime, model: model, slot: slot, rank: rank(slot),
                                     pickable: judging && done.count > 1 && slot["status"].string == "done" && !picks.contains(slot["idx"].int),
@@ -329,26 +329,30 @@ private struct NativeArenaSlot: View {
     @ViewBuilder private var result: some View {
         let presents = slot["presents"].array
         // A preview fills the stage beneath its caption instead of scrolling inside a scroller.
-        let viewport = max(220, stage - (presents.count > 1 ? 150 : 112))
+        let viewport = max(190, stage - (presents.count > 1 ? 162 : 124))
         if !presents.isEmpty {
             if presents.count > 1 {
                 ScrollView(.horizontal) { Stops(options: Array(presents.enumerated()).map { (value: $0.offset, label: $0.element["title"].string) }, selection: presentation) { presentation = $0 } }
                     .scrollIndicators(.hidden).accessibilityLabel("Presentation")
             }
             let p = presents[min(presentation, presents.count - 1)]
-            VStack(alignment: .leading, spacing: 3) {
-                Text(p["title"].string).font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink)
-                if !p["note"].isNull { Text(p["note"].string).font(Theme.ui(12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+            let link = p["kind"].string == "url" ? URL(string: p["url"].string).flatMap { ["http", "https"].contains($0.scheme ?? "") ? $0 : nil } : nil
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(p["title"].string).font(Theme.ui(13, weight: .medium)).foregroundStyle(Theme.ink)
+                    if !p["note"].isNull { Text(p["note"].string).font(Theme.ui(12.5)).foregroundStyle(Theme.muted).lineLimit(1).help(p["note"].string) }
+                }
+                Spacer(minLength: 0)
+                if let link { IconPress(icon: "external-link", help: "Open in browser") { openURL(link) } }
+                else if p["kind"].string != "text" { IconPress(icon: "maximize", help: "Expand preview") { open(p["path"].string) } }
             }
             if p["kind"].string == "text" { NativeCodeMarkdown(text: p["text"].string) }
-            else if p["kind"].string == "url", let url = URL(string: p["url"].string), ["http", "https"].contains(url.scheme ?? "") {
+            else if link != nil {
                 NativeArenaURLPreview(url: p["url"].string).id(p["url"].string).frame(height: viewport)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous))
-                Button("Open in browser", nativeIcon: "external-link") { openURL(url) }.buttonStyle(Press(.quiet)).padding(.leading, -8)
             } else {
                 NativeArenaFileView(runtime: runtime, slotID: id, path: p["path"].string).frame(height: viewport)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous))
-                Button("Expand preview", nativeIcon: "external-link") { open(p["path"].string) }.buttonStyle(Press(.quiet)).padding(.leading, -8)
             }
             if !slot["final_text"].string.isEmpty {
                 Button { showFinal.toggle() } label: {
@@ -369,13 +373,23 @@ private struct NativeArenaSlot: View {
             MicroLabel(unit)
         }.fixedSize()
     }
+    private func measures(spacing: CGFloat) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: spacing) {
+            measure(NativeArenaDuration(slot["duration_ms"].double), "time")
+            measure(String(slot["turns"].int), "steps")
+            measure(String(slot["tool_calls"].int), "tools")
+            measure(NativeNumberFormat.compact(slot["output_tokens"].double), "out")
+        }
+    }
     private var foot: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 16) {
-                measure(NativeArenaDuration(slot["duration_ms"].double), "time")
-                measure(String(slot["turns"].int), "steps")
-                measure(String(slot["tool_calls"].int), "tools")
-                measure(NativeNumberFormat.compact(slot["output_tokens"].double), "out")
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                ViewThatFits(in: .horizontal) {
+                    measures(spacing: 16)
+                    measures(spacing: 9)
+                    Text("\(NativeArenaDuration(slot["duration_ms"].double)) · \(slot["turns"].int) steps · \(slot["tool_calls"].int) tools · \(NativeNumberFormat.compact(slot["output_tokens"].double)) out")
+                        .font(Theme.mono(11)).foregroundStyle(Theme.muted).lineLimit(1)
+                }
                 Spacer(minLength: 0)
                 if slot["blocked"].int > 0 { Tag("\(slot["blocked"].int) refused", tone: Theme.warnFg) }
             }

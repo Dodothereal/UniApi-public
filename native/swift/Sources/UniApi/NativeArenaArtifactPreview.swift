@@ -12,7 +12,7 @@ struct NativeArenaArtifactPreview: View {
     @Environment(\.dismiss) private var dismiss
     @State private var error = ""
     var body: some View {
-        BenchSheet(title: URL(fileURLWithPath: path).lastPathComponent, detail: path, width: 950, height: 700) {
+        BenchSheet(title: URL(fileURLWithPath: path).lastPathComponent, detail: path.contains("/") ? path : "", width: 950, height: 700) {
             VStack(alignment: .leading, spacing: 12) {
                 NativeArenaFileView(runtime: runtime, slotID: slotID, path: path).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Theme.well)

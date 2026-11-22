@@ -42,7 +42,7 @@ struct NativeArenaPage: View {
             Button("New match", nativeIcon: "plus") { compose("") }.buttonStyle(Press(.primary)).disabled(!model.loaded)
         }) {
             if !model.pageError(includeRanking: tab == "Ranking").isEmpty { BenchFailure(message: model.pageError(includeRanking: tab == "Ranking")) }
-            if model.loaded { reading }
+            if model.loaded { reading(wide: width >= 700) }
             HStack(spacing: 16) {
                 Stops(options: ["Judge", "History", "Ranking", "Presets"].map { (value: $0, label: $0) }, selection: tab, spacing: 22) { tab = $0; historyOpen = false }
                     .accessibilityLabel("Arena view")
@@ -70,14 +70,14 @@ struct NativeArenaPage: View {
     private func compose(_ id: String) { preset = id; composing = true }
 
     // ---- reading ---------------------------------------------------------
-    private var reading: some View {
+    private func reading(wide: Bool) -> some View {
         let waiting = model.matches.filter { $0["status"].string == "done" && $0["voted_at"].isNull }.count
         let running = model.matches.filter { ["queued", "running"].contains($0["status"].string) }.count
         let judged = model.matches.filter { ["ranked", "all_bad"].contains($0["verdict"].string) }.count
         let pool = model.state["contestants"].array.count
         let eligible = pool - model.state["excluded"].array.count
-        return ReadoutStrip(minimum: 150) {
-            Readout(label: "Waiting for a verdict", value: String(waiting), unit: waiting == 1 ? "match" : "matches", size: .hero,
+        return ReadoutStrip(minimum: 132) {
+            Readout(label: wide ? "Waiting for a verdict" : "To judge", value: String(waiting), unit: waiting == 1 ? "match" : "matches", size: .hero,
                     tint: waiting > 0 ? Theme.signal : nil)
             Readout(label: "Running", value: String(running), unit: running == 1 ? "match" : "matches",
                     detail: running == 0 ? "Nothing in the background" : "Results arrive here when they finish",

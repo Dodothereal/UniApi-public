@@ -39,13 +39,22 @@ struct NativeArenaNewMatch: View {
     }
     var body: some View {
         BenchSheet(title: "New match", detail: mode == "random" ? "blind draw" : "head-to-head", width: 640) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    taskBand
-                    fieldBand
-                    limits
-                }.padding(.trailing, 2)
-            }.frame(maxHeight: 600)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        taskBand
+                        fieldBand
+                        limits.id("limits")
+                    }.padding(.trailing, 2)
+                }
+                .frame(maxHeight: 600)
+                // The limits open below the fold on a short window; bring them into view.
+                .onChange(of: showLimits) { _, open in
+                    guard open else { return }
+                    if reduceMotion { proxy.scrollTo("limits", anchor: .bottom) }
+                    else { withAnimation(NativeMotion.toggle) { proxy.scrollTo("limits", anchor: .bottom) } }
+                }
+            }
         } note: {
             Text(blocker)
         } actions: {
@@ -73,7 +82,7 @@ struct NativeArenaNewMatch: View {
                     .font(Theme.ui(12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             } else {
                 BenchEditor(text: Binding(get: { prompt }, set: { prompt = $0; presetID = "" }),
-                            placeholder: "What every contestant is asked to do, in its own empty folder", label: "Match prompt", height: 148)
+                            placeholder: "What every contestant is asked to do, in its own empty folder", label: "Match prompt", height: 124)
             }
             HStack(spacing: 10) {
                 Flip(isOn: $randomPreset).accessibilityLabel("Draw a random preset")

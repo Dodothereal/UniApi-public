@@ -400,7 +400,7 @@ struct NativePromptsPage: View {
                 HStack(spacing: 12) {
                     Button("Choose files", nativeIcon: "upload", action: chooseFiles)
                     Text(files.isEmpty ? "or drop them here. Any type, 50 MiB per file." : "Each file becomes a result with the model below.")
-                        .font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
+                        .font(Theme.ui(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
                     Spacer(minLength: 0)
                 }.padding(14)
                 ForEach(files, id: \.self) { url in

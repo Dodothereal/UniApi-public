@@ -114,7 +114,7 @@ struct BenchSheet<Content: View, Note: View, Actions: View>: View {
             content().padding(.top, 20)
                 .frame(maxWidth: .infinity, maxHeight: height == nil ? nil : .infinity, alignment: .topLeading)
             HStack(alignment: .center, spacing: 8) {
-                note().font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(2)
+                note().font(Theme.ui(11.5)).foregroundStyle(Theme.muted).lineLimit(3).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 12)
                 actions()
             }.padding(.top, 20)
