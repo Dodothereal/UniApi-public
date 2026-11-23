@@ -101,7 +101,8 @@ struct NativeResultsPage: View {
             GeometryReader { geometry in content(width: geometry.size.width) }
         }
         .nativePageTask { await state.begin(runtime: runtime) }.nativePageActivity(suspended: { state.stop() })
-        .task(id: state.payload["scope"].string + "\(state.payload["runs"].array.count)") {
+        // Usage covers every run. Each row a run adds changes that run's counts here.
+        .task(id: state.payload["runs"]) {
             if !state.payload.isNull { await state.loadUsage() }
         }
         .onChange(of: state.payload["scope"].string) { selected = nil }
