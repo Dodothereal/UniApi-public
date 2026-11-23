@@ -808,7 +808,11 @@ private struct NativeStatsBoard: View {
         let s: JSONValue = model == nil ? summary : detailLoaded ? detail["datedSummary"] : .null
         return section("Activity") {
             if let row = projectRow {
+                // The headline stays with the chart, so the project's own counts live here.
+                let t = row["totals"], prompt = t["input"].double + t["cacheRead"].double + t["cacheWrite"].double
+                if !lifetime { fact("Responses", nativeStatsCount(t["messages"].double)) }
                 fact("Sessions", "\(row["sessions"].int)")
+                fact("Prompt from cache", prompt > 0 ? String(format: "%.1f%%", t["cacheRead"].double * 100 / prompt) : "—")
             } else if s.isNull, let row = modelRow {
                 fact("Sessions", "\(row["sessions"].int)"); fact("Active days", "\(row["days"].int)")
             } else {
