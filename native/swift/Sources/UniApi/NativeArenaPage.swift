@@ -159,12 +159,10 @@ struct NativeArenaPage: View {
             LazyVStack(spacing: 0) {
                 if scope == .history { matchRows(visible) }
                 else {
-                    let ready = visible.filter { $0["status"].string == "done" && $0["voted_at"].isNull }
-                    let running = visible.filter { ["running", "queued"].contains($0["status"].string) }
-                    let reviewed = visible.filter { !$0["voted_at"].isNull || ["failed", "cancelled"].contains($0["status"].string) }
-                    matchGroup("Ready to judge", rows: ready)
-                    matchGroup("In progress", rows: running)
-                    matchGroup("Reviewed", rows: reviewed)
+                    let groups = Dictionary(grouping: visible, by: ArenaMatchSelection.JudgeGroup.init)
+                    ForEach(ArenaMatchSelection.JudgeGroup.allCases, id: \.self) { group in
+                        matchGroup(group.title, rows: groups[group] ?? [])
+                    }
                 }
             }
         }

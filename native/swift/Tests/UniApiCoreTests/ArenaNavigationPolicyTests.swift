@@ -54,4 +54,14 @@ final class ArenaNavigationPolicyTests: XCTestCase {
         XCTAssertTrue(selection.visible([prior, skipped], in: .judge).isEmpty)
         XCTAssertEqual(selection[.history], "prior")
     }
+
+    func testNextWrapsFromSkippedMatchToFirstReadyMatchInJudgeOrder() {
+        let first: JSONValue = ["id": "first", "status": "done", "created_at": 1]
+        let skipped: JSONValue = ["id": "skipped", "status": "done", "created_at": 2, "voted_at": 4]
+        let running: JSONValue = ["id": "running", "status": "running", "created_at": 3]
+        var selection = ArenaMatchSelection()
+        selection[.judge] = "skipped"
+        let rows = selection.visible([first, skipped, running], in: .judge)
+        XCTAssertEqual(ArenaPresentationPolicy.nextMatchID(in: rows, after: "skipped", history: false), "first")
+    }
 }

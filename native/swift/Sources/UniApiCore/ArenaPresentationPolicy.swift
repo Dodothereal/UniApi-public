@@ -2,6 +2,26 @@ import Foundation
 
 public struct ArenaMatchSelection: Equatable, Sendable {
     public enum Scope: Sendable, Hashable { case judge, history }
+    public enum JudgeGroup: Int, CaseIterable, Sendable {
+        case ready, inProgress, reviewed
+
+        public init(_ match: JSONValue) {
+            guard match["voted_at"].isNull else { self = .reviewed; return }
+            switch match["status"].string {
+            case "done": self = .ready
+            case "queued", "running": self = .inProgress
+            default: self = .reviewed
+            }
+        }
+
+        public var title: String {
+            switch self {
+            case .ready: "Ready to judge"
+            case .inProgress: "In progress"
+            case .reviewed: "Reviewed"
+            }
+        }
+    }
     private var selection: [Scope: String] = [:]
 
     public init() {}
@@ -14,11 +34,10 @@ public struct ArenaMatchSelection: Equatable, Sendable {
     public func visible(_ matches: [JSONValue], in scope: Scope) -> [JSONValue] {
         let selected = self[scope]
         return matches.filter {
-            scope == .history || $0["id"].string == selected ||
-                ($0["voted_at"].isNull && ["done", "running", "queued"].contains($0["status"].string))
+            scope == .history || $0["id"].string == selected || JudgeGroup($0) != .reviewed
         }.sorted {
             if scope == .history { return $0["created_at"].double > $1["created_at"].double }
-            let left = $0["status"].string == "done" ? 0 : 1, right = $1["status"].string == "done" ? 0 : 1
+            let left = JudgeGroup($0).rawValue, right = JudgeGroup($1).rawValue
             return left == right ? $0["created_at"].double < $1["created_at"].double : left < right
         }
     }
