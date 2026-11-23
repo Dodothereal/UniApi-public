@@ -206,8 +206,8 @@ Hardware controls may require compatible devices and an explicitly installed hel
 
 ## Screenshots
 
-These are native views captured offscreen with empty fixture data. Setup uses
-820×660 and 640×520 viewports; the page views use 1050×800 points.
+These are native views captured offscreen with empty or synthetic fixture data. Setup uses
+820×660 and 640×520 viewports. Arena uses 1050×800 and 720×700 points.
 The capture-only session bypasses normal background-service
 startup. They illustrate views, not full-shell interaction, fresh-install
 acceptance or compositor behavior. The [sanitized manifest](assets/screenshots/manifest.json)
@@ -233,6 +233,24 @@ directly. The single-screen guide can be skipped or replayed from Settings.
 
 The sample contains two synthetic records. Its cost is a reference estimate,
 not an operator's usage or billed spend.
+
+**Arena — blind comparison and ranking**
+
+Judge shows matches ready for review and those still running. Choose any two
+contestants to compare, then rank the finished answers or skip. A skipped
+match stays revealed until you choose Next. History has its own selection
+and search. After reveal, performance bars show total elapsed time, output
+tokens, and reported cost when recorded. Ranking shows Elo, rated comparison
+counts, and the win rate against each opponent for the selected ledger scope.
+
+![Arena Judge with anonymous contestants, Dark appearance](assets/screenshots/arena-judge-dark.png)
+
+[Judge — Light](assets/screenshots/arena-judge-light.png) ·
+[Revealed performance](assets/screenshots/arena-revealed-dark.png) ·
+[Ranking and head-to-head](assets/screenshots/arena-ranking-dark.png) ·
+[New match](assets/screenshots/arena-new-match-dark.png) ·
+[History](assets/screenshots/arena-history-dark.png) ·
+[Compact Ranking](assets/screenshots/arena-ranking-light-720x700.png)
 
 **Results — sample comparison, Dark**
 

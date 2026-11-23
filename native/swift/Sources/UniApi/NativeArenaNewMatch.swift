@@ -22,7 +22,16 @@ struct NativeArenaNewMatch: View {
     private var contestants: [JSONValue] { model.state["contestants"].array }
     private var chosen: Set<String> { ArenaContestantPolicy.selection(Set(((try? JSONValue.decode(Data(chosenJSON.utf8))) ?? []).array.map(\.string)), contestants: contestants) }
     private var eligible: Set<String> { Set(contestants.map { $0["key"].string }).subtracting(model.state["excluded"].array.map(\.string)) }
-    private var startDisabled: Bool { busy || (mode == "random" ? eligible.count < count : chosen.count < 2 || chosen.count > 8) || !randomPreset && presetID.isEmpty && prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var taskIssue: String? {
+        if randomPreset { return model.state["presets"].array.isEmpty ? "Save a preset before drawing one at random." : nil }
+        return presetID.isEmpty && prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Enter a task or choose a preset to start." : nil
+    }
+    private var contestantIssue: String? {
+        if contestants.count < 2 { return "Set up at least two available models in Switcher." }
+        if mode == "random" { return eligible.count < count ? "Add models to the pool or reduce the contestant count." : nil }
+        return !(2...8).contains(chosen.count) ? "Choose two to eight contestants." : nil
+    }
+    private var startDisabled: Bool { busy || taskIssue != nil || contestantIssue != nil }
     @Environment(\.nativeInterfaceDensity) private var density
     private func label(_ text: String, detail: String = "") -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -33,6 +42,7 @@ struct NativeArenaNewMatch: View {
     /// The task every contestant gets. It is the page; the right pane only says who runs it and for how long.
     private func task(fills: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            label("Task", detail: "The same prompt goes to every contestant")
             HStack(spacing: 10) {
                 NativeMenuSelectLabel(title: model.state["presets"].array.first(where: { $0["id"].string == presetID })?["title"].string ?? "Custom prompt", width: 260) {
                     Button("Custom prompt") { presetID = "" }
@@ -47,6 +57,7 @@ struct NativeArenaNewMatch: View {
                 T3Switch(isOn: $randomPreset).accessibilityLabel("Draw a random preset")
                     .help("Draw a different preset for each match, so no single task decides the ranking.")
             }
+            if let taskIssue { Text(taskIssue).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted) }
             if randomPreset {
                 Text("Each match draws one of the \(model.state["presets"].array.count) presets.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
@@ -77,6 +88,7 @@ struct NativeArenaNewMatch: View {
                     }
                     Button(picked.isEmpty ? "Pick contestants" : "Change", nativeIcon: "plus") { picker = "chosen" }.buttonStyle(T3Button(.outline))
                 }
+                if let contestantIssue { Text(contestantIssue).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted) }
             }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .leading, spacing: 12) {
                 label("Limits", detail: "per contestant")

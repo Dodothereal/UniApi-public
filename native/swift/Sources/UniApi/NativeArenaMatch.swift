@@ -6,19 +6,27 @@ struct NativeArenaMatch: View {
     let runtime: NativeRuntime
     @ObservedObject var model: NativeArenaModel
     let match: JSONValue
+    let hold: () -> Void
     let next: () -> Void
     @State private var picks: [Int] = []
     @State private var busy = false
     @State private var showPrompt = false
-    @State private var content = "Result"
-    private var done: [JSONValue] { match["slots"].array.filter { $0["status"].string == "done" } }
+    @State private var selectedContent: String?
+    @State private var pair = [0, 1]
+    private var slots: [JSONValue] { match["slots"].array }
+    private var done: [JSONValue] { slots.filter { $0["status"].string == "done" } }
+    private var revealed: Bool { match["revealed"].bool }
+    private var content: String { selectedContent ?? (revealed ? "Performance" : "Result") }
     private var judging: Bool { match["status"].string == "done" && match["voted_at"].isNull }
     private var running: Bool { ["queued", "running"].contains(match["status"].string) }
     @Environment(\.nativeInterfaceDensity) private var density
+    @Environment(\.nativeReducedMotion) private var reducedMotion
+    @Environment(\.nativeMotionVisible) private var motionVisible
+    private var canAnimate: Bool { !reducedMotion && motionVisible }
     private var order: String { picks.map { String(UnicodeScalar(65 + max(0, min(7, $0)))!) }.joined(separator: " > ") }
     var body: some View { VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top, spacing: 8) {
-            Button { showPrompt.toggle() } label: {
+            Button { withAnimation(canAnimate ? NativeMotion.reveal : nil) { showPrompt.toggle() } } label: {
                 // A scrolling task has no text baseline for the chevron to sit on.
                 HStack(alignment: showPrompt ? .top : .firstTextBaseline, spacing: 8) {
                     NativeIcon("chevron-right", size: 12).foregroundStyle(Theme.faint).rotationEffect(.degrees(showPrompt ? 90 : 0))
@@ -38,10 +46,12 @@ struct NativeArenaMatch: View {
         }.padding(.horizontal, density.pageMargin).padding(.top, 14).padding(.bottom, 6)
         // One switch for every contestant: the same part of each answer, side by side.
         HStack(spacing: 8) {
-            NativeTabs(options: [("Result", "Result"), ("Transcript", "Transcript"), ("Files", "Files")], selection: content, height: 34) { content = $0 }
+            NativeTabs(options: (["Result", "Transcript", "Files"] + (revealed ? ["Performance"] : [])).map { ($0, $0) }, selection: content, height: 34) {
+                selectedContent = $0
+            }
                 .accessibilityLabel("Contestant content")
             Spacer(minLength: 8)
-            Text("\(done.count)/\(match["slots"].array.count) finished").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.muted).lineLimit(1)
+            NativeNumberText(text: "\(done.count)/\(slots.count) finished", font: Theme.num(Theme.textXs, weight: .regular), color: Theme.muted).lineLimit(1)
             if running { Button("Stop", nativeIcon: "square") { act("cancel") }.buttonStyle(T3Button(.outline)) }
             NativeIconMenu(help: "Match actions") {
                 if !running { Button("Run again") { act("rerun") } }
@@ -50,15 +60,20 @@ struct NativeArenaMatch: View {
         }.padding(.horizontal, density.pageMargin).disabled(busy)
             .overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
         if !match["error"].isNull { NativeError(message: match["error"].string).padding(.horizontal, density.pageMargin).padding(.vertical, 8) }
-        GeometryReader { geometry in
-            let slots = match["slots"].array
-            // Equal columns while each keeps a readable measure; otherwise they scroll sideways
-            // with the next contestant showing at the edge.
-            if CGFloat(slots.count) * 320 <= geometry.size.width {
-                HStack(alignment: .top, spacing: 0) { columns(slots, width: nil) }
-            } else {
-                ScrollView(.horizontal) { HStack(alignment: .top, spacing: 0) { columns(slots, width: min(420, max(280, geometry.size.width / 2.25))) }.frame(height: geometry.size.height) }
-            }
+        let compared = pair.compactMap { slots.indices.contains($0) ? slots[$0] : nil }
+        if slots.count > 2 {
+            HStack(spacing: 12) {
+                comparePicker(0, title: "Left contestant")
+                Theme.rule.frame(width: 1, height: 20)
+                comparePicker(1, title: "Right contestant")
+            }.padding(.horizontal, density.pageMargin).padding(.vertical, 8)
+                .overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
+        }
+        if content == "Performance", revealed {
+            NativeArenaPerformance(slots: slots, compared: compared)
+                .transition(.opacity)
+        } else {
+            HStack(alignment: .top, spacing: 0) { columns(compared) }
         }
         Theme.border.frame(height: 1)
         // The verdict stays in reach however far the contestants scroll.
@@ -79,20 +94,83 @@ struct NativeArenaMatch: View {
             }
             Button("Next", nativeIcon: "arrow-right") { next() }.buttonStyle(T3Button(judging ? .outline : .primary))
         }.padding(.horizontal, density.pageMargin).frame(height: 52).background(Theme.bg).disabled(busy)
-    } }
-    @ViewBuilder private func columns(_ slots: [JSONValue], width: CGFloat?) -> some View {
-        ForEach(Array(slots.enumerated()), id: \.element) { index, slot in
+    }.animation(canAnimate ? NativeMotion.reveal : nil, value: revealed) }
+    private func comparePicker(_ side: Int, title: String) -> some View {
+        Menu {
+            ForEach(slots.indices, id: \.self) { index in
+                Button {
+                    withAnimation(canAnimate ? NativeMotion.selection : nil) {
+                        if pair[1 - side] == index { pair.swapAt(0, 1) } else { pair[side] = index }
+                    }
+                } label: {
+                    let slot = slots[index]
+                    Text(name(slot) + (rank(slot).map { " · Rank \($0)" } ?? " · \(slot["status"].string)"))
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text(name(slots[pair[side]])).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 0)
+                NativeIcon("chevrons-up-down", size: 12).foregroundStyle(Theme.faint)
+            }
+        }.menuIndicator(.hidden).accessibilityLabel(title).accessibilityValue(name(slots[pair[side]]))
+    }
+    private func name(_ slot: JSONValue) -> String { slot["revealed"].bool ? slot["model"].string : slot["label"].string }
+    @ViewBuilder private func columns(_ slots: [JSONValue]) -> some View {
+        ForEach(Array(slots.enumerated()), id: \.element["id"]) { index, slot in
             let idx = slot["idx"].int
             NativeArenaSlot(runtime: runtime, model: model, slot: slot, tab: content, rank: rank(slot), judging: judging,
                             pickable: judging && slot["status"].string == "done" && !picks.contains(idx), nextRank: picks.count + 1,
                             pick: { pick(idx) }, unpick: { if let at = picks.firstIndex(of: idx) { picks = Array(picks.prefix(at)) } })
-                .frame(width: width).frame(maxWidth: width == nil ? .infinity : nil, maxHeight: .infinity, alignment: .top)
+                .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .overlay(alignment: .leading) { if index > 0 { Theme.rule.frame(width: 1) } }
         }
     }
     private func rank(_ slot: JSONValue) -> Int? { let order = match["ranking"].isNull ? picks : match["ranking"].array.map(\.int); return order.firstIndex(of: slot["idx"].int).map { $0 + 1 } }
     private func pick(_ index: Int) { picks.append(index); let remaining = done.map { $0["idx"].int }.filter { !picks.contains($0) }; if remaining.count == 1 { picks += remaining } }
-    private func act(_ op: String, _ input: JSONObject = [:], then after: (() -> Void)? = nil) { Task { busy = true; defer { busy = false }; _ = await model.performMatchAction(op, id: match["id"], input: input, after: after) } }
+    private func act(_ op: String, _ input: JSONObject = [:], then after: (() -> Void)? = nil) {
+        if op == "skip" || op == "vote" { hold() }
+        Task { busy = true; defer { busy = false }; _ = await model.performMatchAction(op, id: match["id"], input: input, after: after) }
+    }
+}
+
+private struct NativeArenaPerformance: View {
+    let slots: [JSONValue], compared: [JSONValue]
+    @Environment(\.nativeInterfaceDensity) private var density
+
+    private func metric(_ slot: JSONValue, key: String) -> Double? {
+        let value = slot[key].double
+        return value > 0 && value.isFinite ? value : nil
+    }
+
+    var body: some View {
+        ScrollView {
+            Text("Match performance").font(Theme.ui(18, weight: .semibold)).accessibilityAddTraits(.isHeader)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, density.pageMargin).padding(.vertical, 16)
+            measure("Elapsed time", key: "duration_ms", format: NativeArenaDuration)
+            measure("Output tokens", key: "output_tokens", format: NativeNumberFormat.compact)
+            measure("Reported cost", key: "cost_usd") { "$" + String(format: $0 < 0.01 ? "%.4f" : "%.2f", $0) }
+        }.frame(maxHeight: .infinity)
+    }
+
+    private func measure(_ title: String, key: String, format: @escaping (Double) -> String) -> some View {
+        let maximum = slots.compactMap { metric($0, key: key) }.max() ?? 1
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(Theme.ui(Theme.textSm, weight: .semibold)).accessibilityAddTraits(.isHeader)
+            ForEach(compared, id: \.self["id"]) { slot in
+                let value = metric(slot, key: key), name = slot["model"].string
+                HStack(spacing: 12) {
+                    Text(name).font(Theme.mono(Theme.textXs)).lineLimit(1).truncationMode(.middle)
+                        .frame(width: 135, alignment: .leading)
+                    if let value { NativeGrowBar(fraction: value / maximum, color: Theme.pairColor(ArenaContestantPolicy.key(slot))) }
+                    else { Theme.rule.frame(height: 1).frame(maxWidth: .infinity).accessibilityHidden(true) }
+                    NativeNumberText(text: value.map(format) ?? "Not recorded", font: Theme.num(Theme.textXs, weight: .medium))
+                        .frame(width: 88, alignment: .trailing)
+                }.accessibilityElement(children: .combine)
+            }
+        }.padding(.horizontal, density.pageMargin).padding(.vertical, 12)
+            .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
+    }
 }
 
 private struct NativeArenaSlot: View {

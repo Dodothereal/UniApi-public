@@ -7,6 +7,7 @@ import UniApiCore
     @Published package var state: JSONValue = .null
     @Published package var matches: [JSONValue] = []
     @Published package var standings: [JSONValue] = []
+    @Published package private(set) var comparisons: [JSONValue] = []
     @Published package var ledger: JSONValue = .null
     @Published package var recent: [JSONValue] = []
     @Published package private(set) var rankingLoadedMode: String? = nil
@@ -218,6 +219,7 @@ import UniApiCore
             return ["ranking": ranking, "recent": recent]
         }, commit: { value in
             self.standings = value["ranking"]["standings"].array
+            self.comparisons = value["ranking"]["comparisons"].array
             self.ledger = value["ranking"]["ledger"]; self.recent = value["recent"].array
             self.rankingLoadedMode = mode
         })

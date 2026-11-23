@@ -18,6 +18,8 @@ all other UI sources are copied exactly except the recorded Main.swift transform
 --pricing captures the complete empty Statistics page plus native cost-summary
 components using synthetic empty, unknown, partial and priced data. Component
 captures use finite 420/720-point hosts and do not prove whole-page layout.
+--arena captures Judge, revealed performance, Ranking, New match, History and
+an empty queue at 1050x800 and 720x700, using isolated synthetic rows and verdicts.
 No product file is edited. Parent-built public Core/Presentation/CZstd objects are retained and
 linked; this tool never rebuilds them, downloads a model or runs the app owner.
 
@@ -53,6 +55,7 @@ SESSION_INITIALIZER = """    // Capture-only designated initializer, injected in
 """
 SESSION_ANCHOR = "    init() {\n        do {\n            let paths = NativePaths.discover()"
 LABEL = "Offscreen native page, empty fixture; capture-only session bypass"
+ARENA_LABEL = "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue"
 DETAIL_LABEL = "Offscreen native Settings page, empty fixture; capture-only expanded state and scroll"
 COMBINED_DEFAULT_LABEL = "Offscreen native page, empty fixture; capture-only session and Settings-state instrumentation"
 
@@ -147,12 +150,13 @@ def main():
     mode.add_argument("--onboarding", action="store_true", help="Capture the single setup screen at 820x660, 760x580, 700x580 and 640x520, plus Settings, in Light/Dark")
     mode.add_argument("--settings-details", action="store_true", help="Capture default pages and expanded Settings sections in two appearances and sizes")
     mode.add_argument("--pricing", action="store_true", help="Capture synthetic pricing components and the complete empty Statistics page")
+    mode.add_argument("--arena", action="store_true", help="Capture Arena Judge, revealed performance, Ranking, New match, History and the empty queue in Light/Dark, wide and compact")
     args = parser.parse_args()
-    label = DETAIL_LABEL if args.settings_details else LABEL
+    label = ARENA_LABEL if args.arena else DETAIL_LABEL if args.settings_details else LABEL
     if not args.execute:
         print("Plan only: no compiler, runtime, downloads, installation or output writes.")
         print("With --execute: reuse public release objects, compile exact copied UI plus harness,")
-        print("prepare separate empty homes, then capture the selected production views in Light/Dark.")
+        print("prepare separate fixture homes, then capture the selected production views in Light/Dark.")
         print("Publication requires visual review; no runtime or quiet-state success is claimed yet.")
         return 0
     if platform.system() != "Darwin":
@@ -315,10 +319,18 @@ def main():
                       for width, height in ((1050, 800), (720, 700))]
     if args.pricing:
         viewports = [("stats", 1050, 800)] + [("pricing-" + state, width, 160) for state in ("empty", "unknown", "partial", "priced") for width in (420, 720)]
+    if args.arena:
+        viewports = [("arena-" + view, width, height) for view in ("judge", "revealed", "ranking", "new-match", "history", "empty")
+                     for width, height in ((1050, 800), (720, 700))]
+
+    def sized_capture(page, width):
+        return (page.startswith(("onboarding-", "pricing-")) or (args.settings_details and page.startswith("settings-"))
+                or (args.arena and width < 1050))
+
     for page, width, height in viewports:
         for appearance in ("light", "dark"):
             detail = args.settings_details and page.startswith("settings-")
-            sized = page.startswith(("onboarding-", "pricing-")) or detail
+            sized = sized_capture(page, width)
             stem = page + "-" + appearance + (f"-{width}x{height}" if sized else "")
             case = work / stem; case.mkdir()
             # A fresh generic temporary home avoids disclosing operator paths in
@@ -347,7 +359,7 @@ def main():
                     "(deny file-write*)(allow file-write* (subpath " + json.dumps(str(work)) + ")"
                     " (subpath " + json.dumps(str(Path(temporary).resolve())) + "))")
                 prefix = [str(sandbox), "-p", profile, str(binary)]
-                execute(prefix + ["--prepare-fixture", str(root), str(home)], env, home, case / "prepare.log", 30)
+                execute(prefix + ["--prepare-fixture", str(root), str(home)] + ([page] if args.arena else []), env, home, case / "prepare.log", 30)
                 execute(prefix + ["--capture", str(root), str(home), str(case), page, appearance, str(width), str(height)],
                         env, home, case / "capture.log", 30)
             report = json.loads((case / "capture.json").read_text())
@@ -361,13 +373,15 @@ def main():
             filename = stem + ".png"
             shutil.copyfile(case / "page.png", images / filename)
             case_label = ("Offscreen native pricing component; synthetic coverage data" if page.startswith("pricing-") else "Offscreen complete native Statistics page; empty fixture") if args.pricing else (DETAIL_LABEL if detail else COMBINED_DEFAULT_LABEL) if args.settings_details else LABEL
+            if args.arena:
+                case_label = LABEL if page == "arena-empty" else ARENA_LABEL
             cases.append({"page": page, "appearance": appearance, "image": filename, "label": case_label,
                           "sha256": sha(images / filename), "viewport": [width, height]})
     for page, width, height in viewports:
-        suffix = f"-{width}x{height}" if page.startswith(("onboarding-", "pricing-")) or (args.settings_details and page.startswith("settings-")) else ""
+        suffix = f"-{width}x{height}" if sized_capture(page, width) else ""
         if sha(images / (page + "-light" + suffix + ".png")) == sha(images / (page + "-dark" + suffix + ".png")):
             raise ValueError("Light and Dark captures unexpectedly match")
-    (images / "manifest.json").write_text(json.dumps({"kind": "offscreen-native-page-empty-fixture",
+    (images / "manifest.json").write_text(json.dumps({"kind": "offscreen-native-arena-views" if args.arena else "offscreen-native-page-empty-fixture",
         "label": label, "requiresVisualReview": True, "completeShell": False,
         "compositorCapture": False, "freshInstalledAcceptance": False, "cases": cases}, indent=2) + "\n")
     print(f"{len(cases)} native view bitmaps prepared. Visually inspect images/ before publication.")

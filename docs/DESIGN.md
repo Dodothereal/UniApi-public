@@ -98,7 +98,11 @@ page. Use them instead of a page-specific arrangement.
   scale, as Energy does for where power comes from and where it goes.
 - **List and detail panes.** A page about one selected object keeps the list
   on the left and the object on the right: Transcribe, Settings (categories),
-  Benchmark Run (providers and models on the left, the run on the right).
+  Benchmark Run (providers and models on the left, the run on the right), and
+  Arena Judge and History (matches on the left, an answer pair on the right).
+  Arena keeps a separate selection per view and uses a match picker at narrow
+  widths. The contestant selectors change the two panes without hiding the
+  verdict controls. Performance is shown only after reveal.
 - **Route line** (`NativeRouteLine`). A tool's route reads left to right as
   tool, source, model, effort. The stops are the controls and one action on
   the right applies them. Switcher edits it; Home shows it.

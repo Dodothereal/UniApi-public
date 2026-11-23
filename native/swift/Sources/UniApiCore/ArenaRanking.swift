@@ -8,8 +8,14 @@ enum ArenaRanking {
     }
     static func key(_ c: JSONValue) -> String { ArenaContestantPolicy.key(c) }
     static func standings(_ records: [JSONValue], mode: String = "all") -> [JSONValue] {
+        fold(records, mode: mode).standings
+    }
+    static func fold(_ records: [JSONValue], mode: String) -> (standings: [JSONValue], comparisons: [JSONValue]) {
         struct Standing { var route: JSONValue, model: JSONValue, elo: Double = 1000, matches = 0, wins = 0, losses = 0, draws = 0, failures = 0, firsts = 0, durations: [Double] = [], turns: [Double] = [], last: Double = 0 }
+        struct Pair: Hashable { let first: String, second: String }
+        struct Results { var wins = 0, losses = 0, draws = 0 }
         var out: [String: Standing] = [:]
+        var comparisons: [Pair: Results] = [:]
         let records = records.filter { valid($0) && (mode == "all" || $0["mode"].string == mode) }.sorted { $0["ts"].double == $1["ts"].double ? $0["id"].string < $1["id"].string : $0["ts"].double < $1["ts"].double }
         for r in records {
             for c in r["contestants"].array {
@@ -24,11 +30,30 @@ enum ArenaRanking {
                 if r["verdict"].string == "all_bad" || a["rank"] == b["rank"] { score = 0.5; out[ak]!.draws += 1; out[bk]!.draws += 1 }
                 else if a["rank"].double < b["rank"].double { score = 1; out[ak]!.wins += 1; out[bk]!.losses += 1 }
                 else { score = 0; out[bk]!.wins += 1; out[ak]!.losses += 1 }
+                let forward = ak < bk, pair = Pair(first: forward ? ak : bk, second: forward ? bk : ak)
+                if score == 0.5 { comparisons[pair, default: Results()].draws += 1 }
+                else if (score == 1) == forward { comparisons[pair, default: Results()].wins += 1 }
+                else { comparisons[pair, default: Results()].losses += 1 }
                 delta[ak, default: 0] += k * (score - expected); delta[bk, default: 0] += k * ((1 - score) - (1 - expected))
             } }
             for (key, value) in delta { out[key]!.elo += value }
         }
         func average(_ values: [Double]) -> JSONValue { values.isEmpty ? .null : .number(values.reduce(0, +) / Double(values.count)) }
-        return out.map { key, s -> JSONValue in ["key": .string(key), "route": s.route, "model": s.model, "elo": .number(floor(s.elo + 0.5)), "matches": .number(Double(s.matches)), "wins": .number(Double(s.wins)), "losses": .number(Double(s.losses)), "draws": .number(Double(s.draws)), "failures": .number(Double(s.failures)), "firsts": .number(Double(s.firsts)), "avg_duration_ms": average(s.durations), "avg_turns": average(s.turns), "last_ts": .number(s.last)] }.sorted { a, b in a["elo"] == b["elo"] ? a["wins"] == b["wins"] ? a["key"].string < b["key"].string : a["wins"].int > b["wins"].int : a["elo"].double > b["elo"].double }
+        let rows: [JSONValue] = out.map { key, s in
+            ["key": .string(key), "route": s.route, "model": s.model, "elo": .number(floor(s.elo + 0.5)),
+             "matches": .number(Double(s.matches)), "wins": .number(Double(s.wins)), "losses": .number(Double(s.losses)),
+             "draws": .number(Double(s.draws)), "failures": .number(Double(s.failures)), "firsts": .number(Double(s.firsts)),
+             "avg_duration_ms": average(s.durations), "avg_turns": average(s.turns), "last_ts": .number(s.last)]
+        }
+        let standings = rows.sorted { a, b in
+            if a["elo"] != b["elo"] { return a["elo"].double > b["elo"].double }
+            if a["wins"] != b["wins"] { return a["wins"].int > b["wins"].int }
+            return a["key"].string < b["key"].string
+        }
+        let pairs = comparisons.keys.sorted { ($0.first, $0.second) < ($1.first, $1.second) }.map { key -> JSONValue in
+            let results = comparisons[key]!
+            return ["first": .string(key.first), "second": .string(key.second), "wins": .number(Double(results.wins)), "losses": .number(Double(results.losses)), "draws": .number(Double(results.draws))]
+        }
+        return (standings, pairs)
     }
 }

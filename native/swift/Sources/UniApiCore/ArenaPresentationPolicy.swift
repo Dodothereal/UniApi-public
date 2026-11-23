@@ -1,5 +1,54 @@
 import Foundation
 
+public struct ArenaMatchSelection: Equatable, Sendable {
+    public enum Scope: Sendable, Hashable { case judge, history }
+    private var selection: [Scope: String] = [:]
+
+    public init() {}
+
+    public subscript(scope: Scope) -> String? {
+        get { selection[scope] }
+        set { selection[scope] = newValue }
+    }
+
+    public func visible(_ matches: [JSONValue], in scope: Scope) -> [JSONValue] {
+        let selected = self[scope]
+        return matches.filter {
+            scope == .history || $0["id"].string == selected ||
+                ($0["voted_at"].isNull && ["done", "running", "queued"].contains($0["status"].string))
+        }.sorted {
+            if scope == .history { return $0["created_at"].double > $1["created_at"].double }
+            let left = $0["status"].string == "done" ? 0 : 1, right = $1["status"].string == "done" ? 0 : 1
+            return left == right ? $0["created_at"].double < $1["created_at"].double : left < right
+        }
+    }
+
+    public func current(_ visible: [JSONValue], in scope: Scope) -> JSONValue? {
+        visible.first { $0["id"].string == self[scope] } ?? visible.first
+    }
+}
+
+public struct ArenaPairResult: Equatable, Sendable {
+    public var wins: Int, losses: Int, draws: Int
+    public var sample: Int { wins + losses + draws }
+    public var winRate: Double? { sample == 0 ? nil : Double(wins) / Double(sample) }
+}
+
+public struct ArenaPairMatrix: Sendable {
+    private var pairs: [String: [String: ArenaPairResult]] = [:]
+
+    public init(_ comparisons: [JSONValue]) {
+        for entry in comparisons {
+            let first = entry["first"].string, second = entry["second"].string
+            let result = ArenaPairResult(wins: entry["wins"].int, losses: entry["losses"].int, draws: entry["draws"].int)
+            pairs[first, default: [:]][second] = result
+            pairs[second, default: [:]][first] = ArenaPairResult(wins: result.losses, losses: result.wins, draws: result.draws)
+        }
+    }
+
+    public subscript(row: String, column: String) -> ArenaPairResult? { pairs[row]?[column] }
+}
+
 public struct ArenaPresetGroup: Identifiable, Equatable, Sendable {
     public let category: String
     public var presets: [JSONValue]

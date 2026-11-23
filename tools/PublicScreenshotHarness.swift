@@ -26,6 +26,60 @@ struct PublicCaptureAnchor: NSViewRepresentable {
     func updateNSView(_ view: PublicCaptureAnchorView, context: Context) { view.anchorName = name }
 }
 
+private enum PublicArenaCapture {
+    static let tabs = ["arena-judge": "Judge", "arena-empty": "Judge", "arena-revealed": "History",
+                       "arena-history": "History", "arena-ranking": "Ranking", "arena-new-match": "New match"]
+    static let task = "Design a keyboard-first reading list. Explain how users add a first book and resume where they left off."
+
+    static func prepare(page: String, runtime: NativeRuntime) async throws {
+        try await NativeArenaService.shared(runtime: runtime).start()
+        guard page != "arena-empty" else { return }
+        let now = Date().timeIntervalSince1970 * 1000
+        let models = ["sample-cedar", "sample-maple", "sample-alder", "sample-pine"]
+        let answers = [
+            "Make Add a book the first focused action. It opens a search field and a short list of matches. Enter adds the highlighted book; Escape returns to the library without losing the query.\n\nWhen a book is in progress, put Resume reading first. Show a short excerpt and the last saved page beside it.",
+            "Use one command palette for Add, Find, and Resume. A keyboard shortcut opens it from anywhere, and the default action changes when the library is empty.\n\nKeep a recent books section and show the last completed chapter inline.",
+            "Start with a focused search field. Offer title search, a recent books list, and a simple detail pane with notes and progress.",
+            "Show a small reading queue sorted by last opened. Keep Resume and Add available without opening settings."
+        ]
+        let folder = runtime.paths.root.appendingPathComponent("arena/results")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for index in 0..<6 {
+            let id = "fixture-match-\(index)", mode: JSONValue = index.isMultiple(of: 2) ? "random" : "chosen"
+            let ranked = (2...4).contains(index), status: JSONValue = index == 1 ? "running" : index == 5 ? "queued" : "done"
+            let prompt = index == 0 || index == 4 ? task : ["", "Compare two ways to organize a local library.", "Draft an accessible command palette.", "Sketch a desktop notes workspace.", "", "Plan a small offline search index."][index]
+            let created = now - Double(page == "arena-revealed" && index == 4 ? 1 : index + 2) * 120_000
+            let count = index == 0 || index == 4 ? 4 : 2
+            let order = index == 3 ? [0, 1] : Array(0..<count).map { ($0 + index) % count }
+            try runtime.db.execute("INSERT INTO arena_matches(id,mode,prompt,category,status,ranking,verdict,timeout_s,max_turns,created_at,started_at,finished_at,voted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+                .string(id), mode, .string(prompt), "design", status,
+                ranked ? .string("[" + order.map(String.init).joined(separator: ",") + "]") : .null,
+                ranked ? "ranked" : .null, 1200, 80, .number(created), .number(created + 1000),
+                status == "done" ? .number(created + 40_000) : .null, ranked ? .number(created + 50_000) : .null
+            ])
+            var contestants: [JSONValue] = []
+            for slot in 0..<count {
+                let name = models[(slot + (count == 4 ? 0 : index)) % models.count]
+                let duration = Double([18_500, 29_000, 24_000, 38_000][slot])
+                let workdir = runtime.paths.data.appendingPathComponent("arena/matches/\(id)/slot-\(slot)").path
+                try runtime.db.execute("INSERT INTO arena_slots(id,match_id,idx,route,model,status,workdir,final_text,duration_ms,turns,output_tokens,cost_usd,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+                    .string("\(id)-slot-\(slot)"), .string(id), .number(Double(slot)), "sample-source", .string(name), status,
+                    .string(workdir), status == "done" ? .string(answers[slot]) : "",
+                    status == "done" ? .number(duration) : .null, .number(Double(slot + 3)),
+                    .number(Double(640 + slot * 146)), slot == 1 ? 0 : .number(0.014 + Double(slot) * 0.009), .number(created + 1000)
+                ])
+                contestants.append(["route": "sample-source", "model": .string(name), "status": "done",
+                                     "rank": .number(Double((order.firstIndex(of: slot) ?? 0) + 1)), "duration_ms": .number(duration), "turns": .number(Double(slot + 3))])
+            }
+            if ranked {
+                let value: JSONValue = ["v": 1, "id": .string(id), "ts": .number(created + 50_000), "mode": mode, "category": "design",
+                                        "voter": "sample", "prompt": .string(prompt), "verdict": "ranked", "contestants": .array(contestants)]
+                try NativeFile.writeAtomic(try value.encoded(pretty: true), to: folder.appendingPathComponent(id + ".json"))
+            }
+        }
+    }
+}
+
 final class PublicCaptureAnchorView: NSView {
     var anchorName = ""
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -111,11 +165,12 @@ final class PublicCaptureAnchorView: NSView {
                               "settings-theme-common": "theme-common", "settings-theme-advanced": "theme-advanced"]
         let section = detailSections[page]
         let onboarding = page == "onboarding-welcome"
+        let arenaTab = PublicArenaCapture.tabs[page]
         let pricing = ["pricing-empty": "empty", "pricing-unknown": "unknown", "pricing-partial": "partial", "pricing-priced": "priced"][page]
         let viewportAllowed = pricing == nil
             ? (640...1200).contains(width) && (500...1000).contains(height)
             : (320...1200).contains(width) && (100...1000).contains(height)
-        guard paths.readOnly, ["stats", "transcribe", "settings"].contains(page) || onboarding || section != nil || pricing != nil,
+        guard paths.readOnly, ["stats", "transcribe", "settings"].contains(page) || onboarding || section != nil || pricing != nil || arenaTab != nil,
               viewportAllowed,
               ["light", "dark"].contains(appearance),
               ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] == section,
@@ -149,12 +204,12 @@ final class PublicCaptureAnchorView: NSView {
         }
         suite = suiteName; preferences = defaults
         // setVolatileDomain does not create persistent operator preferences.
-        defaults.setVolatileDomain(["uniapi-theme": appearance, "uniapi-density": "standard",
+        let capturePreferences: [String: Any] = ["uniapi-theme": appearance, "uniapi-density": "standard",
                                     "uniapi-motion": "reduced", "uniapi.transcribe.notify": false,
-                                    "uniapi.stats.source": "all", "uniapi.stats.range": 0],
-                                   forName: suiteName)
+                                    "uniapi.stats.source": "all", "uniapi.stats.range": 0]
+        defaults.setVolatileDomain(capturePreferences, forName: suiteName)
         NativeUIReadiness.shared.launched()
-        let destination: NativeDestination = page == "stats" ? .stats : page == "transcribe" ? .transcribe : .settings
+        let destination: NativeDestination = arenaTab != nil ? .arena : page == "stats" ? .stats : page == "transcribe" ? .transcribe : .settings
         guard let visit = NativeUIReadiness.shared.begin(destination) else {
             throw NativeFailure("Production readiness instrumentation must be enabled")
         }
@@ -163,6 +218,8 @@ final class PublicCaptureAnchorView: NSView {
             content = AnyView(VStack { NativeStatsPricing(cost: pricingFixture(pricing)); Spacer(minLength: 0) }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Theme.bg))
         } else if onboarding {
             content = AnyView(NativeOnboardingView { _ in })
+        } else if let arenaTab {
+            content = AnyView(NativeArenaPage(runtime: runtime, opens: arenaTab).background(Theme.bg))
         } else { switch page {
         case "stats": content = AnyView(NativeStatsPage(runtime: runtime))
         case "transcribe": content = AnyView(NativeTranscribePage(runtime: runtime))
@@ -239,7 +296,8 @@ final class PublicCaptureAnchorView: NSView {
             throw NativeFailure("Cannot encode native page bitmap")
         }
         try sample("after-bitmap")
-        let report: [String: Any] = ["kind": pricing == nil ? "offscreen-native-page-empty-fixture" : "offscreen-native-pricing-component-synthetic", "page": page,
+        let fixtureKind = pricing != nil ? "offscreen-native-pricing-component-synthetic" : arenaTab != nil && page != "arena-empty" ? "offscreen-native-arena-synthetic" : "offscreen-native-page-empty-fixture"
+        let report: [String: Any] = ["kind": fixtureKind, "page": page,
             "appearance": appearance, "viewportWidth": width, "viewportHeight": height,
             "pixelWidth": bitmap.pixelsWide, "pixelHeight": bitmap.pixelsHigh,
             "quiet": true, "samples": samples, "inputActions": 0,
@@ -274,7 +332,7 @@ final class PublicCaptureAnchorView: NSView {
               env["CFFIXED_USER_HOME"] == home.path else {
             fputs("Isolated capture environment required\n", stderr); exit(64)
         }
-        if args[0] == "--prepare-fixture", args.count == 3 {
+        if args[0] == "--prepare-fixture", args.count == 3 || (args.count == 4 && PublicArenaCapture.tabs[args[3]] != nil) {
             // A separate process exits after creating only fresh schemas. No
             // default session, ownership lease, recovery, services or UI starts.
             Task {
@@ -282,6 +340,7 @@ final class PublicCaptureAnchorView: NSView {
                     let runtime = try NativeRuntime(paths: NativePaths(root: root, home: home))
                     try await NativeTranscriptionService(runtime: runtime).start()
                     try await NativeStatisticsService(runtime: runtime).start()
+                    if args.count == 4 { try await PublicArenaCapture.prepare(page: args[3], runtime: runtime) }
                     guard try runtime.db.query("SELECT id FROM jobs").isEmpty,
                           try runtime.db.query("SELECT id FROM transcripts").isEmpty,
                           try runtime.providers.list().isEmpty else {

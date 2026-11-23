@@ -123,7 +123,9 @@ public actor NativeArenaService {
             guard let slot = try s.rawSlot(id) else { throw NativeFailure("Slot no longer exists") }
             let workspace = try ownedWorkspace(slot)
             return operation == "files" ? ["files": .array(try ArenaSandbox.files(workspace: workspace, home: runtime.paths.home))] : try ArenaSandbox.preview(b["path"].string, workspace: workspace, home: runtime.paths.home)
-        case "ranking": let records = ledger.records(); return ["standings": .array(ArenaRanking.standings(records, mode: b["mode"].string.isEmpty ? "all" : b["mode"].string)), "records": .number(Double(records.count)), "ledger": await ledger.status()]
+        case "ranking":
+            let records = ledger.records(), ranking = ArenaRanking.fold(records, mode: b["mode"].string.isEmpty ? "all" : b["mode"].string)
+            return ["standings": .array(ranking.standings), "comparisons": .array(ranking.comparisons), "records": .number(Double(records.count)), "ledger": await ledger.status()]
         case "ledger.status": return await ledger.status()
         case "ledger.records": return .array(Array(ledger.records().sorted { $0["ts"].double > $1["ts"].double }.prefix(b["limit"].isNull ? 100 : max(1, min(500, b["limit"].int)))))
         case "ledger.publish", "ledger.sync": guard !sharing else { throw NativeFailure("Arena sharing is already active") }; sharing = true; defer { sharing = false }; return operation == "ledger.publish" ? try await ledger.publish(voter: s.voter()) : try await ledger.sync()
