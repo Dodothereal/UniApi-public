@@ -22,69 +22,112 @@ struct NativeArenaNewMatch: View {
     private var contestants: [JSONValue] { model.state["contestants"].array }
     private var chosen: Set<String> { ArenaContestantPolicy.selection(Set(((try? JSONValue.decode(Data(chosenJSON.utf8))) ?? []).array.map(\.string)), contestants: contestants) }
     private var eligible: Set<String> { Set(contestants.map { $0["key"].string }).subtracting(model.state["excluded"].array.map(\.string)) }
-    var body: some View { VStack(alignment: .leading, spacing: 24) {
-        SettingRow(title: "Mode", desc: mode == "random" ? "Contestants are drawn at random from every model on every route, so the ranking is not shaped by who you pick." : "You pick exactly which models compete, for a direct head-to-head.") {
-            T3Segmented(options: [("random", "Random"), ("chosen", "Chosen")], selection: mode, icons: ["random": "shuffle", "chosen": "list-checks"]) { mode = $0 }.accessibilityLabel("Match mode")
-        }
-        Rectangle().fill(Theme.border).frame(height: 1)
-        VStack(alignment: .leading, spacing: 20) {
-            SettingRow(title: "Prompt", desc: randomPreset ? "A random preset per match, so no single task decides the ranking." : "Every contestant gets exactly this task in its own empty folder. Pick a preset or write your own.") {
-                Menu {
+    private var startDisabled: Bool { busy || (mode == "random" ? eligible.count < count : chosen.count < 2 || chosen.count > 8) || !randomPreset && presetID.isEmpty && prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    @Environment(\.nativeInterfaceDensity) private var density
+    private func label(_ text: String, detail: String = "") -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(text).font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted)
+            if !detail.isEmpty { Text(detail).font(Theme.ui(11)).foregroundStyle(Theme.faint).lineLimit(1) }
+        }.accessibilityAddTraits(.isHeader)
+    }
+    /// The task every contestant gets. It is the page; the right pane only says who runs it and for how long.
+    private func task(fills: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                NativeMenuSelectLabel(title: model.state["presets"].array.first(where: { $0["id"].string == presetID })?["title"].string ?? "Custom prompt", width: 260) {
                     Button("Custom prompt") { presetID = "" }
                     ForEach(ArenaPresentationPolicy.presetGroups(model.state["presets"].array)) { group in
                         Section(group.title) { ForEach(group.presets, id: \.self["id"]) { p in Button(p["title"].string) { presetID = p["id"].string } } }
                     }
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(model.state["presets"].array.first(where: { $0["id"].string == presetID })?["title"].string ?? "Custom prompt").lineLimit(1)
-                        Spacer(minLength: 0); NativeIcon("chevron-down", size: 12)
-                    }.font(Theme.ui(12)).foregroundStyle(Theme.dim).padding(.horizontal, 11).frame(width: 260, height: 30)
-                        .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1))
-                }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).disabled(randomPreset).accessibilityLabel("Preset")
-            }
-            if !randomPreset {
-                TextEditor(text: Binding(get: { prompt }, set: { prompt = $0; presetID = "" })).font(Theme.ui(13)).scrollContentBackground(.hidden)
-                    .padding(10).frame(height: 150).background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1)).accessibilityLabel("Match prompt")
-                Button("Save as preset", nativeIcon: "plus") { saving = true }.buttonStyle(T3Button(.ghost)).disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            SettingRow(title: "Random preset", desc: "Draw a different preset for this match instead of the prompt above.") {
+                }.disabled(randomPreset).accessibilityLabel("Preset")
+                Button("Save as preset", nativeIcon: "save") { saving = true }.buttonStyle(T3Button(.ghost))
+                    .disabled(randomPreset || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Spacer(minLength: 0)
+                Text("Random preset").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
                 T3Switch(isOn: $randomPreset).accessibilityLabel("Draw a random preset")
+                    .help("Draw a different preset for each match, so no single task decides the ranking.")
             }
-        }
-        Rectangle().fill(Theme.border).frame(height: 1)
-        VStack(alignment: .leading, spacing: 20) {
-            if mode == "random" {
-                SettingRow(title: "Contestants", desc: "How many models are drawn. Each one is its own Claude Code session in its own folder.") {
-                    T3Segmented(options: Array(2...8).map { (value: $0, label: String($0)) }, selection: count) { count = $0 }.accessibilityLabel("Contestant count")
-                }
-                SettingRow(title: "Pool", desc: "\(eligible.count) of \(contestants.count) models are eligible. Untick models you never want drawn.") {
-                    Button("Manage pool") { picker = "pool" }.buttonStyle(T3Button(.outline))
-                }
+            if randomPreset {
+                Text("Each match draws one of the \(model.state["presets"].array.count) presets.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
             } else {
-                SectionLabel(text: "Contestants") { Button("Pick contestants", nativeIcon: "plus") { picker = "chosen" }.buttonStyle(T3Button(.outline)) }
-                Text("Between two and eight. Their positions are shuffled and hidden until you vote.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                ForEach(contestants.filter { chosen.contains($0["key"].string) }, id: \.self) { c in
-                    HStack {
-                        Text(c["label"].string).font(Theme.mono(12)).foregroundStyle(Theme.dim)
-                        Button { setChosen(chosen.subtracting([c["key"].string])) } label: { NativeIcon("x", size: 12) }
-                            .buttonStyle(T3Button(.ghost)).help("Remove contestant").accessibilityLabel("Remove " + c["label"].string)
+                NativeEditor(text: Binding(get: { prompt }, set: { prompt = $0; presetID = "" }), placeholder: "What every contestant is asked to do, in its own empty folder")
+                    .frame(minHeight: 200, maxHeight: fills ? .infinity : 260).accessibilityLabel("Match prompt")
+            }
+        }.padding(.horizontal, density.pageMargin).padding(.vertical, 20)
+    }
+    private var setup: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                label("Contestants", detail: mode == "random" ? "\(eligible.count) of \(contestants.count) in the pool" : "\(chosen.count) picked, 2 to 8")
+                T3Segmented(options: [("random", "Random draw"), ("chosen", "Hand-picked")], selection: mode, icons: ["random": "shuffle", "chosen": "list-checks"]) { mode = $0 }.accessibilityLabel("Match mode")
+                    .help(mode == "random" ? "Drawn from every model on every route, so the ranking is not shaped by who you pick." : "You pick exactly which models compete.")
+                if mode == "random" {
+                    T3Segmented(options: Array(2...8).map { (value: $0, label: String($0)) }, selection: count) { count = $0 }.accessibilityLabel("Contestant count")
+                    Button("Edit pool", nativeIcon: "list-checks") { picker = "pool" }.buttonStyle(T3Button(.outline))
+                } else {
+                    let picked = contestants.filter { chosen.contains($0["key"].string) }
+                    VStack(spacing: 0) {
+                        ForEach(picked, id: \.self) { c in
+                            HStack(spacing: 8) {
+                                Text(c["label"].string).font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.dim).lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
+                                T3IconButton(system: "x", help: "Remove " + c["label"].string, size: 12) { setChosen(chosen.subtracting([c["key"].string])) }
+                            }.frame(minHeight: 30).overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
+                        }
                     }
+                    Button(picked.isEmpty ? "Pick contestants" : "Change", nativeIcon: "plus") { picker = "chosen" }.buttonStyle(T3Button(.outline))
                 }
+            }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 12) {
+                label("Limits", detail: "per contestant")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Time").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.dim)
+                        .help("A session that runs out is judged on what it presented by then.")
+                    NativeArenaBudgetPicker(title: "Time limit", value: $timeout, presets: [10, 20, 40, 60], suffix: " min", bounds: 2...120, step: 2)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Steps").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.dim)
+                    NativeArenaBudgetPicker(title: "Steps", value: $turns, presets: [40, 80, 160, 300], suffix: "", bounds: 5...400, step: 5)
+                }
+                HStack(spacing: 8) {
+                    Text("Telegram when ready to judge").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.dim)
+                    Spacer(minLength: 8)
+                    T3Switch(isOn: $notify).accessibilityLabel("Telegram when finished")
+                }
+            }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
+        }
+    }
+    private var startBar: some View {
+        Button("Start \(mode == "random" ? count : chosen.count) contestants", nativeIcon: "play") { Task { await start() } }
+            .buttonStyle(T3Button(.primary, size: Theme.textSm)).disabled(startDisabled)
+            .keyboardShortcut(.return, modifiers: .command)
+            .padding(.horizontal, 16).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .trailing)
+            .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
+    }
+    var body: some View { GeometryReader { geometry in
+        if geometry.size.width >= 860 {
+            HStack(alignment: .top, spacing: 0) {
+                task(fills: true).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                VStack(spacing: 0) {
+                    ScrollView { setup }.scrollContentBackground(.hidden)
+                    startBar
+                }
+                .frame(width: 360).frame(maxHeight: .infinity, alignment: .top)
+                .overlay(alignment: .leading) { Theme.rule.frame(width: 1) }
+            }
+        } else {
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        task(fills: false)
+                        Theme.rule.frame(height: 1)
+                        setup
+                    }
+                }.scrollContentBackground(.hidden)
+                startBar
             }
         }
-        Rectangle().fill(Theme.border).frame(height: 1)
-        VStack(spacing: 20) {
-            SettingRow(title: "Time limit", desc: "Per contestant. A session that runs out is stopped and judged on what it presented by then.") {
-                NativeArenaBudgetPicker(title: "Time limit", value: $timeout, presets: [10, 20, 40, 60], suffix: " min", bounds: 2...120, step: 2)
-            }
-            SettingRow(title: "Steps", desc: "The most agent turns a contestant may take.") {
-                NativeArenaBudgetPicker(title: "Steps", value: $turns, presets: [40, 80, 160, 300], suffix: "", bounds: 5...400, step: 5)
-            }
-            SettingRow(title: "Telegram when done", desc: "One ping when the match is ready to judge.") { T3Switch(isOn: $notify).accessibilityLabel("Telegram when finished") }
-        }
-        Button("Start with \(mode == "random" ? count : chosen.count) contestants", nativeIcon: "play") { Task { await start() } }.buttonStyle(T3Button(.primary)).disabled(busy || (mode == "random" ? eligible.count < count : chosen.count < 2 || chosen.count > 8) || !randomPreset && presetID.isEmpty && prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
     .task { guard !initialized else { return }; initialized = true; let d = model.state["defaults"]; count = d["count"].int; timeout = d["timeoutMin"].int; turns = d["maxTurns"].int; notify = d["notify"].bool; presetID = initialPreset; if let p = model.state["presets"].array.first(where: { $0["id"].string == initialPreset }) { prompt = p["prompt"].string } }
     .onChange(of: presetID) { _, id in if let p = model.state["presets"].array.first(where: { $0["id"].string == id }) { prompt = p["prompt"].string } }
@@ -130,7 +173,7 @@ private struct NativeArenaBudgetPicker: View {
         }
         .popover(isPresented: $showsCustom, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Custom " + title.lowercased()).font(Theme.ui(12, weight: .medium))
+                Text("Custom " + title.lowercased()).font(Theme.ui(Theme.textXs, weight: .medium))
                 Stepper("\(value)\(suffix)", value: $value, in: bounds, step: step)
                     .font(Theme.mono(12)).frame(width: 150).accessibilityLabel(title)
             }.padding(16).background(Theme.bg).foregroundStyle(Theme.ink)
@@ -158,32 +201,23 @@ private struct NativeArenaContestantPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text(title).font(Theme.ui(18, weight: .semibold))
+                Text(title).font(Theme.ui(Theme.textBase, weight: .semibold))
                 Spacer()
                 Button("Done") { changed(picked); dismiss() }
                     .buttonStyle(T3Button(.primary)).keyboardShortcut(.defaultAction)
             }
             HStack(spacing: 12) {
-                Menu {
+                NativeMenuSelectLabel(title: route.isEmpty ? "All routes" : routeName(route), width: 190) {
                     Button("All routes") { route = "" }
                     ForEach(Array(Set(model.state["contestants"].array.map { $0["route"].string })).sorted(), id: \.self) { id in
                         Button(routeName(id)) { route = id }
                     }
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(route.isEmpty ? "All routes" : routeName(route)).lineLimit(1)
-                        Spacer(minLength: 0)
-                        NativeIcon("chevron-down", size: 12)
-                    }.font(Theme.ui(12)).foregroundStyle(Theme.dim).padding(.horizontal, 11)
-                        .frame(width: 190, height: 32)
-                        .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.input, lineWidth: 1))
-                }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).accessibilityLabel("Route")
+                }.accessibilityLabel("Route")
                 T3Field(placeholder: "Search every word", text: $query, leadingIcon: "search").accessibilityLabel("Search contestants")
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if rows.isEmpty { Text("No matching contestants").font(Theme.ui(12)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, 32) }
+                    if rows.isEmpty { Text("No matching contestants").font(Theme.ui(12)).foregroundStyle(Theme.muted).padding(.vertical, 24) }
                     ForEach(rows, id: \.self) { c in
                         Toggle(isOn: Binding(get: { picked.contains(c["key"].string) }, set: { on in
                             if on { if maximum == nil || picked.count < maximum! { picked.insert(c["key"].string) } }
@@ -197,19 +231,20 @@ private struct NativeArenaContestantPicker: View {
                                 }
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }.toggleStyle(.checkbox).padding(.vertical, 8).padding(.horizontal, 2)
+                            .overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
                             .accessibilityLabel(c["label"].string).help(c["label"].string)
                     }
                 }
             }
             HStack(spacing: 8) {
-                Text("\(picked.count) selected").font(Theme.mono(11)).foregroundStyle(Theme.muted)
+                Text("\(picked.count) selected").font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
                 Spacer()
                 Button("None shown") { picked.subtract(rows.map { $0["key"].string }) }.buttonStyle(T3Button(.ghost))
                 Button("All shown") { for row in rows where maximum == nil || picked.count < maximum! { picked.insert(row["key"].string) } }.buttonStyle(T3Button(.ghost))
                 Button("Check routes", nativeIcon: "activity") { Task { checking = true; if let value = await model.call("check", ["contestants": .array(model.state["contestants"].array.filter { picked.contains($0["key"].string) && $0["route"].string != "subscription" })]) { for row in value["results"].array { checks[row["key"].string] = row; if !row["ok"].bool { picked.remove(row["key"].string) } } }; checking = false } }
                     .buttonStyle(T3Button(.outline)).disabled(checking || picked.isEmpty)
+                    .help("Sends one eight-token request per selected provider model and unticks the ones that fail. Subscription models are not probed.")
             }
-            Text("Check routes sends one eight-token request per selected provider model. Subscription models are not probed.").font(Theme.ui(11)).foregroundStyle(Theme.muted)
         }.padding(20).frame(width: 700, height: 520).background(Theme.bg).foregroundStyle(Theme.ink)
             .tint(Theme.accent).task { if !initialized { picked = selection; initialized = true } }
     }
@@ -223,7 +258,7 @@ private struct NativeArenaSavePrompt: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Save preset").font(Theme.ui(18, weight: .semibold))
+            Text("Save preset").font(Theme.ui(Theme.textBase, weight: .semibold))
             VStack(spacing: 12) {
                 T3Field(placeholder: "Title", text: $title).accessibilityLabel("Title")
                 T3Field(placeholder: "Category", text: $category).accessibilityLabel("Category")

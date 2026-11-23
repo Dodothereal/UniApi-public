@@ -12,59 +12,60 @@ struct NativeJobsPage: View {
     @State private var notice: String?
     @State private var confirmPrune = false
     @State private var pruning = false
+    @State private var selected: String?
     @State private var reads = NativePageReadScope()
     @State private var subscription: NativePageReadScope.Ticket?
-    // CSS ch is the zero-glyph advance; measure the same46ch in the native font.
-    private static let emptyDetailWidth = ("0" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12.5)]).width * 46
-    private var filtered: [JSONObject] {
-        rows.filter { row in let status = row["status"]?.string ?? ""; return scope == "all" || (scope == "active" ? ["queued", "running"].contains(status) : ["failed", "cancelled"].contains(status)) }
+    private func matches(_ row: JSONObject, _ scope: String) -> Bool {
+        let status = row["status"]?.string ?? ""
+        return scope == "all" || (scope == "active" ? ["queued", "running"].contains(status) : ["failed", "cancelled"].contains(status))
     }
+    private var filtered: [JSONObject] { rows.filter { matches($0, scope) } }
+    private var selectedRow: JSONObject? { selected.flatMap { id in filtered.first { $0["id"]?.string == id } } }
     var body: some View {
-        NativePage(title: "Jobs", subtitle: "Everything that runs in the background: arena matches, transcriptions, benchmark runs. Jobs keep running with the window closed.", readiness: error != nil ? .failed : loaded ? .ready : .pending, actions: {
-            HStack(spacing: 8) {
-                Button { Task { await reload() } } label: { HStack(spacing: 6) { NativeIcon("rotate-cw", size: 12); Text("Reload") } }
-                T3Segmented(options: [("active", "Active"), ("all", "All"), ("failed", "Failed")], selection: scope) { scope = $0 }
-                Button(pruning ? "Clearing…" : "Clear old jobs…") { confirmPrune = true }
-                    .disabled(runtime.paths.readOnly || pruning)
-                    .help("Review removal of completed, failed and cancelled job entries older than seven days")
+        NativePage(title: "Jobs", maxWidth: .infinity, readiness: error != nil ? .failed : loaded ? .ready : .pending, scrolls: false, tabs: {
+            NativeTabs(options: [("active", "Active"), ("failed", "Failed"), ("all", "All")], selection: scope,
+                       counts: ["active": rows.filter { matches($0, "active") }.count, "failed": rows.filter { matches($0, "failed") }.count]) { scope = $0 }
+        }, actions: {
+            T3IconButton(system: "refresh-cw", help: "Reload") { Task { await reload() } }
+            NativeIconMenu {
+                Button(pruning ? "Clearing…" : "Clear jobs older than seven days…") { confirmPrune = true }.disabled(runtime.paths.readOnly || pruning)
             }
         }) {
-            if let error {
-                VStack(alignment: .leading, spacing: 10) {
-                    NativeError(message: error)
-                    Button("Retry") { Task { await reload() } }
-                }
-            }
-            if let notice { Text(notice).font(Theme.ui(12)).foregroundStyle(Theme.muted) }
-            VStack(alignment: .leading, spacing: 12) {
-                SectionLabel(text: scope == "active" ? "Running and queued" : scope == "failed" ? "Failed and cancelled" : "All jobs") {
-                    if loaded || !rows.isEmpty {
-                        NativeNumberText(text: "\(filtered.count) \(filtered.count == 1 ? "job" : "jobs")", font: Theme.ui(12), color: Theme.muted)
-                    } else {
-                        Text("—").font(Theme.ui(12)).foregroundStyle(Theme.muted).accessibilityLabel("Job count unavailable")
+            NativeInspectorSplit(open: selectedRow != nil, width: 380, onClose: { selected = nil }, main: {
+                NativePane(maxWidth: .infinity, centered: false) {
+                    if let error {
+                        VStack(alignment: .leading, spacing: 10) {
+                            NativeError(message: error)
+                            Button("Retry") { Task { await reload() } }
+                        }
                     }
-                }
-                if !loaded && rows.isEmpty {
-                    if error == nil { ShimmerText(text: "Reading background jobs…").padding(.vertical, 40) }
-                } else if filtered.isEmpty {
-                    VStack(spacing: 0) {
-                        NativeIcon("list-checks", size: 24).foregroundStyle(Theme.muted.opacity(0.8)).padding(.bottom, 10).accessibilityHidden(true)
-                        Text(scope == "active" ? "Nothing running" : "No jobs").font(Theme.ui(14, weight: .medium))
-                        Text("Start a benchmark, an arena match or a transcription and it shows up here.").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                            .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: Self.emptyDetailWidth).padding(.top, 4)
-                    }.frame(maxWidth: .infinity).padding(.vertical, 48)
-                } else {
-                    Card(padding: 0) {
+                    if let notice { Text(notice).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted) }
+                    if !loaded && rows.isEmpty {
+                        if error == nil { ShimmerText(text: "Reading background jobs…") }
+                    } else if filtered.isEmpty {
+                        EmptyState(icon: "list-checks", title: scope == "active" ? "Nothing running" : scope == "failed" ? "Nothing failed" : "No jobs",
+                                   detail: scope == "failed" ? "" : "Benchmark runs, arena matches and transcriptions appear here and keep running with the window closed.")
+                    } else {
                         LazyVStack(spacing: 0) {
-                            ForEach(Array(filtered.enumerated()), id: \.element["id"]) { index, row in
-                                if index > 0 { Rectangle().fill(Theme.border).frame(height: 1) }
-                                NativeJobRow(row: row, cancel: { Task { do { _ = try await runtime.jobs.cancel(row["id"]!.string); await reload() } catch { self.error = error.localizedDescription } } }, compact: false)
+                            Theme.rule.frame(height: 1)
+                            ForEach(filtered, id: \.self["id"]) { row in
+                                let id = row["id"]?.string ?? ""
+                                NativeJobRow(row: row, cancel: { cancel(id) }, compact: false, selected: selected == id) { selected = selected == id ? nil : id }
+                                Theme.rule.frame(height: 1)
                             }
+                        }
+                        .focusable().focusEffectDisabled()
+                        .onMoveCommand { direction in
+                            let ids = filtered.compactMap { $0["id"]?.string }
+                            guard let current = selected, let index = ids.firstIndex(of: current) else { selected = ids.first; return }
+                            let next = direction == .down ? index + 1 : direction == .up ? index - 1 : index
+                            if ids.indices.contains(next) { selected = ids[next] }
                         }
                     }
                 }
-            }
+            }, inspector: {
+                if let row = selectedRow { inspector(row) }
+            })
         }
         .nativePageTask {
             guard let listener = reads.begin("events") else { return }
@@ -91,6 +92,48 @@ struct NativeJobsPage: View {
             Text("Permanently remove completed, failed and cancelled job entries older than seven days, including their logs and job details. Running and queued jobs, benchmark results and saved transcripts are kept.")
         }
     }
+    private func cancel(_ id: String) {
+        Task { do { _ = try await runtime.jobs.cancel(id); await reload() } catch { self.error = error.localizedDescription } }
+    }
+    private func inspector(_ row: JSONObject) -> some View {
+        let value = JSONValue.object(row), status = value["status"].string
+        let details = (try? String(decoding: value.encoded(pretty: true), as: UTF8.self)) ?? ""
+        return NativeInspector(title: value["title"].string, caption: value["id"].string, icon: "list-checks", onClose: { selected = nil }) {
+            VStack(alignment: .leading, spacing: 0) {
+                NativeFact(label: "Status", value: status, tone: status == "done" ? Theme.okFg : status == "failed" ? Theme.failFg : status == "running" ? Theme.accent : status == "cancelled" ? Theme.warnFg : Theme.ink)
+                if !value["app"].string.isEmpty { NativeFact(label: "From", value: value["app"].string, mono: true) }
+                NativeFact(label: "Created", value: NativeListTimeFormat.ago(value["created_at"].double))
+                if !value["started_at"].isNull {
+                    NativeFact(label: "Ran for", value: NativeListTimeFormat.duration(max(0, (value["finished_at"].isNull ? Date().timeIntervalSince1970 * 1000 : value["finished_at"].double) - value["started_at"].double)))
+                }
+                if status == "running" {
+                    NativeTickMeter(fraction: value["progress"].double, color: Theme.accent, height: 9).padding(.top, 14)
+                    if !value["progress_text"].string.isEmpty { Text(value["progress_text"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted).padding(.top, 6) }
+                }
+                if status != "cancelled", !value["error"].string.isEmpty {
+                    Text(value["error"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.failFg).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true).padding(.top, 14)
+                }
+                ForEach(["params", "log", "result"], id: \.self) { field in
+                    if !value[field].isNull && (field != "log" || !value[field].array.isEmpty) {
+                        Text(field.capitalized).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).padding(.top, 16).padding(.bottom, 6)
+                        Text(field == "log" ? value[field].array.map(\.string).joined(separator: "\n") : (try? String(decoding: value[field].encoded(pretty: true), as: UTF8.self)) ?? "")
+                            .font(Theme.mono(11)).foregroundStyle(Theme.dim).lineSpacing(2).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(10)
+                            .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
+                    }
+                }
+            }
+        } actions: {
+            HStack(spacing: 8) {
+                if ["running", "queued"].contains(status) {
+                    Button("Cancel job", nativeIcon: "x") { cancel(value["id"].string) }.buttonStyle(T3Button(.destructive))
+                }
+                Spacer(minLength: 0)
+                T3IconButton(system: "copy", help: "Copy job details") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(details, forType: .string) }
+            }
+        }
+    }
     private func prune() async {
         guard !runtime.paths.readOnly, !pruning else { return }
         pruning = true; defer { pruning = false }
@@ -113,50 +156,60 @@ struct NativeJobsPage: View {
     }
 }
 
+/// One background job: state as a mark and a word, what it is, how far it is,
+/// when it started. Expands to its parameters, log and result.
 struct NativeJobRow: View {
     let row: JSONObject
     let cancel: () -> Void
     var compact = true
+    var selected = false
+    /// Set where a job opens in an inspector or on its page instead of expanding in place.
+    var onSelect: (() -> Void)? = nil
     @State private var expanded = false
     @State private var hovering = false
     @Environment(\.nativeReducedMotion) private var reduceMotion
     private var value: JSONValue { .object(row) }
-    private var live: Bool { ["running", "queued"].contains(value["status"].string) }
+    private var status: String { value["status"].string }
+    private var live: Bool { ["running", "queued"].contains(status) }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                Button { expanded.toggle() } label: { NativeIcon(expanded ? "chevron-down" : "chevron-right", size: 14) }.buttonStyle(.plain).pointingHand().help("Job details").accessibilityLabel("\(expanded ? "Collapse" : "Expand") details for \(value["title"].string)")
-                NativeStatusDot(color: color, pulse: value["status"] == "running")
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 7) {
-                        Text(value["title"].string).font(Theme.ui(13)).lineLimit(1)
-                        Text(value["status"].string).font(Theme.mono(11)).foregroundStyle(statusForeground).frame(minHeight: 14)
-                            .padding(.horizontal, 6).padding(.vertical, 2).background(statusBackground, in: RoundedRectangle(cornerRadius: 5))
-                        if !compact { Text(value["app"].string).font(Theme.mono(10.5)).foregroundStyle(Theme.muted) }
+                if onSelect == nil { Button { expanded.toggle() } label: {
+                    NativeIcon("chevron-right", size: 13).rotationEffect(.degrees(expanded ? 90 : 0)).foregroundStyle(Theme.muted).frame(width: 18, height: 28).contentShape(Rectangle())
+                }.buttonStyle(.plain).pointingHand().help("Job details").accessibilityLabel("\(expanded ? "Collapse" : "Expand") details for \(value["title"].string)") }
+                Group {
+                    if status == "running" { NativeStatusDot(color: Theme.accent, size: 7, pulse: true) }
+                    else { NativeIcon(status == "done" ? "check" : status == "failed" ? "circle-alert" : status == "cancelled" ? "ban" : "clock", size: 14).foregroundStyle(tone) }
+                }.frame(width: 16)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(value["title"].string).font(Theme.ui(Theme.textSm, weight: .medium)).lineLimit(1)
+                    HStack(spacing: 8) {
+                        Text(status).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(tone)
+                        if !compact, !value["app"].string.isEmpty { Text(value["app"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted) }
+                        if status == "running" { NativeTickMeter(fraction: value["progress"].double, color: Theme.accent, height: 9).frame(width: 120) }
+                        if !value["progress_text"].string.isEmpty { Text(value["progress_text"].string).font(Theme.mono(11)).foregroundStyle(Theme.muted).lineLimit(1) }
                     }
-                    if live || !value["progress_text"].string.isEmpty {
-                        HStack(spacing: 10) {
-                            if value["status"].string == "running" { CapsuleBar(fraction: value["progress"].double, color: Theme.accent).frame(maxWidth: 220) }
-                            Text(value["progress_text"].string).font(Theme.mono(10.5)).foregroundStyle(Theme.muted).lineLimit(1)
-                        }
-                    }
-                    if value["status"].string != "cancelled", !value["error"].string.isEmpty { Text(value["error"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.failFg).lineLimit(1).help(value["error"].string).textSelection(.enabled) }
+                    if status != "cancelled", !value["error"].string.isEmpty { Text(value["error"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.failFg).lineLimit(1).help(value["error"].string).textSelection(.enabled) }
                 }
-                Spacer()
+                Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(NativeListTimeFormat.ago(value["created_at"].double))
                     if !value["started_at"].isNull {
                         Text(NativeListTimeFormat.duration(max(0, (value["finished_at"].isNull ? Date().timeIntervalSince1970 * 1000 : value["finished_at"].double) - value["started_at"].double)))
                     }
-                }.font(Theme.mono(10.5)).foregroundStyle(Theme.muted).fixedSize()
-                if live { Button(action: cancel) { NativeIcon("x", size: 14) }.buttonStyle(T3Button(.ghost)).help("Cancel job").accessibilityLabel("Cancel \(value["title"].string)").frame(width: 28) }
+                }.font(Theme.mono(11)).foregroundStyle(Theme.muted).fixedSize()
+                if live { T3IconButton(system: "x", help: "Cancel job", size: 14, action: cancel).accessibilityLabel("Cancel \(value["title"].string)") }
                 else { Color.clear.frame(width: 28, height: 1) }
-            }.padding(.horizontal, 14).padding(.vertical, 10).background(hovering ? Theme.subtle : .clear).onHover { hovering = $0 }.animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+            }.padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 10).nativeRowHover(hovering, selected: selected).onHover { hovering = $0 }
+                .contentShape(Rectangle()).onTapGesture { onSelect?() }
+                .accessibilityAddTraits(onSelect == nil ? [] : selected ? [.isButton, .isSelected] : [.isButton])
+                .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+                .animation(reduceMotion ? nil : NativeMotion.reveal, value: expanded)
             if expanded {
-                Rectangle().fill(Theme.border).frame(height: 1)
+                Theme.rule.frame(height: 1)
                 VStack(alignment: .leading, spacing: 8) {
-                    if !value["error"].string.isEmpty, value["status"].string != "cancelled" {
-                        Text("ERROR").font(Theme.mono(10)).tracking(0.5).foregroundStyle(Theme.muted)
+                    if !value["error"].string.isEmpty, status != "cancelled" {
+                        fieldLabel("Error")
                         ViewThatFits(in: .vertical) {
                             errorText
                             ScrollView { errorText }.frame(height: 96)
@@ -164,37 +217,23 @@ struct NativeJobRow: View {
                     }
                     ForEach(["params", "log", "result"], id: \.self) { field in
                         if !value[field].isNull && (field != "log" || !value[field].array.isEmpty) {
-                            Text(field.uppercased()).font(Theme.mono(10)).tracking(0.5).foregroundStyle(Theme.muted)
-                            ScrollView { Text(field == "log" ? value[field].array.map(\.string).joined(separator: "\n") : pretty(value[field])).font(Theme.mono(11)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(maxHeight: field == "log" ? 240 : 160)
+                            fieldLabel(field.capitalized)
+                            ScrollView { Text(field == "log" ? value[field].array.map(\.string).joined(separator: "\n") : pretty(value[field])).font(Theme.mono(11)).foregroundStyle(Theme.dim).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(maxHeight: field == "log" ? 240 : 160)
                         }
                     }
-                }.padding(.horizontal, 14).padding(.vertical, 10).background(Theme.well)
+                }.padding(.leading, 56).padding(.trailing, 16).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading).background(Theme.well)
             }
         }
-        .background(compact ? Theme.surface : .clear)
-        .clipShape(RoundedRectangle(cornerRadius: compact ? Theme.radiusMd : 0))
-        .overlay { if compact { RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.border, lineWidth: 1) } }
+    }
+    private func fieldLabel(_ text: String) -> some View {
+        Text(text.uppercased()).font(Theme.ui(10.5, weight: .semibold)).tracking(0.9).foregroundStyle(Theme.faint)
     }
     private var errorText: some View {
-        Text(value["error"].string).font(Theme.ui(11.5)).foregroundStyle(Theme.failFg)
+        Text(value["error"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.failFg)
             .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
     }
-    private var statusForeground: Color {
-        switch value["status"].string {
-        case "done": return Theme.okFg
-        case "failed": return Theme.failFg
-        case "cancelled": return Theme.warnFg
-        default: return Theme.muted
-        }
-    }
-    private var statusBackground: Color {
-        switch value["status"].string {
-        case "done", "failed", "cancelled": return color.opacity(0.14)
-        default: return Theme.subtle
-        }
-    }
-    private var color: Color {
-        switch value["status"].string { case "done": return Theme.ok; case "failed": return Theme.fail; case "running": return Theme.accent; case "cancelled": return Theme.warn; default: return Theme.muted }
+    private var tone: Color {
+        switch status { case "done": return Theme.okFg; case "failed": return Theme.failFg; case "running": return Theme.accent; case "cancelled": return Theme.warnFg; default: return Theme.muted }
     }
     private func pretty(_ json: JSONValue) -> String { (try? String(decoding: json.encoded(pretty: true), as: UTF8.self)) ?? "" }
 }

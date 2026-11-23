@@ -28,18 +28,22 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.binding = $follows
         if coordinator.jump != jump { coordinator.jump = jump; coordinator.policy.jumpToBottom() }
-        coordinator.updating = true
-        let width = max(1, scroll.contentSize.width)
         // A nested NSHostingView starts a new environment. Forward policy and
         // appearance explicitly so retained transcripts cannot keep child
         // image reads/motion active or silently lose the chosen density/theme.
-        coordinator.host.rootView = AnyView(content.padding(12).frame(width: width, alignment: .topLeading).fixedSize(horizontal: false, vertical: true).frame(maxHeight: .infinity, alignment: .topLeading)
-            .environment(\.nativePageActivation, activation)
-            .environment(\.nativeMotionVisible, motionVisible)
-            .environment(\.nativeReducedMotion, reducedMotion)
-            .environment(\.nativeInterfaceDensity, density)
-            .environment(\.colorScheme, colorScheme))
-        coordinator.updating = false; coordinator.layout(scroll)
+        // The measure is applied by the coordinator: the scroll view has no
+        // width yet when it is first made, and a resize arrives without an update.
+        let content = content, activation = activation, motionVisible = motionVisible, reducedMotion = reducedMotion, density = density, colorScheme = colorScheme
+        coordinator.root = { width in
+            AnyView(content.padding(12).frame(width: width, alignment: .topLeading).fixedSize(horizontal: false, vertical: true).frame(maxHeight: .infinity, alignment: .topLeading)
+                .environment(\.nativePageActivation, activation)
+                .environment(\.nativeMotionVisible, motionVisible)
+                .environment(\.nativeReducedMotion, reducedMotion)
+                .environment(\.nativeInterfaceDensity, density)
+                .environment(\.colorScheme, colorScheme))
+        }
+        coordinator.apply(max(1, scroll.contentSize.width))
+        coordinator.layout(scroll)
         DispatchQueue.main.async { [weak coordinator, weak scroll] in if let scroll { coordinator?.layout(scroll) } }
     }
     static func dismantleNSView(_ scroll: Scroll, coordinator: Coordinator) { scroll.didLayout = nil; coordinator.stop() }
@@ -59,6 +63,12 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     final class Coordinator {
         let host = Host(rootView: AnyView(EmptyView()))
         var policy = CodeScrollPolicy(), binding: Binding<Bool>, jump = 0, updating = false, layingOut = false
+        var root: ((CGFloat) -> AnyView)?
+        private var measure: CGFloat = 0
+        func apply(_ width: CGFloat) {
+            guard let root else { return }
+            measure = width; updating = true; host.rootView = root(width); updating = false
+        }
         private var observer: NSObjectProtocol?
         private var keys: Any?
         init(follows: Binding<Bool>) { binding = follows; host.isFlipped = true }
@@ -86,6 +96,7 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
         func layout(_ scroll: Scroll) {
             guard !layingOut else { return }; layingOut = true; defer { layingOut = false }
             let width = max(1, scroll.contentSize.width), viewport = scroll.contentSize.height, old = host.frame.height, offset = scroll.contentView.bounds.origin.y
+            if abs(measure - width) > 0.5 { apply(width) }
             if abs(host.frame.width - width) > 0.5 { host.setFrameSize(NSSize(width: width, height: old)) }
             host.layoutSubtreeIfNeeded()
             let fitted = max(viewport, host.fittingSize.height)
@@ -96,7 +107,7 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
             publish()
         }
         private func publish() { let value = policy.follows; if binding.wrappedValue != value { DispatchQueue.main.async { [weak self] in self?.binding.wrappedValue = value } } }
-        func stop() { if let observer { NotificationCenter.default.removeObserver(observer) }; if let keys { NSEvent.removeMonitor(keys) }; keys = nil; observer = nil; host.resized = nil }
+        func stop() { root = nil; if let observer { NotificationCenter.default.removeObserver(observer) }; if let keys { NSEvent.removeMonitor(keys) }; keys = nil; observer = nil; host.resized = nil }
         deinit { stop() }
     }
 }

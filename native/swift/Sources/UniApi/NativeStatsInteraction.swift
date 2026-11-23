@@ -1,41 +1,5 @@
 import SwiftUI
 
-/// The shared tile's exact typography, spacing and accessibility, with a real
-/// reading on first paint. Statistics snapshots need no blank stagger interval.
-struct NativeStatsValueTile: View {
-    let label: String
-    let value: Double?
-    var unit = ""
-    var detail = ""
-    var accent: Color = Theme.accent
-    var format: (Double) -> String = NativeNumberFormat.decimal
-    private var reading: String { value.flatMap { $0.isFinite ? format($0) : nil } ?? "-" }
-
-    var body: some View {
-        Card(padding: 14) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    StatusDot(color: accent, size: 5)
-                    Text(label).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineLimit(1)
-                }
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(reading).font(Theme.mono(22, weight: .semibold)).monospacedDigit().lineLimit(1)
-                        .nativeStatsNumberTransition(value)
-                    if !unit.isEmpty {
-                        Text(unit).font(Theme.mono(12)).foregroundStyle(Theme.muted).lineLimit(1)
-                    }
-                }
-                if !detail.isEmpty {
-                    Text(detail).font(Theme.ui(11.5)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .accessibilityElement(children: .ignore).accessibilityLabel(label)
-        .accessibilityValue([reading, unit, detail].filter { !$0.isEmpty }.joined(separator: " "))
-    }
-}
-
 extension View {
     /// Actual readings stay visible on first paint. Only a subsequent semantic
     /// number change rolls; there is no delayed text state or per-cell AppKit host.

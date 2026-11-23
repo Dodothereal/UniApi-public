@@ -6,7 +6,7 @@ struct NativeIcon: View {
     var size: CGFloat
     var strokeWidth: CGFloat
 
-    init(_ name: String, size: CGFloat = 16, strokeWidth: CGFloat = 2) {
+    init(_ name: String, size: CGFloat = 16, strokeWidth: CGFloat = 1.7) {
         self.name = name; self.size = size; self.strokeWidth = strokeWidth
     }
     init(systemName: String, size: CGFloat = 14) {

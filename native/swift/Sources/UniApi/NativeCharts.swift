@@ -99,16 +99,40 @@ enum NativeChartMath {
     }
 }
 
+/// A chart's name. What the chart measures and how to read it sits behind
+/// the mark beside the name, so the page shows data rather than prose.
+/// An empty plot: the grid a chart would draw on, and two words.
+struct NativeChartEmpty: View {
+    var text: String = "No data"
+    var height: CGFloat = 96
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(0..<4, id: \.self) { index in
+                Theme.grid.frame(height: 1)
+                if index < 3 { Spacer(minLength: 0) }
+            }
+        }
+        .frame(height: height)
+        .overlay(alignment: .topLeading) {
+            Text(text).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint)
+                .padding(.trailing, 8).padding(.bottom, 2).background(Theme.bg).offset(y: -7)
+        }
+        .padding(.top, 7)
+        .accessibilityElement(children: .ignore).accessibilityLabel(text)
+    }
+}
+
 struct NativeChartHeading: View {
     var title: String
     var caption: String = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(Theme.ui(14, weight: .medium)).foregroundStyle(Theme.ink)
+        HStack(spacing: 6) {
+            Text(title).font(Theme.ui(Theme.textSm, weight: .semibold)).foregroundStyle(Theme.ink)
                 .accessibilityAddTraits(.isHeader)
             if !caption.isEmpty {
-                Text(caption).font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                NativeIcon("circle-help", size: 12).foregroundStyle(Theme.faint)
+                    .frame(width: 18, height: 18).contentShape(Rectangle())
+                    .help(caption).accessibilityLabel(caption)
             }
         }
     }
@@ -241,12 +265,16 @@ struct NativeLineChart: View {
     var monotone: Bool = true
     var showPoints: Bool = true
     var includeZero: Bool = true
+    var focus: String? = nil
     var xFormat: (Double) -> String = NativeNumberFormat.compact
     var yFormat: (Double) -> String = NativeNumberFormat.compact
-    @State private var isolated: String?
+    @State private var picked: String?
     @Environment(\.nativeReducedMotion) private var reduceMotion
     @Environment(\.nativeMotionVisible) private var visible
 
+    /// A series chosen outside the chart wins over the legend's own choice,
+    /// also when it has nothing to plot: the chart is then empty, not someone else's.
+    private var isolated: String? { focus ?? picked }
     private var samples: [NativeChartSample] {
         NativeChartMath.samples(series.filter { isolated == nil || $0.id == isolated })
     }
@@ -255,15 +283,17 @@ struct NativeLineChart: View {
         let points = samples
         VStack(alignment: .leading, spacing: 12) {
             if points.isEmpty {
-                NativeEmptyState(title: "No measured points", detail: "Measurements appear here when they are available.", icon: "chart.xyaxis.line")
+                NativeChartEmpty()
             } else {
                 chart(points)
             }
-            NativeChartLegend(entries: series.map { NativeLegendEntry(id: $0.id, label: $0.label, color: $0.color) },
-                              selection: $isolated)
+            // With a series chosen outside, that choice is the only control: no legend to click.
+            if focus == nil {
+                NativeChartLegend(entries: series.map { NativeLegendEntry(id: $0.id, label: $0.label, color: $0.color) }, selection: $picked)
+            }
         }
         .onChange(of: series) {
-            if let isolated, !series.contains(where: { $0.id == isolated }) { self.isolated = nil }
+            if let picked, !series.contains(where: { $0.id == picked }) { self.picked = nil }
         }
     }
 
@@ -326,7 +356,7 @@ struct NativeStackedBarChart: View {
         let yDomain = NativeChartMath.domain(sums)
         VStack(alignment: .leading, spacing: 12) {
             if points.isEmpty {
-                NativeEmptyState(title: "No measured columns", detail: "Missing readings remain gaps.", icon: "chart.bar")
+                NativeChartEmpty()
             } else {
                 Chart(points) { point in
                     BarMark(x: .value("Position", point.x), y: .value("Value", point.y))
@@ -365,77 +395,5 @@ struct NativeStackedBarChart: View {
         .onChange(of: series) {
             if let isolated, !series.contains(where: { $0.id == isolated }) { self.isolated = nil }
         }
-    }
-}
-
-struct NativeRankEntry: Identifiable {
-    var id: String
-    var title: String
-    var detail: String = ""
-    var value: Double?
-    var low: Double? = nil
-    var high: Double? = nil
-    var color: Color? = nil
-}
-
-struct NativeRankingChart: View {
-    var rows: [NativeRankEntry]
-    var lowerIsBetter: Bool = false
-    var fixedMaximum: Double? = nil
-    var format: (Double) -> String = NativeNumberFormat.compact
-
-    var body: some View {
-        let values = rows.compactMap(\.value).filter(\.isFinite)
-        let best = fixedMaximum ?? (lowerIsBetter ? values.min() : values.max()) ?? 1
-        VStack(spacing: 2) {
-            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                NativeRankBarRow(row: row, rank: index + 1, best: best,
-                                 lowerIsBetter: lowerIsBetter, format: format)
-            }
-        }
-    }
-}
-
-private struct NativeRankBarRow: View {
-    var row: NativeRankEntry
-    var rank: Int
-    var best: Double
-    var lowerIsBetter: Bool
-    var format: (Double) -> String
-    @State private var hovering = false
-    @Environment(\.nativeReducedMotion) private var reduceMotion
-    private var color: Color { row.color ?? Theme.pairColor(row.id) }
-    private func fraction(_ value: Double) -> Double {
-        guard best.isFinite, best >= 0, value.isFinite, value >= 0 else { return 0 }
-        if lowerIsBetter {
-            if value == 0 { return 1 }
-            return NativeMotion.fraction(best / value)
-        }
-        return best > 0 ? NativeMotion.fraction(value / best) : 0
-    }
-    private var spread: ClosedRange<Double>? {
-        guard let low = row.low, let high = row.high, low.isFinite, high.isFinite, high > low else { return nil }
-        let a = fraction(low), b = fraction(high)
-        return min(a, b)...max(a, b)
-    }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(String(format: "%02d", rank)).font(Theme.mono(10)).foregroundStyle(Theme.muted)
-                    .frame(width: 18, alignment: .leading)
-                Text(row.title).font(Theme.mono(12, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                if !row.detail.isEmpty { Text(row.detail).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1) }
-                Spacer(minLength: 12)
-                NativeNumberText(text: row.value.flatMap { $0.isFinite ? format($0) : nil } ?? "-",
-                                 font: Theme.mono(12, weight: .medium), delay: Double(rank - 1) * 0.045)
-            }
-            NativeGrowBar(fraction: row.value.map(fraction) ?? 0, color: color,
-                          delay: Double(rank - 1) * 0.045, spread: spread)
-        }
-        .padding(.horizontal, 9).padding(.vertical, 8)
-        .background(hovering ? Theme.subtle : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-        .onHover { hovering = $0 }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hovering)
-        .accessibilityElement(children: .combine)
     }
 }

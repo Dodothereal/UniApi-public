@@ -58,39 +58,27 @@ struct NativeBatteryPage: View {
     }
     private var disabled: Bool { runtime.paths.readOnly || state.pending || status["busy"].bool || !status["supported"].bool || !targetKnown }
     private var percent: Double? { NativeHardwareDisplayPolicies.number(status["battery"]["percent"]) }
-    private var limitLabel: String { !targetKnown ? "Reading limit…" : target == 100 ? "No limit" : "Limit \(target)%" }
-    private var statusColor: Color {
-        switch status["phase"].string {
-        case "holding", "holding-low": return Theme.okFg
-        case "above-limit": return Theme.warnFg
-        case "off": return Theme.muted.opacity(0.5)
-        default: return Theme.accent
-        }
-    }
     var body: some View {
-        NativePage(title: "Battery", subtitle: "Stop charging at a level instead of always filling to 100%, so the charger powers the Mac directly.", readiness: state.error != nil ? .failed : state.status.isNull ? .pending : .ready) {
+        NativePage(title: "Battery", readiness: state.error != nil ? .failed : state.status.isNull ? .pending : .ready, actions: {
+            T3IconButton(system: "refresh-cw", help: "Refresh") { Task { if let service = session.battery { await state.reload(service, force: true) } } }
+        }) {
             if let error = state.error { NativeError(message: error) }
             if !status["error"].isNull { NativeError(message: status["error"].string) }
             if status.isNull {
-                if state.error == nil {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("Reading battery state…").font(Theme.ui(12.5)).foregroundStyle(Theme.muted)
-                    }
-                    .frame(maxWidth: .infinity).padding(.vertical, 48)
-                } else {
-                    NativeEmptyState(title: "Battery unavailable", detail: "Refresh to try reading the battery again.", icon: "battery.0percent")
-                    refreshButton
-                }
+                if state.error == nil { ShimmerText(text: "Loading…") }
             } else if !status["supported"].bool {
                 NativeEmptyState(
-                    title: status["installed"] == .bool(false) ? "Helper not built" : "Not available on this Mac",
-                    detail: status["installed"] == .bool(false)
-                        ? "The battery helper is not included in this build."
-                        : "This version of macOS does not offer a battery charge limit.",
-                    icon: "battery.0percent")
+                    title: status["installed"] == .bool(false) ? "Helper not built" : "No charge limit on this Mac",
+                    detail: status["installed"] == .bool(false) ? "This build does not include the battery helper." : "This version of macOS does not offer one.",
+                    icon: "battery")
             } else {
-                controlCard
+                headline
+                if !status["hold"]["installed"].bool {
+                    NativeSetup(steps: [NativeSetupStep(id: "helper", title: "Install the charging helper", detail: "Limits below 100% need it. It is installed once.",
+                                                        done: false, enabled: !(runtime.paths.readOnly || state.pending || status["busy"].bool),
+                                                        actionTitle: "Install", actionIcon: "download", action: { Task { await install() } })])
+                }
+                limit
             }
         }
         .onChange(of: disabled) { _, value in if value { interaction.cancel() } }
@@ -108,69 +96,43 @@ struct NativeBatteryPage: View {
         }
         .nativePageActivity(suspended: { state.stop(); interaction.blur(); controlFocused = false })
     }
-    private var controlCard: some View {
-        Card(padding: 20) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .firstTextBaseline, spacing: 16) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            NativeNumberText(text: percent.map { String(format: "%.0f%%", $0) } ?? "—", font: Theme.ui(34, weight: .medium), color: percent == nil ? Theme.muted : Theme.ink)
-                            if status["battery"]["externalConnected"].bool {
-                                NativeIcon("plug", size: 14)
-                                    .foregroundStyle(Theme.muted)
-                                    .accessibilityLabel("Power connected")
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        HStack(spacing: 8) {
-                            StatusDot(color: statusColor, pulse: status["phase"].string == "charging-to-limit")
-                                .accessibilityHidden(true)
-                            Text(limitLabel).font(Theme.ui(12)).foregroundStyle(Theme.dim)
-                        }
-                        .fixedSize()
-                        .accessibilityElement(children: .combine)
-                    }
-
-                    control.padding(.top, 12)
-                    targetRange
-
-                    Text(phase)
-                        .font(Theme.ui(12.5)).foregroundStyle(Theme.dim)
-                        .lineSpacing(4).fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 12)
-
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .firstTextBaseline, spacing: 16) {
-                            readouts
-                            Spacer(minLength: 0)
-                            refreshButton
-                        }
-                        VStack(alignment: .leading, spacing: 8) {
-                            readouts
-                            refreshButton
-                        }
-                    }
-                    .padding(.top, 16)
-
-                    if !status["hold"]["installed"].bool {
-                        helperInstallation.padding(.top, 16)
-                    }
-                }
-            }
+    private var power: String {
+        status["battery"].isNull ? "" : status["battery"]["externalConnected"].bool ? (status["battery"]["charging"].bool ? "Charging" : "Plugged in, not charging") : "On battery"
+    }
+    private var headline: some View {
+        var facts = [NativeHeroFact(label: "Limit", value: !targetKnown ? "—" : target == 100 ? "Off" : "\(target)%", tone: targetKnown && target < 100 ? Theme.accent : Theme.ink)]
+        if !status["battery"]["health"].isNull { facts.append(NativeHeroFact(label: "Health", value: "\(status["battery"]["health"].int)%")) }
+        if !status["battery"]["cycleCount"].isNull { facts.append(NativeHeroFact(label: "Cycles", value: "\(status["battery"]["cycleCount"].int)")) }
+        return NativeHero(value: percent.map { String(format: "%.0f", $0) } ?? "—", numeric: percent, unit: percent == nil ? "" : "%", facts: facts) {
+            Text("Charge")
+            Text(power).foregroundStyle(Theme.faint).lineLimit(1).fixedSize()
+        } trailing: { EmptyView() }
+    }
+    private var limit: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Text(phase).font(Theme.ui(Theme.textSm)).foregroundStyle(status["phase"].string == "control-error" ? Theme.failFg : Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+                if state.pending { ProgressView().controlSize(.mini).accessibilityHidden(true) }
+                Text(targetHint).font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(interaction.draft != nil ? Theme.accent : Theme.muted)
+            }.padding(.bottom, 14)
+            control
+            targetRange
+        }
     }
     private var control: some View {
         GeometryReader { geometry in
             let desired = interaction.draft ?? interaction.pending ?? target
             ZStack(alignment: .leading) {
-                Capsule().fill(Theme.subtle2).frame(height: 8)
-                if let percent {
-                    Capsule().fill(Theme.accent.opacity(0.4))
-                        .frame(width: geometry.size.width * max(0, min(1, percent / 100)), height: 8)
+                NativeTickMeter(fraction: (percent ?? 0) / 100, color: Theme.ink, height: 20)
+                ForEach(levels, id: \.self) { level in
+                    Theme.faint.frame(width: 1, height: 5)
+                        .offset(x: geometry.size.width * Double(level) / 100 - 0.5, y: 16)
                 }
-                Capsule().fill(Theme.accent)
-                    .overlay(Capsule().strokeBorder(Theme.surface, lineWidth: 2))
-                    .frame(width: 12, height: 20)
-                    .shadow(color: Theme.shadow.opacity(0.25), radius: 1, y: 1)
-                    .offset(x: geometry.size.width * Double(desired) / 100 - 6)
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous).fill(Theme.accent)
+                    .frame(width: 3, height: 32)
+                    .offset(x: geometry.size.width * Double(desired) / 100 - 1.5)
             }.frame(height: 48).contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
                     .updating($pointerDown) { _, down, _ in down = true }
@@ -219,17 +181,10 @@ struct NativeBatteryPage: View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(levelLabel(levels.first ?? 100)).fixedSize()
             Spacer(minLength: 0)
-            HStack(spacing: 6) {
-                if state.pending { ProgressView().controlSize(.mini).accessibilityHidden(true) }
-                Text(targetHint)
-            }
-            .foregroundStyle(Theme.dim)
-            .multilineTextAlignment(.center)
-            Spacer(minLength: 0)
-            Text("100% · Off").fixedSize()
+            Text("Off").fixedSize()
         }
-        .font(Theme.ui(11)).foregroundStyle(Theme.muted).monospacedDigit()
-        .accessibilityElement(children: .combine)
+        .font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.faint)
+        .accessibilityHidden(true)
     }
     private func levelLabel(_ level: Int) -> String { level == 100 ? "Off" : "\(level)%" }
     private var targetAccessibilityValue: String {
@@ -238,71 +193,24 @@ struct NativeBatteryPage: View {
         return value == 100 ? "Off" : "\(value) percent"
     }
     private var targetHint: String {
-        if state.pending || interaction.pending != nil { return "Setting limit…" }
-        if let draft = interaction.draft { return "Release to set \(levelLabel(draft))" }
-        if !targetKnown { return "Reading limit…" }
-        return "Drag to set limit · \(levelLabel(target))"
-    }
-    private var readouts: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 20) { batteryReadouts }
-            VStack(alignment: .leading, spacing: 4) { batteryReadouts }
-        }
-        .font(Theme.ui(11)).foregroundStyle(Theme.muted).monospacedDigit()
-    }
-    @ViewBuilder private var batteryReadouts: some View {
-        if !status["battery"]["health"].isNull { Text("Health \(status["battery"]["health"].int)%").fixedSize() }
-        if !status["battery"]["cycleCount"].isNull { Text("\(status["battery"]["cycleCount"].int) cycles").fixedSize() }
-        Text(status["battery"].isNull ? "Reading battery…" : status["battery"]["externalConnected"].bool ? (status["battery"]["charging"].bool ? "Charging" : "Plugged in, not charging") : "On battery")
-            .fixedSize()
-    }
-    private var refreshButton: some View {
-        Button {
-            Task { if let service = session.battery { await state.reload(service, force: true) } }
-        } label: {
-            HStack(spacing: 6) { NativeIcon("refresh-cw", size: 12); Text("Refresh") }
-        }
-        .buttonStyle(T3Button(.ghost, size: 11))
-        .fixedSize()
-    }
-    private var helperInstallation: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 16) {
-                helperExplanation
-                Spacer(minLength: 0)
-                installButton
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                helperExplanation
-                installButton
-            }
-        }
-    }
-    private var helperExplanation: some View {
-        Text("Lower targets require one charging-helper installation.")
-            .font(Theme.ui(11)).foregroundStyle(Theme.muted)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-    private var installButton: some View {
-        Button("Install helper") { Task { await install() } }
-            .buttonStyle(T3Button(.outline, size: 11))
-            .fixedSize()
-            .disabled(runtime.paths.readOnly || state.pending || status["busy"].bool)
+        if state.pending || interaction.pending != nil { return "Setting" }
+        if let draft = interaction.draft { return "Release for \(levelLabel(draft))" }
+        return ""
     }
     private var phase: String {
-        guard targetKnown else { return "Reading charge-limit policy…" }
+        guard targetKnown else { return "" }
         return [
             "unsupported": "This Mac does not offer a charge limit.",
             "control-pending": "Limit requested. Waiting for charging telemetry to confirm it.",
             "control-error": "The helper could not apply charging control. The requested limit is not verified.",
-            "off": "No charge limit is set.",
+            "off": "Charges to 100%. Drag the marker to stop earlier.",
             "on-battery": "Running on battery. The limit applies again when you plug in.",
             "above-limit": "Above the \(target)% limit and not charging. macOS manages the transition down to the target.",
             "holding-low": "Plugged in and not charging near \(target)%.",
             "holding": "Plugged in and not charging at \(target)%.",
             "charging-to-limit": "Charging below the requested \(target)% limit.",
             "below-limit-idle": "Below the \(target)% limit, plugged in and not charging. macOS controls when charging resumes."
-        ][status["phase"].string] ?? "Reading battery state"
+        ][status["phase"].string] ?? ""
     }
     private func interactionKey(_ key: KeyEquivalent) -> NativeBatteryTargetInteraction.Key? {
         switch key {

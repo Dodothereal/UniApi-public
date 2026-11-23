@@ -33,23 +33,27 @@ struct NativeNoticeHost: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
             ForEach(center.queue.rows) { notice in
-                HStack(alignment: .top, spacing: 10) {
-                    NativeIcon(systemName: notice.kind == .error ? "exclamationmark.circle" : notice.kind == .success ? "checkmark.circle" : "info.circle")
-                        .foregroundStyle(notice.kind == .error ? Theme.failFg : notice.kind == .success ? Theme.okFg : Theme.accent)
-                    Text(notice.text).font(Theme.ui(13, weight: .medium)).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
-                    Button { center.dismiss(notice.id) } label: { NativeIcon(systemName: "xmark", size: 10) }
-                        .buttonStyle(.plain).help("Dismiss notification").accessibilityLabel("Dismiss notification")
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    NativeIcon(notice.kind == .error ? "circle-alert" : notice.kind == .success ? "circle-check" : "info", size: 14)
+                        .foregroundStyle(notice.kind == .error ? Theme.failFg : notice.kind == .success ? Theme.okFg : Theme.muted)
+                        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2.5 }
+                    Text(notice.text).font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(Theme.ink)
+                        .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                    Button { center.dismiss(notice.id) } label: { NativeIcon("x", size: 12).foregroundStyle(Theme.muted).frame(width: 18, height: 18).contentShape(Rectangle()) }
+                        .buttonStyle(.plain).pointingHand().help("Dismiss").accessibilityLabel("Dismiss notification")
+                        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 4 }
                 }
-                .padding(12).background(Theme.popover)
-                .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).stroke(Theme.input))
-                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(notice.kind == .error ? Theme.failFg.opacity(0.45) : Theme.border, lineWidth: 1))
+                .shadow(color: .black.opacity(0.10), radius: 12, y: 4)
                 .opacity(notice.leaving == nil ? 1 : 0)
                 .allowsHitTesting(notice.leaving == nil)
                 .animation(reduced ? nil : .easeOut(duration: NativeNoticeQueue.fadeDuration), value: notice.leaving)
                 .transition(.opacity)
             }
         }
-        .frame(width: 370).padding(.trailing, 16).padding(.top, 48)
+        .frame(width: 340).padding(.trailing, 16).padding(.top, Theme.barHeight + 8)
         .animation(reduced ? nil : .easeOut(duration: NativeNoticeQueue.fadeDuration), value: center.queue.rows.map(\.id))
         .accessibilityLabel("Notifications")
     }

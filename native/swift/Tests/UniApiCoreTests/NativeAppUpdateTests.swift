@@ -243,6 +243,52 @@ final class NativeAppUpdateTests: XCTestCase {
         XCTAssertEqual(state["phase"].string, "ready")
         XCTAssertFalse(record.values.contains("hide")); XCTAssertFalse(record.values.contains { $0.hasPrefix("launch") })
     }
+    /// Holds the second read of running work open, so a cancel can land inside it.
+    private final class WorkGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var calls = 0, open = false, waiter: CheckedContinuation<Void, Never>?
+        private(set) var entered = false
+        func pass() async {
+            let hold = lock.withLock { calls += 1; return calls == 2 }
+            guard hold else { return }
+            await withCheckedContinuation { continuation in
+                lock.withLock { entered = true; if open { continuation.resume() } else { waiter = continuation } }
+            }
+        }
+        var isEntered: Bool { lock.withLock { entered } }
+        func release() { lock.withLock { open = true; waiter?.resume(); waiter = nil } }
+    }
+    private func cancelInsideWorkRead(failing: Bool) async throws {
+        struct Unreachable: Error {}
+        let (runtime, root) = try runtime(); defer { try? FileManager.default.removeItem(at: root) }
+        let record = Record(), gate = WorkGate()
+        var io = io(record)
+        io.work = {
+            let busy = record.takeBusy(); record.add("work \(busy)")
+            await gate.pass()
+            if failing, gate.isEntered { throw Unreachable() }
+            return .init(jobs: busy, code: 0)
+        }
+        let updater = NativeAppUpdater(runtime: runtime, io: io)
+        await updater.check()
+        record.setBusy(1_000_000)
+        await updater.install { record.add("hide") }
+        _ = await settle(updater, until: ["waiting"])
+        for _ in 0..<2_000 where !gate.isEntered { try await Task.sleep(nanoseconds: 1_000_000) }
+        XCTAssertTrue(gate.isEntered)
+        await updater.cancelInstall()
+        var state = await updater.state()
+        XCTAssertEqual(state["phase"].string, "ready")
+        // The cancelled install comes back from its read only now.
+        gate.release()
+        for _ in 0..<20 { await Task.yield() }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        state = await updater.state()
+        XCTAssertEqual(state["phase"].string, "ready"); XCTAssertEqual(state["staged"].string, "0.1.17")
+        XCTAssertFalse(record.values.contains("hide")); XCTAssertFalse(record.values.contains { $0.hasPrefix("launch") })
+    }
+    func testCancelWhileRunningWorkIsReadStaysCancelled() async throws { try await cancelInsideWorkRead(failing: false) }
+    func testCancelledInstallDoesNotReportALaterReadFailure() async throws { try await cancelInsideWorkRead(failing: true) }
     func testCancelDuringTheFinalCheckLaunchesNothing() async throws {
         final class Holder: @unchecked Sendable { var updater: NativeAppUpdater?; var armed = false }
         let (runtime, root) = try runtime(); defer { try? FileManager.default.removeItem(at: root) }

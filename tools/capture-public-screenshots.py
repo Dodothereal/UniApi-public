@@ -57,22 +57,23 @@ DETAIL_LABEL = "Offscreen native Settings page, empty fixture; capture-only expa
 COMBINED_DEFAULT_LABEL = "Offscreen native page, empty fixture; capture-only session and Settings-state instrumentation"
 
 # Each replacement is admitted exactly once and recorded with its copied
-# source hash. These changes initialize real production disclosures and mark
-# their existing location; they do not replace any content or page container.
+# source hash. These changes select the real Settings category, initialize
+# production disclosures and mark their existing location; they do not replace
+# any content or page container.
 DETAIL_TRANSFORMS = {
     "NativeSettingsPage.swift": [
-        ('DisclosureGroup("Customize colors") {',
-         'DisclosureGroup("Customize colors", isExpanded: .constant(ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"]?.hasPrefix("theme-") == true)) {'),
-        ('NativeThemeSettingsView().padding(.top, 12)',
-         'NativeThemeSettingsView().padding(.top, 12).background(PublicCaptureAnchor("theme-common"))'),
+        ('@AppStorage("uniapi-settings-category") private var category = "appearance"',
+         '@State private var category = { () -> String in let section = ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] ?? ""; return section.hasPrefix("theme-") ? "colors" : section.isEmpty ? "appearance" : section }()'),
+        ('NativeThemeSettingsView()',
+         'NativeThemeSettingsView().background(PublicCaptureAnchor("theme-common"))'),
         ('NativeSidebarSettingsView()',
          'NativeSidebarSettingsView().background(PublicCaptureAnchor("sidebar"))'),
         ('NativeTelegramSettingsView(runtime: runtime)',
          'NativeTelegramSettingsView(runtime: runtime).background(PublicCaptureAnchor("telegram"))'),
     ],
     "NativeSidebarSettingsView.swift": [
-        ('DisclosureGroup("Edit sidebar") {',
-         'DisclosureGroup("Edit sidebar", isExpanded: .constant(ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] == "sidebar")) {'),
+        ('NativeDisclosure("Pages and order") {',
+         'NativeDisclosure("Pages and order", isExpanded: .constant(ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] == "sidebar")) {'),
     ],
     "NativeTelegramSettingsView.swift": [
         ('@State private var expanded = false',
@@ -81,8 +82,8 @@ DETAIL_TRANSFORMS = {
     "NativeThemeSettingsView.swift": [
         ('@State private var showAdvanced = false',
          '@State private var showAdvanced = ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] == "theme-advanced"'),
-        ('.font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.ink)\n        }.onAppear',
-         '.font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.ink)\n            .background(PublicCaptureAnchor("theme-advanced"))\n        }.onAppear'),
+        ('colorRows(advanced)\n            }\n        }.onAppear',
+         'colorRows(advanced)\n            }\n            .background(PublicCaptureAnchor("theme-advanced"))\n        }.onAppear'),
     ],
 }
 

@@ -11,8 +11,8 @@ If the app exits before completing or skipping setup, the guide opens again on t
 The guide offers Home, Switcher, Statistics and Transcribe as starting pages,
 without connecting or downloading anything. Appearance and spacing share this
 same screen. Larger viewports show an inert layout illustration; smaller ones
-use a two-column task grid. The Open action stays in a fixed footer at 40 points
-high and names the selected page. Skip for now stays in the header. Short
+use a two-column grid. The Open action stays in a fixed footer and names the
+selected page. Skip stays in the header. Short
 windows can scroll content while keeping the primary action available. The
 heading requests accessibility focus on entry.
 
@@ -47,21 +47,25 @@ observable tokens, without recreating pages or adding animation timers. Stable
 data-series colors and a few translucent effects retain their original roles.
 The bounded local preference document uses `uniapi-custom-theme-v1`.
 
+## Layout
+
+Settings shows one category at a time: Appearance, Colors, Launch, Sidebar, Telegram, Updates and Diagnostics. The list on the left selects the category, and the arrow keys move through it. `Search settings` filters the list by setting name; the first matching category is shown. In a narrow window the list becomes a menu above the category.
+
 ## Launch behavior
 
 `Launch page` chooses the page used when UniApi opens. Choosing a launch page turns off `Restore last visited page`, so that choice applies on the next launch. Restoration is enabled by default and preserves the existing behavior: the last selected page wins. When restoration is disabled, or the stored page is no longer an installed destination, UniApi opens the configured launch page. If that value is also unavailable, it opens Home when installed, otherwise the first installed page in the app's declared page order. If no known pages are installed, it falls back to Home.
 
 Read-only preview hosts retain their explicit installed-page selection before these preferences are considered.
 
-When the shell knows that Battery is unsupported, it omits Battery from the launch-page choices. If the launch-page preference is used, a previously saved Battery choice falls back to Home on that Mac; a valid restored last page still takes precedence. The saved choice is preserved in case support becomes available.
+Results, Prompts and Battery are views of Benchmark, Arena and Energy and are not offered as launch pages. A launch or restored page saved as one of them by an earlier version opens that view. If the launch-page preference is used on a Mac where the shell knows that Battery is unsupported, a previously saved Battery choice falls back to Home; a valid restored last page still takes precedence. The saved choice is preserved in case support becomes available.
 
 ## Sidebar
 
-Open `Edit sidebar` for a preview of the navigation layout, including hidden pages. Drag a section handle onto another section heading, or a page handle onto a page in the same section. When moving up, the item is placed before the target; when moving down, it is placed after it. An insertion line marks the position; invalid targets are marked and cannot be dropped. Each row also has a Move menu for keyboard access and a visibility switch. Home stays at the top, while Jobs and Settings stay at the bottom; these anchored pages cannot be moved or hidden. An unavailable Battery page retains its saved preference.
+`Expanded` switches between the full sidebar and an icon rail; Command-B does the same from any page, and the rail keeps every destination one click away. Open `Pages and order` for a preview of the navigation layout, including hidden pages. Drag a section handle onto another section heading, or a page handle onto a page in the same section. When moving up, the item is placed before the target; when moving down, it is placed after it. An insertion line marks the position; invalid targets are marked and cannot be dropped. Each row also has a Move menu for keyboard access and a visibility switch. Home stays at the top and Settings at the bottom; these anchored pages cannot be moved or hidden. Jobs has no sidebar row: running and queued jobs appear above Settings with their progress and open Jobs, which is also in the command palette.
 
 Hidden pages remain valid destinations, including for launch or restoration. Some can also be reached from Home; any hidden page can be restored with its visibility control. Sections with no visible pages are omitted. Hiding a page does not change the saved page and section order.
 
-`Show badges` is enabled by default. Turning it off hides the Jobs, Code and Arena counts and the battery percentage in the sidebar while leaving the destinations and their content available. `Restore sidebar layout defaults` resets width, page and section order, page visibility and badges. It does not change whether the sidebar is open.
+`Badges` is enabled by default. Turning it off hides the Code and Arena counts and the Energy reading in the sidebar while leaving the destinations and their content available. `Restore defaults` resets width, page and section order, page visibility and badges. It does not change whether the sidebar is expanded.
 
 The backing preference keys are `uniapi-start-page`, `uniapi-restore-last-page`, `uniapi-sidebar-order`, `uniapi-sidebar-hidden` and `uniapi-sidebar-badges`. Unrecognized launch and hidden-page entries are ignored. Choose a launch page or turn a sidebar page back on in Settings to replace them.
 
@@ -81,7 +85,7 @@ Application diagnostics and storage actions are available under the Diagnostics 
 
 Under Diagnostics and storage, Start recording saves page timing and process
 resource metadata locally for up to five minutes. Use the normal sidebar to
-navigate from Speed to Statistics, then use the Statistics header Reload action.
+navigate from Benchmark to Statistics, then use the Statistics header Reload action.
 Stop recording closes the file; Show recording reveals it in Finder only when
 you ask. Starting a recording does not reopen pages or clear retained data.
 

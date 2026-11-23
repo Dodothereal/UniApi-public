@@ -25,7 +25,7 @@ import UniApiCore
         case "checking": return running + " Checking GitHub for a newer release."
         case "current": return running + " This is the newest release."
         case "downloading": return "Downloading UniApi \(latest), \(Int((state["progress"].double * 100).rounded())) percent."
-        case "ready": return "UniApi \(latest) is downloaded and verified. Installing takes under a minute; the window closes and reopens, and providers, data and settings are kept."
+        case "ready": return "UniApi \(latest) is downloaded and verified. Installing takes under a minute and reopens the window. Providers, data and settings are kept."
         case "waiting", "installing", "failed", "unavailable": return state["message"].string
         default: return running
         }
@@ -54,7 +54,7 @@ struct NativeUpdateSettings: View {
                 case "checking":
                     ShimmerText(text: "Checking…")
                 case "downloading":
-                    NativeGrowBar(fraction: model.state["progress"].double, height: 6, entrance: false).frame(width: 120)
+                    NativeTickMeter(fraction: model.state["progress"].double, color: Theme.accent, height: 8).frame(width: 120)
                         .accessibilityLabel("Download progress").accessibilityValue("\(Int(model.state["progress"].double * 100)) percent")
                 case "unavailable":
                     EmptyView()
@@ -67,7 +67,7 @@ struct NativeUpdateSettings: View {
             }
         }
         if phase != "unavailable" {
-            SettingRow(title: "Check for updates automatically", desc: "On by default. Looks for a newer GitHub release every few hours and downloads it in the background, so installing is one click. Nothing is installed until you choose to update.") {
+            SettingRow(title: "Check for updates automatically", desc: "Downloads a newer release in the background. Nothing installs until you choose to.") {
                 T3Switch(isOn: $automatic).accessibilityLabel("Check for updates automatically")
             }
         }
@@ -84,14 +84,14 @@ struct NativeUpdateSidebarButton: View {
             let phase = model.phase
             Button { if phase == "ready" { session.installUpdate() } } label: {
                 HStack(spacing: 7) {
-                    NativeIcon("download", size: 12, strokeWidth: 2)
+                    NativeIcon("download", size: 13)
                     Text(phase == "ready" ? "Update to " + model.latest : phase == "waiting" ? "Updating when idle" : "Installing update")
                         .font(Theme.ui(11.5, weight: .medium)).lineLimit(1)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 9).frame(height: 28).frame(maxWidth: .infinity)
-                .foregroundStyle(Theme.onAccent)
-                .background(Theme.accent.opacity(phase == "ready" ? 1 : 0.6), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .foregroundStyle(Theme.onInk)
+                .background(Theme.ink.opacity(phase == "ready" ? 1 : 0.55), in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain).disabled(phase != "ready")
