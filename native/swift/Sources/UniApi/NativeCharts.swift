@@ -287,8 +287,10 @@ struct NativeLineChart: View {
             } else {
                 chart(points)
             }
-            NativeChartLegend(entries: series.map { NativeLegendEntry(id: $0.id, label: $0.label, color: $0.color) },
-                              selection: Binding(get: { isolated }, set: { picked = $0 }))
+            // With a series chosen outside, that choice is the only control: no legend to click.
+            if focus == nil {
+                NativeChartLegend(entries: series.map { NativeLegendEntry(id: $0.id, label: $0.label, color: $0.color) }, selection: $picked)
+            }
         }
         .onChange(of: series) {
             if let picked, !series.contains(where: { $0.id == picked }) { self.picked = nil }
