@@ -115,7 +115,9 @@ struct NativeArenaMatch: View {
             }
         }.menuIndicator(.hidden).accessibilityLabel(title).accessibilityValue(name(slots[pair[side]]))
     }
-    private func name(_ slot: JSONValue) -> String { slot["revealed"].bool ? slot["model"].string : slot["label"].string }
+    private func name(_ slot: JSONValue) -> String {
+        slot["revealed"].bool ? "\(slot["model"].string) · \(slot["route"].string)" : slot["label"].string
+    }
     @ViewBuilder private func columns(_ slots: [JSONValue]) -> some View {
         ForEach(Array(slots.enumerated()), id: \.element["id"]) { index, slot in
             let idx = slot["idx"].int
@@ -158,10 +160,13 @@ private struct NativeArenaPerformance: View {
         return VStack(alignment: .leading, spacing: 8) {
             Text(title).font(Theme.ui(Theme.textSm, weight: .semibold)).accessibilityAddTraits(.isHeader)
             ForEach(compared, id: \.self["id"]) { slot in
-                let value = metric(slot, key: key), name = slot["model"].string
+                let value = metric(slot, key: key)
                 HStack(spacing: 12) {
-                    Text(name).font(Theme.mono(Theme.textXs)).lineLimit(1).truncationMode(.middle)
-                        .frame(width: 135, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(slot["model"].string).font(Theme.mono(Theme.textXs))
+                        Text(slot["route"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                    }.lineLimit(1).truncationMode(.middle).frame(width: 135, alignment: .leading)
+                        .help("\(slot["model"].string) · \(slot["route"].string)")
                     if let value { NativeGrowBar(fraction: value / maximum, color: Theme.pairColor(ArenaContestantPolicy.key(slot))) }
                     else { Theme.rule.frame(height: 1).frame(maxWidth: .infinity).accessibilityHidden(true) }
                     NativeNumberText(text: value.map(format) ?? "Not recorded", font: Theme.num(Theme.textXs, weight: .medium))
