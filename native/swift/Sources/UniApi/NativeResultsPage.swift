@@ -382,7 +382,7 @@ struct NativeResultsPage: View {
                            tone: (cell.reliability ?? 100) < 90 ? Theme.warnFg : Theme.ink)
             if !cell.value["last_error"].isNull { NativePaneFact(label: "Last problem", value: Self.problem(cell), tone: Theme.warnFg) }
         }
-        if let spent = state.usage["pairs"].array.first(where: { $0["model"] == cell.value["model"] && $0["provider_name"] == cell.value["provider_name"] }) {
+        if let spent = state.usage["pairs"].array.first(where: { $0["provider"].string + "|" + $0["model"].string == cell.id }) {
             NativePaneSection(title: "Tokens spent, every run") {
                 NativePaneFact(label: "Input", value: NativeNumberFormat.compact(spent["input"].double))
                 NativePaneFact(label: "Output", value: NativeNumberFormat.compact(spent["output"].double))
