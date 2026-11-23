@@ -36,8 +36,10 @@ struct NativeResultsCharts: View {
         .overlay(alignment: .top) { Theme.rule.frame(height: 1).padding(.horizontal, margin) }
         .padding(.top, 18)
     }
+    /// The selected target first, so the eight-line cap never leaves it out.
     private var mostTested: [NativeResultCell] {
         cells.sorted { a, b in
+            if (a.id == focus) != (b.id == focus) { return a.id == focus }
             let ac = a.value["ok_count"].int + a.value["err_count"].int, bc = b.value["ok_count"].int + b.value["err_count"].int
             return ac == bc ? a.id < b.id : ac > bc
         }
@@ -59,6 +61,7 @@ struct NativeResultsCharts: View {
         }
         let known = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0.value["ok_count"].int + $0.value["err_count"].int) })
         return latest.keys.filter { known[$0] != nil }.sorted { a, b in
+            if (a == focus) != (b == focus) { return a == focus }
             let ac = known[a] ?? 0, bc = known[b] ?? 0
             return ac == bc ? a < b : ac > bc
         }.map { key in

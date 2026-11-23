@@ -272,8 +272,9 @@ struct NativeLineChart: View {
     @Environment(\.nativeReducedMotion) private var reduceMotion
     @Environment(\.nativeMotionVisible) private var visible
 
-    /// A series chosen outside the chart wins over the legend's own choice.
-    private var isolated: String? { focus.flatMap { id in series.contains { $0.id == id } ? id : nil } ?? picked }
+    /// A series chosen outside the chart wins over the legend's own choice,
+    /// also when it has nothing to plot: the chart is then empty, not someone else's.
+    private var isolated: String? { focus ?? picked }
     private var samples: [NativeChartSample] {
         NativeChartMath.samples(series.filter { isolated == nil || $0.id == isolated })
     }
