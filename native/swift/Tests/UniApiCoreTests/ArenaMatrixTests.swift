@@ -2,6 +2,15 @@ import XCTest
 @testable import UniApiCore
 
 final class ArenaMatrixTests: XCTestCase {
+    func testCompactLeaderboardNamesKeepTheDifferingPart() {
+        let cedar = "reading-assistant-enterprise-cedar-regional-preview-2026"
+        let maple = "reading-assistant-enterprise-maple-regional-preview-2026"
+        XCTAssertEqual(ArenaPresentationPolicy.compactModelNames([maple, "sample-pine", cedar, cedar]), [
+            cedar: "…cedar-regional-preview-2026",
+            maple: "…maple-regional-preview-2026"
+        ])
+    }
+
     func testScopeDrawsMissingPairsAndDirectionFollowLedgerOutcomes() {
         func slot(_ model: String, _ rank: JSONValue, status: JSONValue = "done") -> JSONValue {
             ["model": .string(model), "route": "route", "status": status, "rank": rank]

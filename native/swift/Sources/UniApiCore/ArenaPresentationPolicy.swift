@@ -88,6 +88,22 @@ public enum ArenaPresentationPolicy {
             match["slots"].array.contains { $0["revealed"].bool && $0["model"].string.localizedCaseInsensitiveContains(term) }
     }
 
+    public static func compactModelNames(_ models: [String]) -> [String: String] {
+        let names = Array(Set(models)).sorted()
+        let minimumSharedPrefix = 12
+        var compact: [String: String] = [:]
+        for index in names.indices {
+            let name = names[index]
+            let before = index > 0 ? name.commonPrefix(with: names[index - 1]).count : 0
+            let after = index + 1 < names.count ? name.commonPrefix(with: names[index + 1]).count : 0
+            let shared = max(before, after)
+            if shared >= minimumSharedPrefix, shared < name.count {
+                compact[name] = "…" + name.dropFirst(shared)
+            }
+        }
+        return compact
+    }
+
     /// Advance in the displayed order, wrapping after the last eligible match.
     /// History includes prior verdicts; Judge moves only to unjudged matches.
     public static func nextMatchID(in visible: [JSONValue], after currentID: String, history: Bool) -> String? {

@@ -304,6 +304,7 @@ struct NativeArenaPage: View {
         let columns: [(String, CGFloat)] = [("Elo", 54), ("Rated pairs", 72), ("Failed", 50)] + (width >= 570 ? [("Avg time", 72)] : [])
         let meter: CGFloat = width >= 660 ? 120 : width >= 450 ? 80 : 42
         let rows = filteredStandings, ranks = Dictionary(uniqueKeysWithValues: model.standings.enumerated().map { ($0.element["key"].string, $0.offset + 1) })
+        let compactNames = ArenaPresentationPolicy.compactModelNames(rows.map { $0["model"].string })
         let lower = floor(min(model.standings.last?["elo"].double ?? 1000, 1000) / 100) * 100
         let upper = max(lower + 100, ceil(max(model.standings.first?["elo"].double ?? 1000, 1000) / 100) * 100)
         return VStack(alignment: .leading, spacing: 0) {
@@ -317,6 +318,7 @@ struct NativeArenaPage: View {
             LazyVStack(spacing: 0) {
                 ForEach(rows, id: \.self["key"]) { row in
                     let key = row["key"].string
+                    let name = row["model"].string, route = row["route"].string
                     NativeArenaListRow(selected: standingKey == key, margin: density.pageMargin) {
                         withAnimation(selectionMotion) { standingKey = standingKey == key ? "" : key }
                     } content: {
@@ -324,8 +326,15 @@ struct NativeArenaPage: View {
                         Text("\(rank)").font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(rank == 1 ? Theme.ink : Theme.muted).frame(width: 28, alignment: .leading)
                         HStack(spacing: 8) {
                             RoundedRectangle(cornerRadius: 1).fill(Theme.pairColor(key)).frame(width: 3, height: 12).accessibilityHidden(true)
-                            Text(row["model"].string).font(Theme.mono(Theme.textXs, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                            Text(row["route"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1)
+                            if let compactName = compactNames[name] {
+                                ViewThatFits(in: .horizontal) {
+                                    Text(name)
+                                    Text(compactName).truncationMode(.tail)
+                                }.font(Theme.mono(Theme.textXs, weight: .medium)).lineLimit(1).accessibilityLabel(name)
+                            } else {
+                                Text(name).font(Theme.mono(Theme.textXs, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                            }
+                            Text(route).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                         NativeGrowBar(fraction: (row["elo"].double - lower) / (upper - lower), color: Theme.pairColor(key), height: 7)
                             .frame(width: meter).padding(.trailing, 8).accessibilityHidden(true)
@@ -334,7 +343,7 @@ struct NativeArenaPage: View {
                                              color: column.0 == "Elo" ? Theme.ink : column.0 == "Failed" && row["failures"].int > 0 ? Theme.warnFg : Theme.dim)
                                 .frame(width: column.1, alignment: .trailing)
                         }
-                    }.help(ArenaStandingDetail(row).accessibilitySummary)
+                    }.help("\(name) · \(route)\n\(ArenaStandingDetail(row).accessibilitySummary)")
                 }
             }
         }
