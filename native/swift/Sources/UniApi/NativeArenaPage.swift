@@ -56,7 +56,6 @@ struct NativeArenaPage: View {
         let showsRail = viewport.size.width >= 900
         NativePage(title: "Arena", readiness: pageReadiness, scrolls: false, tabs: {
             NativeTabs(options: ["Judge", "Ranking", "Presets", "History"].map { (value: $0, label: $0) }, selection: tab, counts: ["Judge": waiting]) { tab = $0; host?.select($0) }
-                .nativeHostedView(["Judge", "Ranking", "Presets", "History"]) { tab = $0 }
         }, actions: {
             if tab == "History" {
                 TextField("Search matches", text: $historySearch).textFieldStyle(.roundedBorder).frame(maxWidth: 170)
@@ -115,6 +114,7 @@ struct NativeArenaPage: View {
         .nativePageActivity(suspended: { model.stop() })
         .sheet(item: Binding(get: { editing.map { NativeArenaPresetItem(value: $0) } }, set: { editing = $0?.value })) { item in NativeArenaPresetEditor(value: item.value) { input in if let saved = await model.call("preset.save", input) { editing = nil; await model.load(); return saved }; return nil } }
         }
+        .nativeHostedView(["Judge", "Ranking", "Presets", "History"]) { tab = $0 }
     }
     private var compactMatchPicker: some View {
         let current = self.current
