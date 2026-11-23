@@ -14,6 +14,8 @@ struct NativeArenaPage: View {
     @State private var preset = ""
     @State private var rankingMode = "all"
     @State private var editing: JSONValue?
+    @State private var presetID = ""
+    @State private var standingKey = ""
     @Environment(\.nativeInterfaceDensity) private var density
     @Environment(\.nativePageActive) private var pageActive
     init(runtime: NativeRuntime) { self.runtime = runtime; _model = StateObject(wrappedValue: NativeArenaModel(runtime: runtime)) }
@@ -37,6 +39,10 @@ struct NativeArenaPage: View {
             NativeTabs(options: ["Judge", "Ranking", "Presets", "History"].map { (value: $0, label: $0) }, selection: tab, counts: ["Judge": waiting]) { tab = $0; host?.select($0) }
                 .nativeHostedView(["Judge", "Ranking", "Presets", "History"]) { tab = $0 }
         }, actions: {
+            if tab == "Ranking" {
+                T3Segmented(options: [("all", "All"), ("random", "Random"), ("chosen", "Chosen")], selection: rankingMode) { rankingMode = $0 }
+                    .accessibilityLabel("Ranking scope").help("Matches with random contestants, ones you chose, or both")
+            }
             T3IconButton(system: "refresh-cw", help: "Reload") { Task { await model.reload(ranking: tab == "Ranking" ? rankingMode : nil) } }
             if tab == "Presets" { Button("New preset", nativeIcon: "plus") { editing = [:] }.buttonStyle(T3Button(.outline)) }
             if tab == "New match" { Button("Cancel") { tab = "Judge" }.buttonStyle(T3Button(.ghost)) }
@@ -49,9 +55,9 @@ struct NativeArenaPage: View {
             if !model.loaded && tab != "Ranking" {
                 if !model.failed { ShimmerText(text: "Loading…").padding(.horizontal, density.pageMargin).padding(.top, density.pageGap) }
             } else { switch tab {
-            case "New match": NativePane(maxWidth: Theme.sheetWidth) { NativeArenaNewMatch(model: model, initialPreset: preset) { id in selected = id; tab = "Judge" } }
-            case "Presets": NativePane(maxWidth: Theme.sheetWidth) { presets }
-            case "Ranking": NativePane { rankings }
+            case "New match": NativeArenaNewMatch(model: model, initialPreset: preset) { id in selected = id; tab = "Judge" }
+            case "Presets": presets
+            case "Ranking": rankings(width: viewport.size.width)
             default:
                 if visible.isEmpty {
                     EmptyState(icon: "swords", title: tab == "Judge" ? "Nothing to judge" : "No matches",
@@ -130,142 +136,256 @@ struct NativeArenaPage: View {
             }
         }
     }
-    private var presets: some View { VStack(alignment: .leading, spacing: density.sectionGap) {
+    // MARK: Presets
+
+    private var inspectedPreset: JSONValue? { model.state["presets"].array.first { $0["id"].string == presetID } }
+    @ViewBuilder private var presets: some View {
         if model.state["presets"].array.isEmpty {
             EmptyState(icon: "file-text", title: "No presets", detail: "A preset is a saved task you can start a match from.", actionTitle: "New preset") { editing = [:] }
-        }
-        ForEach(ArenaPresentationPolicy.presetGroups(model.state["presets"].array)) { group in
-            NativeSection(group.title.prefix(1).uppercased() + group.title.dropFirst(), detail: "\(group.presets.count)") {
-                NativeStack {
-                    ForEach(Array(group.presets.enumerated()), id: \.element["id"]) { index, p in
-                        PresetRow(preset: p, use: { preset = p["id"].string; tab = "New match" }, edit: { editing = p }, delete: {
-                            if NativeArenaConfirm("Delete preset “\(p["title"].string)”?", detail: "Deleted built-in presets will stay deleted.") { Task { _ = await model.call("preset.delete", ["id": p["id"]]); await model.load() } }
-                        })
+                .padding(.horizontal, density.pageMargin).padding(.top, density.pageGap)
+        } else {
+            let groups = ArenaPresentationPolicy.presetGroups(model.state["presets"].array)
+            let order = groups.flatMap { $0.presets.map { $0["id"].string } }
+            NativeInspectorSplit(open: inspectedPreset != nil, width: 400, onClose: { presetID = "" }, main: {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(groups) { group in
+                            HStack(spacing: 6) {
+                                Text(group.title.prefix(1).uppercased() + group.title.dropFirst()).font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted)
+                                Text("\(group.presets.count)").font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.faint)
+                            }.padding(.horizontal, density.pageMargin).frame(height: 32, alignment: .bottom).padding(.bottom, 6)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(group.presets, id: \.self["id"]) { item in
+                                NativeArenaListRow(selected: presetID == item["id"].string, margin: density.pageMargin) {
+                                    presetID = presetID == item["id"].string ? "" : item["id"].string
+                                } content: {
+                                    Text(item["title"].string).font(Theme.ui(Theme.textSm, weight: .medium)).lineLimit(1).frame(width: 220, alignment: .leading)
+                                    Text(item["prompt"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                                    if item["builtin"].bool { MonoChip(text: "built-in").fixedSize().padding(.leading, 8) }
+                                    NativeIcon("chevron-right", size: 12).foregroundStyle(presetID == item["id"].string ? Theme.ink : Theme.faint).padding(.leading, 12).accessibilityHidden(true)
+                                }
+                            }
+                        }
+                    }.padding(.bottom, 32)
+                }
+                .scrollContentBackground(.hidden).focusable().focusEffectDisabled()
+                .onMoveCommand { direction in
+                    guard let index = order.firstIndex(of: presetID) else { return }
+                    let next = direction == .down ? index + 1 : direction == .up ? index - 1 : index
+                    if order.indices.contains(next) { presetID = order[next] }
+                }
+            }, inspector: {
+                if let item = inspectedPreset {
+                    NativeInspector(title: item["title"].string, caption: item["category"].string, onClose: { presetID = "" }) {
+                        Text(item["prompt"].string).font(Theme.ui(Theme.textSm)).lineSpacing(3).foregroundStyle(Theme.ink).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } actions: {
+                        NativeIconMenu(help: "Preset actions") {
+                            Button("Delete preset", role: .destructive) {
+                                if NativeArenaConfirm("Delete preset “\(item["title"].string)”?", detail: "Deleted built-in presets will stay deleted.") { Task { _ = await model.call("preset.delete", ["id": item["id"]]); presetID = ""; await model.load() } }
+                            }
+                        }
+                        Spacer(minLength: 0)
+                        Button("Edit", nativeIcon: "pencil") { editing = item }.buttonStyle(T3Button(.outline))
+                        Button("New match", nativeIcon: "play") { preset = item["id"].string; tab = "New match" }.buttonStyle(T3Button(.primary))
                     }
                 }
-            }
-        }
-    } }
-    private struct PresetRow: View {
-        let preset: JSONValue
-        let use: () -> Void
-        let edit: () -> Void
-        let delete: () -> Void
-        @State private var hovering = false
-        @Environment(\.nativeReducedMotion) private var reduceMotion
-        var body: some View {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(preset["title"].string).font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(Theme.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if preset["builtin"].bool { MonoChip(text: "built-in").fixedSize() }
-                    }
-                    Text(preset["prompt"].string).font(Theme.ui(12)).foregroundStyle(Theme.muted).lineSpacing(2).lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 2) {
-                    PresetAction(icon: "play", title: "New match with this prompt", action: use)
-                    PresetAction(icon: "pencil", title: "Edit", action: edit)
-                    PresetAction(icon: "trash-2", title: "Delete", action: delete)
-                }.fixedSize().opacity(hovering ? 1 : 0.45)
-            }.padding(.vertical, 10).contentShape(Rectangle())
-                .onHover { hovering = $0 }.animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
+            })
         }
     }
-    private struct PresetAction: View {
-        let icon: String
-        let title: String
-        let action: () -> Void
-        @State private var hovering = false
-        @Environment(\.isEnabled) private var enabled
-        @Environment(\.nativeReducedMotion) private var reduceMotion
-        var body: some View {
-            Button(action: action) {
-                NativeIcon(icon, size: 14)
-                    .foregroundStyle(hovering && enabled ? (icon == "trash-2" ? Theme.failFg : Theme.ink) : Theme.muted)
-                    .frame(width: 28, height: 28)
-                    .background(hovering && enabled ? Theme.subtle : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous))
-                    .contentShape(Rectangle())
-            }.buttonStyle(.plain).opacity(enabled ? 1 : 0.45).pointingHand(enabled)
-                .onHover { hovering = $0 && enabled }.animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
-                .help(title).accessibilityLabel(title)
-        }
+
+    // MARK: Ranking
+
+    private var inspectedStanding: JSONValue? { model.standings.first { $0["key"].string == standingKey } }
+    private func verdicts(for row: JSONValue?) -> [JSONValue] {
+        guard let row else { return model.recent }
+        return model.recent.filter { $0["contestants"].array.contains { $0["route"] == row["route"] && $0["model"] == row["model"] } }
     }
-    @ViewBuilder private var rankings: some View {
+    @ViewBuilder private func rankings(width: CGFloat) -> some View {
         let hasContent = model.rankingHasContent(for: rankingMode)
         let phase = model.rankingPhase(for: rankingMode)
-        NativeSection("Standings", detail: phase == .loading && hasContent ? "Refreshing" : "", trailing: {
-            T3Segmented(options: [("all", "All"), ("random", "Random"), ("chosen", "Chosen")], selection: rankingMode) { rankingMode = $0 }.accessibilityLabel("Ranking scope")
-        }) {
-            if hasContent {
-                if model.standings.isEmpty { EmptyState(icon: "trophy", title: "No verdicts", detail: "Judge a match or sync the shared ledger.") }
-                else {
-                    NativeStack {
-                        ForEach(Array(model.standings.enumerated()), id: \.offset) { i, row in standing(row, index: i) }
+        if !hasContent {
+            Group {
+                if phase == .failed { EmptyState(icon: "trophy", title: "Ranking unavailable", detail: "Reload to try this scope again.") }
+                else { ShimmerText(text: "Loading…") }
+            }.padding(.horizontal, density.pageMargin).padding(.top, density.pageGap)
+        } else {
+            let wide = width >= 900
+            HStack(alignment: .top, spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if model.standings.isEmpty {
+                            EmptyState(icon: "trophy", title: "No verdicts", detail: "Judge a match or sync the shared ledger.")
+                                .padding(.horizontal, density.pageMargin).padding(.top, density.pageGap)
+                        } else { standingsTable(width: wide ? width - 341 : width) }
+                        if !wide { rankingPane.padding(.top, 24); ledgerActions }
+                    }.padding(.bottom, 32).frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .scrollContentBackground(.hidden).focusable().focusEffectDisabled()
+                .onMoveCommand { direction in
+                    let keys = model.standings.map { $0["key"].string }
+                    guard let index = keys.firstIndex(of: standingKey) else { if direction == .down, let first = keys.first { standingKey = first }; return }
+                    let next = direction == .down ? index + 1 : direction == .up ? index - 1 : index
+                    if keys.indices.contains(next) { standingKey = keys[next] }
+                }
+                .onExitCommand { standingKey = "" }
+                if wide {
+                    VStack(spacing: 0) {
+                        ScrollView { rankingPane }.scrollContentBackground(.hidden)
+                        ledgerActions
                     }
+                    .frame(width: 340).frame(maxHeight: .infinity, alignment: .top)
+                    .overlay(alignment: .leading) { Theme.rule.frame(width: 1) }
+                }
+            }
+        }
+    }
+    private func standingsTable(width: CGFloat) -> some View {
+        let columns: [(String, CGFloat)] = [("Elo", 56), ("W", 36), ("L", 36), ("D", 36)] + (width >= 640 ? [("Matches", 64), ("Failed", 56)] : []) + (width >= 760 ? [("Avg time", 72)] : [])
+        let meter: CGFloat = width >= 720 ? 110 : 0
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                Text("#").frame(width: 28, alignment: .leading)
+                Text("Model").frame(maxWidth: .infinity, alignment: .leading)
+                ForEach(columns, id: \.0) { column in Text(column.0).frame(width: column.1, alignment: .trailing) }
+            }.font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).frame(height: 32).padding(.horizontal, density.pageMargin)
+            LazyVStack(spacing: 0) {
+                ForEach(Array(model.standings.enumerated()), id: \.element["key"]) { index, row in
+                    let key = row["key"].string
+                    NativeArenaListRow(selected: standingKey == key, margin: density.pageMargin) { standingKey = standingKey == key ? "" : key } content: {
+                        Text("\(index + 1)").font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(index == 0 ? Theme.ink : Theme.faint).frame(width: 28, alignment: .leading)
+                        HStack(spacing: 8) {
+                            RoundedRectangle(cornerRadius: 1).fill(Theme.pairColor(key)).frame(width: 3, height: 12).accessibilityHidden(true)
+                            Text(row["model"].string).font(Theme.mono(Theme.textXs, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                            Text(row["route"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        if meter > 0 { NativeTickMeter(fraction: fraction(row), color: Theme.ink, height: 8).frame(width: meter).padding(.trailing, 12) }
+                        ForEach(columns, id: \.0) { column in
+                            Text(standingCell(row, column.0)).font(Theme.num(Theme.textXs, weight: column.0 == "Elo" ? .semibold : .regular))
+                                .foregroundStyle(column.0 == "Elo" ? Theme.ink : column.0 == "Failed" && row["failures"].int > 0 ? Theme.warnFg : Theme.dim)
+                                .frame(width: column.1, alignment: .trailing)
+                        }
+                    }.help(ArenaStandingDetail(row).accessibilitySummary)
+                }
+            }
+        }
+    }
+    private func standingCell(_ row: JSONValue, _ column: String) -> String {
+        switch column {
+        case "Elo": return "\(row["elo"].int)"
+        case "W": return "\(row["wins"].int)"
+        case "L": return "\(row["losses"].int)"
+        case "D": return "\(row["draws"].int)"
+        case "Matches": return "\(row["matches"].int)"
+        case "Failed": return "\(row["failures"].int)"
+        default: return NativeArenaDuration(row["avg_duration_ms"].double)
+        }
+    }
+    private func paneSection<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).accessibilityAddTraits(.isHeader)
+            content()
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14).frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
+    }
+    private func paneFact(_ label: String, _ value: String, tone: Color = Theme.ink) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.dim).lineLimit(1)
+            Spacer(minLength: 8)
+            Text(value).font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(tone).lineLimit(1)
+        }
+    }
+    /// Describes the selected model; with nothing selected, the ledger the standings are folded from.
+    @ViewBuilder private var rankingPane: some View {
+        let row = inspectedStanding, records = verdicts(for: row)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(row?["model"].string ?? "Verdict ledger").font(row == nil ? Theme.ui(Theme.textSm, weight: .semibold) : Theme.mono(Theme.textSm, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(row?["route"].string ?? (model.ledger["remote"].string.isEmpty ? "On this Mac only" : model.ledger["remote"].string))
+                        .font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                }
+                Spacer(minLength: 8)
+                if row != nil { T3IconButton(system: "x", help: "Clear the selection", size: 13) { standingKey = "" } }
+            }.padding(.leading, 16).padding(.trailing, 10).padding(.vertical, 14)
+            if let row {
+                paneSection("Rating") {
+                    paneFact("Elo", "\(row["elo"].int)")
+                    paneFact("Won, lost, drawn", "\(row["wins"].int) · \(row["losses"].int) · \(row["draws"].int)")
+                    paneFact("Matches", "\(row["matches"].int)")
+                    paneFact("First places", ArenaStandingDetail(row).firstPlaceLabel)
+                    paneFact("Failed runs", "\(row["failures"].int)", tone: row["failures"].int > 0 ? Theme.warnFg : Theme.ink)
+                }
+                paneSection("Effort") {
+                    paneFact("Average time", NativeArenaDuration(row["avg_duration_ms"].double))
+                    paneFact("Average steps", "\(Int(row["avg_turns"].double.rounded()))")
+                }
+            } else {
+                paneSection("Files") {
+                    paneFact("Verdict files", "\(model.ledger["files"].int)")
+                    if model.ledger["git"].bool {
+                        paneFact("Not published", "\(model.ledger["unpublished"].int)", tone: model.ledger["unpublished"].int > 0 ? Theme.warnFg : Theme.ink)
+                        paneFact("New upstream", "\(model.ledger["behind"].int)", tone: model.ledger["behind"].int > 0 ? Theme.accent : Theme.ink)
+                    }
+                    if !model.output.isEmpty { Text(model.output).font(Theme.mono(11)).foregroundStyle(Theme.dim).textSelection(.enabled) }
                     Text("Pairwise Elo, K=32 shared across multi-way matches. All-bad is a draw. Failures count against reliability, not rating.")
-                        .font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint).fixedSize(horizontal: false, vertical: true)
-                }
-            } else if phase == .failed {
-                EmptyState(icon: "trophy", title: "Ranking unavailable", detail: "Reload to try this scope again.")
-            } else { ShimmerText(text: "Loading…") }
-        }
-        if hasContent {
-            NativeSection("Shared ledger", trailing: {
-                if model.ledger["git"].bool {
-                    HStack(spacing: 6) {
-                        Button("Sync", nativeIcon: "refresh-cw") { Task { await model.share("ledger.sync", mode: rankingMode) } }
-                        Button("Publish", nativeIcon: "upload") { if NativeArenaConfirm("Publish Arena verdict files?", detail: "This pushes new immutable results to the arena-results branch of the configured remote.") { Task { await model.share("ledger.publish", mode: rankingMode) } } }
-                    }.disabled(model.busy)
-                }
-            }) {
-                NativeReadoutStrip {
-                    NativeReadout(label: "Files", value: "\(model.ledger["files"].int)")
-                    NativeReadout(label: "Unpublished", value: "\(model.ledger["unpublished"].int)", tone: model.ledger["unpublished"].int > 0 ? Theme.warnFg : Theme.ink)
-                    NativeReadout(label: "New upstream", value: "\(model.ledger["behind"].int)", tone: model.ledger["behind"].int > 0 ? Theme.accent : Theme.ink)
-                }
-                Text(model.ledger["remote"].string.isEmpty ? "No Git remote. Results stay on this Mac." : model.ledger["remote"].string)
-                    .font(model.ledger["remote"].string.isEmpty ? Theme.ui(Theme.textXs) : Theme.mono(Theme.textXs)).foregroundStyle(Theme.muted).textSelection(.enabled)
-                if !model.output.isEmpty { Text(model.output).font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.dim).textSelection(.enabled) }
-            }
-            if !model.recent.isEmpty {
-                NativeSection("Recent verdicts", detail: "\(model.recent.count)") {
-                    if pageActive { TimelineView(.periodic(from: .now, by: 30)) { clock in recentVerdicts(at: clock.date) } }
-                    else { recentVerdicts(at: Date()) }
+                        .font(Theme.ui(11)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
             }
+            if !records.isEmpty {
+                paneSection(row == nil ? "Recent verdicts" : "Its verdicts") {
+                    if pageActive { TimelineView(.periodic(from: .now, by: 30)) { clock in recentVerdicts(records, at: clock.date) } }
+                    else { recentVerdicts(records, at: Date()) }
+                }
+            }
+        }.frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+    @ViewBuilder private var ledgerActions: some View {
+        if model.ledger["git"].bool, inspectedStanding == nil {
+            HStack(spacing: 8) {
+                Button("Sync", nativeIcon: "refresh-cw") { Task { await model.share("ledger.sync", mode: rankingMode) } }.buttonStyle(T3Button(.outline))
+                Button("Publish", nativeIcon: "upload") { if NativeArenaConfirm("Publish Arena verdict files?", detail: "This pushes new immutable results to the arena-results branch of the configured remote.") { Task { await model.share("ledger.publish", mode: rankingMode) } } }.buttonStyle(T3Button(.outline))
+            }
+            .disabled(model.busy).padding(.horizontal, 16).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .trailing)
+            .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
         }
     }
-    private func standing(_ row: JSONValue, index i: Int) -> some View {
-        HStack(alignment: .center, spacing: 14) {
-            Text("\(i + 1)").font(Theme.num(Theme.textSm, weight: .medium)).foregroundStyle(i == 0 ? Theme.ink : Theme.faint).frame(width: 22, alignment: .leading)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 1).fill(Theme.pairColor(row["key"].string)).frame(width: 3, height: 13)
-                    Text(row["model"].string).font(Theme.mono(Theme.textSm, weight: .medium)).lineLimit(1)
-                    Text(row["route"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1)
-                }
-                Text("\(row["wins"].int)W \(row["losses"].int)L \(row["draws"].int)D · \(row["failures"].int) failed · \(row["matches"].int) matches · \(ArenaStandingDetail(row).firstPlaceLabel) · \(NativeArenaDuration(row["avg_duration_ms"].double)) · \(Int(row["avg_turns"].double.rounded())) steps")
-                    .font(Theme.ui(Theme.textXs).monospacedDigit()).foregroundStyle(Theme.muted).lineLimit(1)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            NativeTickMeter(fraction: fraction(row), color: Theme.pairColor(row["key"].string), height: 10).frame(width: 150)
-            Text("\(row["elo"].int)").font(Theme.num(Theme.textLg)).frame(width: 56, alignment: .trailing)
-        }.padding(.vertical, 10).help(ArenaStandingDetail(row).accessibilitySummary)
-    }
-    private func recentVerdicts(at now: Date) -> some View {
-        NativeStack {
-            ForEach(Array(model.recent.enumerated()), id: \.offset) { _, record in
+    private func recentVerdicts(_ records: [JSONValue], at now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(records.prefix(12).enumerated()), id: \.offset) { _, record in
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(record["prompt"].string).lineLimit(2).font(Theme.ui(Theme.textSm))
-                    Text(record["contestants"].array.sorted { ($0["rank"].isNull ? 99 : $0["rank"].int) < ($1["rank"].isNull ? 99 : $1["rank"].int) }.map { "\($0["model"].string)\($0["status"].string == "failed" ? " (failed)" : "")" }.joined(separator: "  >  ")).font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.dim).textSelection(.enabled)
+                    Text(record["prompt"].string).lineLimit(2).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.ink)
+                    Text(record["contestants"].array.sorted { ($0["rank"].isNull ? 99 : $0["rank"].int) < ($1["rank"].isNull ? 99 : $1["rank"].int) }.map { "\($0["model"].string)\($0["status"].string == "failed" ? " (failed)" : "")" }.joined(separator: " > ")).font(Theme.mono(11)).foregroundStyle(Theme.dim).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                         .help(record["contestants"].array.map { "\($0["route"].string) · \($0["model"].string)" }.joined(separator: "\n"))
-                    Text(ArenaPresentationPolicy.recentVerdictMetadata(record, now: now)).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint)
-                }.padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(ArenaPresentationPolicy.recentVerdictMetadata(record, now: now)).font(Theme.ui(11)).foregroundStyle(Theme.faint)
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
     private func fraction(_ row: JSONValue) -> Double { let floor = min(1000, model.standings.map { $0["elo"].double }.min() ?? 1000), peak = model.standings.map { $0["elo"].double }.max() ?? 1000; return (row["elo"].double - floor + 50) / max(1, peak - floor + 50) }
+}
+
+/// A selectable row of an Arena list: hairline above, raised when selected.
+private struct NativeArenaListRow<Content: View>: View {
+    let selected: Bool
+    let margin: CGFloat
+    let action: () -> Void
+    @ViewBuilder var content: () -> Content
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 0) { content() }.frame(minHeight: 38).padding(.horizontal, margin).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(selected ? Theme.raised : hovering ? Theme.subtle : .clear)
+        .overlay(alignment: .top) { Theme.rule.frame(height: 1).padding(.horizontal, margin) }
+        .overlay(alignment: .leading) { Theme.accent.frame(width: 2).opacity(selected ? 1 : 0) }
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
 }
 
 private struct NativeArenaMatchRow: View {
