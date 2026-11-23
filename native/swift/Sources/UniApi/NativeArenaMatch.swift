@@ -19,10 +19,19 @@ struct NativeArenaMatch: View {
     var body: some View { VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top, spacing: 8) {
             Button { showPrompt.toggle() } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                // A scrolling task has no text baseline for the chevron to sit on.
+                HStack(alignment: showPrompt ? .top : .firstTextBaseline, spacing: 8) {
                     NativeIcon("chevron-right", size: 12).foregroundStyle(Theme.faint).rotationEffect(.degrees(showPrompt ? 90 : 0))
-                    Text(match["prompt"].string).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.ink).lineSpacing(3).lineLimit(showPrompt ? 12 : 1)
+                        .padding(.top, showPrompt ? 3 : 0)
+                    let task = Text(match["prompt"].string).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.ink).lineSpacing(3)
                         .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                    // The whole task is readable when open: it scrolls once it is taller than the cap.
+                    if showPrompt {
+                        ViewThatFits(in: .vertical) {
+                            task.fixedSize(horizontal: false, vertical: true)
+                            ScrollView { task.fixedSize(horizontal: false, vertical: true) }
+                        }.frame(maxHeight: 200)
+                    } else { task.lineLimit(1) }
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).pointingHand().accessibilityLabel("Match prompt").accessibilityValue(showPrompt ? "Expanded" : "Collapsed")
                 .help(showPrompt ? "Collapse the task" : "Show the whole task")
