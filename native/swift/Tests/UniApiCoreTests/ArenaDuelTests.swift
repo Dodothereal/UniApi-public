@@ -60,4 +60,18 @@ final class ArenaDuelTests: XCTestCase {
             XCTAssertEqual(folded.deltas[key].int, points.last!["elo"].int - before.first { $0["key"].string == key }!["elo"].int)
         }
     }
+
+    func testOneArchivedVerdictProducesOneSamplePerModelAndOneTrendTick() {
+        let slots: [JSONValue] = [
+            ["idx": 0, "route": "fixture", "model": "alpha", "status": "done"],
+            ["idx": 1, "route": "fixture", "model": "beta", "status": "done"]
+        ]
+        let verdict = ArenaLedger.record(match: ["id": "archived", "mode": "random"], slots: slots,
+                                         ranking: [0, 1], voter: .null, at: 1_700_000_000_000)
+        let trend = ArenaRanking.fold([verdict], mode: "all", trend: true).trend
+        XCTAssertEqual(trend.count, 2)
+        XCTAssertEqual(trend.map { $0["points"].array.count }, [1, 1])
+        let timestamps = trend.flatMap { $0["points"].array.map { $0["ts"].double } }
+        XCTAssertEqual(ArenaPresentationPolicy.trendTicks(timestamps, label: { String($0) }), [1_700_000_000_000])
+    }
 }

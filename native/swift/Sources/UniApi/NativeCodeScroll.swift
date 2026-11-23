@@ -9,13 +9,16 @@ import UniApiPresentation
 struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     let content: Content
     var jump: Int = 0
+    var scrollsWithDownArrow: Bool
     @Binding var follows: Bool
     @Environment(\.nativePageActivation) private var activation
     @Environment(\.nativeMotionVisible) private var motionVisible
     @Environment(\.nativeReducedMotion) private var reducedMotion
     @Environment(\.nativeInterfaceDensity) private var density
     @Environment(\.colorScheme) private var colorScheme
-    init(jump: Int = 0, follows: Binding<Bool>, @ViewBuilder content: () -> Content) { self.jump = jump; _follows = follows; self.content = content() }
+    init(jump: Int = 0, follows: Binding<Bool>, scrollsWithDownArrow: Bool = true, @ViewBuilder content: () -> Content) {
+        self.jump = jump; _follows = follows; self.scrollsWithDownArrow = scrollsWithDownArrow; self.content = content()
+    }
     func makeCoordinator() -> Coordinator { Coordinator(follows: $follows) }
     func makeNSView(context: Context) -> Scroll {
         let scroll = Scroll(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = false; scroll.drawsBackground = false; scroll.autohidesScrollers = true
@@ -27,6 +30,7 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     func updateNSView(_ scroll: Scroll, context: Context) {
         let coordinator = context.coordinator
         coordinator.binding = $follows
+        coordinator.scrollsWithDownArrow = scrollsWithDownArrow
         if coordinator.jump != jump { coordinator.jump = jump; coordinator.policy.jumpToBottom() }
         // A nested NSHostingView starts a new environment. Forward policy and
         // appearance explicitly so retained transcripts cannot keep child
@@ -63,6 +67,7 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     final class Coordinator {
         let host = Host(rootView: AnyView(EmptyView()))
         var policy = CodeScrollPolicy(), binding: Binding<Bool>, jump = 0, updating = false, layingOut = false
+        var scrollsWithDownArrow = true
         var root: ((CGFloat) -> AnyView)?
         private var measure: CGFloat = 0
         func apply(_ width: CGFloat) {
@@ -79,11 +84,12 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
                 self.policy.userScrolled(distanceToBottom: Double(distance)); self.publish()
             }
             host.resized = { [weak self, weak scroll] in DispatchQueue.main.async { if let scroll { self?.layout(scroll) } } }
-            keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak scroll] event in
+            keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak scroll] event in
                 // A retained window can still have this reader as its responder
                 // while a sheet or another window owns the incoming key event.
                 guard let scroll, let window = scroll.window, event.window === window,
                       window.isVisible, !window.isMiniaturized, !NSApp.isHidden,
+                      event.keyCode != 125 || self?.scrollsWithDownArrow == true,
                       [UInt16(126), 125, 116, 121, 115, 119].contains(event.keyCode), event.modifierFlags.intersection([.command, .option, .shift, .control]).isEmpty,
                       let responder = window.firstResponder as? NSView else { return event }
                 if let text = responder as? NSTextView, text.isEditable { return event }

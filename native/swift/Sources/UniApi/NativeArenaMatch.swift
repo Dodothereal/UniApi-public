@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniApiCore
 import UniApiPresentation
@@ -14,7 +15,7 @@ struct NativeArenaMatch: View {
     @State private var leftContent = "Result"
     @State private var rightContent = "Result"
     @State private var compared = [0, 1]
-    @FocusState private var duelFocused: Bool
+    @Environment(\.nativePageActive) private var pageActive
     @Environment(\.nativeInterfaceDensity) private var density
     @Environment(\.nativeReducedMotion) private var reducedMotion
     @Environment(\.nativeMotionVisible) private var visible
@@ -105,12 +106,10 @@ struct NativeArenaMatch: View {
                 VStack(alignment: .trailing, spacing: 8) { duelChoices; secondaryChoices }
             }.padding(.horizontal, density.pageMargin).padding(.vertical, 12).disabled(busy)
         }
-        .focusable().focusEffectDisabled().focused($duelFocused)
-        .defaultFocus($duelFocused, true)
-        .onKeyPress(keys: [.leftArrow, .downArrow, .rightArrow], phases: .down) { key in
-            guard duel.pair != nil, !busy, key.modifiers.isEmpty else { return .ignored }
-            choose(key.key == .leftArrow ? .left : key.key == .rightArrow ? .right : .tie)
-            return .handled
+        .background {
+            if pageActive {
+                NativeArenaDuelKeys(choose: choose).allowsHitTesting(false).accessibilityHidden(true)
+            }
         }
     }
 
@@ -228,21 +227,61 @@ struct NativeArenaMatch: View {
             NativeTabs(options: ["Result", "Transcript", "Files"].map { ($0, $0) }, selection: selection.wrappedValue, height: 33) { selection.wrappedValue = $0 }
                 .padding(.horizontal, 12).accessibilityLabel("\(slot["label"].string) content")
             Theme.rule.frame(height: 1)
-            NativeArenaSlot(runtime: runtime, model: model, slot: slot, tab: selection.wrappedValue, compactName: compactNames[slot["model"].string])
+            NativeArenaSlot(runtime: runtime, model: model, slot: slot, tab: selection.wrappedValue,
+                            compactName: compactNames[slot["model"].string], judging: judging)
         }.frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private func choose(_ choice: ArenaDuel.Choice) {
-        guard !busy, duel.pair != nil else { return }
+    @discardableResult private func choose(_ choice: ArenaDuel.Choice) -> Bool {
+        guard !busy, duel.pair != nil else { return false }
         var updated = duel
         updated.choose(choice)
         withAnimation(motion) { draft = updated; leftContent = "Result"; rightContent = "Result" }
+        return true
     }
 
     private func act(_ op: String, _ input: JSONObject = [:], then after: (() -> Void)? = nil) {
         guard !busy else { return }
         busy = true
         Task { defer { busy = false }; _ = await model.performMatchAction(op, id: match["id"], input: input, after: after) }
+    }
+}
+
+private struct NativeArenaDuelKeys: NSViewRepresentable {
+    let choose: (ArenaDuel.Choice) -> Bool
+
+    func makeNSView(context: Context) -> MonitorView { MonitorView() }
+    func updateNSView(_ view: MonitorView, context: Context) { view.choose = choose }
+    static func dismantleNSView(_ view: MonitorView, coordinator: ()) { view.stop() }
+
+    final class MonitorView: NSView {
+        var choose: ((ArenaDuel.Choice) -> Bool)?
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, let window = self.window, event.window === window, window.isKeyWindow,
+                      window.attachedSheet == nil, !event.isARepeat,
+                      event.modifierFlags.intersection([.command, .option, .shift, .control]).isEmpty,
+                      (window.firstResponder as? NSTextView)?.isEditable != true else { return event }
+                let choice: ArenaDuel.Choice
+                switch event.specialKey {
+                case .leftArrow: choice = .left
+                case .downArrow: choice = .tie
+                case .rightArrow: choice = .right
+                default: return event
+                }
+                return self.choose?(choice) == true ? nil : event
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
     }
 }
 
@@ -295,6 +334,7 @@ private struct NativeArenaSlot: View {
     let slot: JSONValue
     let tab: String
     let compactName: String?
+    let judging: Bool
     @State private var presentation = 0
     @State private var files: [JSONValue] = []
     @State private var preview: NativeArenaPreviewItem?
@@ -329,7 +369,7 @@ private struct NativeArenaSlot: View {
                 else { duration(at: Date()) }
             }.padding(.horizontal, 16).frame(height: 32).background(Theme.sunken)
         }
-        if tab == "Transcript" { NativeCodeScroll(jump: jump, follows: $follows) { VStack(alignment: .leading, spacing: 10) {
+        if tab == "Transcript" { NativeCodeScroll(jump: jump, follows: $follows, scrollsWithDownArrow: !judging) { VStack(alignment: .leading, spacing: 10) {
             if model.transcripts[id]?.isEmpty == true, slot["status"].string != "running", model.contentError(id, tab: tab).isEmpty {
                 Text("No transcript was recorded").font(Theme.ui(12)).foregroundStyle(Theme.muted)
             }

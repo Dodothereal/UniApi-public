@@ -201,11 +201,12 @@ private struct NativeEntranceModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let final = revealed || settled || !allowed
+        let collapsedScale: CGFloat = 0.001
         content
             .opacity(final || kind == .grow || kind == .growVertical || kind == .rule ? 1 : 0)
             .offset(y: final ? 0 : (kind == .page ? 6 : (kind == .row ? 8 : 0)))
-            .scaleEffect(x: !final && (kind == .grow || kind == .rule) ? 0 : 1,
-                         y: !final && kind == .growVertical ? 0 : 1,
+            .scaleEffect(x: !final && (kind == .grow || kind == .rule) ? collapsedScale : 1,
+                         y: !final && kind == .growVertical ? collapsedScale : 1,
                          anchor: kind == .growVertical ? .bottom : .leading)
             .animation(allowed && !settled ? kind.animation : nil, value: revealed)
             .animation(nil, value: settled)

@@ -303,14 +303,21 @@ struct NativeLineChart: View {
 
     private func chart(_ points: [NativeChartSample]) -> some View {
         let yDomain = NativeChartMath.domain(points.map(\.y), includeZero: includeZero)
+        let linePaths = Set(Dictionary(grouping: points, by: \.pathID).compactMap { key, path -> String? in
+            guard let first = path.first, path.contains(where: { $0.x != first.x }) else { return nil }
+            return key
+        })
         return Chart {
             ForEach(points) { point in
-                LineMark(x: .value("Position", point.x), y: .value("Value", point.y),
-                         series: .value("Path", point.pathID))
-                    .foregroundStyle(point.color)
-                    .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(monotone ? .monotone : .linear)
-                if showPoints {
+                let drawsLine = linePaths.contains(point.pathID)
+                if drawsLine {
+                    LineMark(x: .value("Position", point.x), y: .value("Value", point.y),
+                             series: .value("Path", point.pathID))
+                        .foregroundStyle(point.color)
+                        .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                        .interpolationMethod(monotone ? .monotone : .linear)
+                }
+                if showPoints || !drawsLine {
                     PointMark(x: .value("Position", point.x), y: .value("Value", point.y))
                         .foregroundStyle(point.color).symbolSize(isolated == nil ? 20 : 34)
                         .accessibilityLabel(point.label + ", " + xFormat(point.x))

@@ -30,7 +30,7 @@ struct NativeArenaStandingsPreview: View {
                         NativeLineChart(series: series, height: 130, monotone: false, includeZero: false,
                             xFormat: format, yFormat: { String(format: "%.0f", $0) },
                             xTicks: { ArenaPresentationPolicy.trendTicks($0, label: format) }, legend: trendLegend(series))
-                            .nativeEntrance(.growVertical)
+                            .nativeEntrance(.fade)
                     }
                 }
             }
