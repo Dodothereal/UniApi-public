@@ -260,6 +260,9 @@ private struct NativeStatsBoard: View {
     private var projectRow: JSONValue? { project.flatMap { path in d["projects"].array.first { $0["path"].string == path } } }
     private var detailLoaded: Bool { model != nil && detail["loaded"].bool && detail["model"].string == model }
     private var totals: JSONValue { projectRow?["totals"] ?? modelRow?["totals"] ?? summary["totals"] }
+    /// What the chart plots. Days are not kept per project, so a selected
+    /// project is described in the pane and the headline stays with the chart.
+    private var plotted: JSONValue { modelRow?["totals"] ?? summary["totals"] }
     private var metric: NativeStatsRateMetric {
         chosenMetric ?? (NativeStatsThroughputPresentation.hasMeasurements(NativeStatsRateMetric.streaming.board(d["throughput"])) ? .streaming : .response)
     }
@@ -360,20 +363,20 @@ private struct NativeStatsBoard: View {
                     .help("Scale of the first-token chart")
             }
         default:
+            let totals = plotted
             let amount = nativeStatsAmount(totals, measure)
             let prompt = totals["input"].double + totals["cacheRead"].double + totals["cacheWrite"].double
             heroRow(value: nativeStatsCount(amount), numeric: amount, unit: "",
                     facts: [costFact,
                             HeroFact(label: "From cache", value: prompt > 0 ? String(format: "%.1f%%", totals["cacheRead"].double * 100 / prompt) : "—", help: "\(nativeStatsCount(totals["cacheRead"].double)) of \(nativeStatsCount(prompt)) prompt tokens were cache reads")]
                         + (lifetime ? [] : [HeroFact(label: "Responses", value: nativeStatsCount(totals["messages"].double))])
-                        + [HeroFact(label: "Sessions", value: "\((projectRow?["sessions"] ?? modelRow?["sessions"] ?? summary["sessions"]).int)")]) {
+                        + [HeroFact(label: "Sessions", value: "\((modelRow?["sessions"] ?? summary["sessions"]).int)")]) {
                 measureMenu(Self.measures.first { $0.0 == measure }?.1 ?? "Tokens", options: Self.measures) { measure = $0 }
             } trailing: { EmptyView() }
         }
     }
 
     private var costFact: HeroFact {
-        if project != nil { return HeroFact(label: "Est. cost", value: "—", help: "Cost is estimated per model, not per project") }
         if let model {
             let row = d["cost"]["rows"].array.first { $0["model"].string == model } ?? .null
             return HeroFact(label: "Est. cost", value: row["usd"].isNull ? "—" : nativeStatsMoney(row["usd"].double) + (row["unpricedTokens"].double > 0 ? "+" : ""),
@@ -402,7 +405,7 @@ private struct NativeStatsBoard: View {
 
     private var scopeName: String? {
         if view == "benchmark" { return targetRow.map { "\(short($0["model"].string)) · \($0["providerName"].string)" } }
-        return projectRow?["name"].string ?? model.map(short)
+        return model.map(short)
     }
 
     private func heroRow<Label: View, Trailing: View>(value: String, numeric: Double?, unit: String, facts: [HeroFact],
