@@ -77,6 +77,17 @@ public struct ArenaPresetGroup: Identifiable, Equatable, Sendable {
 
 /// Presentation only; category and task order follow the saved preset catalog.
 public enum ArenaPresentationPolicy {
+    public static func matchStatus(_ match: JSONValue) -> String {
+        if ArenaMatchSelection.JudgeGroup(match) == .ready { return "ready to judge" }
+        let status = match["verdict"].isNull ? match["status"] : match["verdict"]
+        return status.string.replacingOccurrences(of: "_", with: " ")
+    }
+
+    public static func matchesHistorySearch(_ match: JSONValue, term: String) -> Bool {
+        [match["prompt"].string, match["category"].string, matchStatus(match)].contains { $0.localizedCaseInsensitiveContains(term) } ||
+            match["slots"].array.contains { $0["revealed"].bool && $0["model"].string.localizedCaseInsensitiveContains(term) }
+    }
+
     /// Advance in the displayed order, wrapping after the last eligible match.
     /// History includes prior verdicts; Judge moves only to unjudged matches.
     public static func nextMatchID(in visible: [JSONValue], after currentID: String, history: Bool) -> String? {

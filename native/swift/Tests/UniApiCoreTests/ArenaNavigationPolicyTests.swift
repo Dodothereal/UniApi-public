@@ -64,4 +64,15 @@ final class ArenaNavigationPolicyTests: XCTestCase {
         let rows = selection.visible([first, skipped, running], in: .judge)
         XCTAssertEqual(ArenaPresentationPolicy.nextMatchID(in: rows, after: "skipped", history: false), "first")
     }
+
+    func testHistorySearchFindsDisplayedStatusWithoutMatchingBlindModels() {
+        let ready: JSONValue = ["status": "done", "slots": [["model": "blind-model", "revealed": false]]]
+        let judged: JSONValue = ["status": "done", "voted_at": 10, "verdict": "all_bad", "slots": [["model": "known-model", "revealed": true]]]
+        XCTAssertEqual(ArenaPresentationPolicy.matchStatus(ready), "ready to judge")
+        XCTAssertTrue(ArenaPresentationPolicy.matchesHistorySearch(ready, term: "Ready to Judge"))
+        XCTAssertFalse(ArenaPresentationPolicy.matchesHistorySearch(judged, term: "ready to judge"))
+        XCTAssertTrue(ArenaPresentationPolicy.matchesHistorySearch(judged, term: "all bad"))
+        XCTAssertFalse(ArenaPresentationPolicy.matchesHistorySearch(ready, term: "blind-model"))
+        XCTAssertTrue(ArenaPresentationPolicy.matchesHistorySearch(judged, term: "known-model"))
+    }
 }

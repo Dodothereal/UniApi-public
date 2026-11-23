@@ -32,10 +32,7 @@ struct NativeArenaPage: View {
         let rows = matchSelection.visible(model.matches, in: scope)
         let term = historySearch.trimmingCharacters(in: .whitespacesAndNewlines)
         guard scope == .history, !term.isEmpty else { return rows }
-        return rows.filter { row in
-            [row["prompt"].string, row["category"].string, matchStatus(row)].contains { $0.localizedCaseInsensitiveContains(term) } ||
-                row["slots"].array.contains { $0["revealed"].bool && $0["model"].string.localizedCaseInsensitiveContains(term) }
-        }
+        return rows.filter { ArenaPresentationPolicy.matchesHistorySearch($0, term: term) }
     }
     private var current: JSONValue? { matchSelection.current(visible, in: scope) }
     private var selectionMotion: Animation? { reducedMotion || !motionVisible ? nil : NativeMotion.selection }
@@ -127,10 +124,10 @@ struct NativeArenaPage: View {
                 Button {
                     select(match["id"].string, in: scope)
                 } label: {
-                    Text("\(position + 1). \(match["mode"].string) · \(matchStatus(match)) · \(String(match["prompt"].string.prefix(100)))")
+                    Text("\(position + 1). \(match["mode"].string) · \(ArenaPresentationPolicy.matchStatus(match)) · \(String(match["prompt"].string.prefix(100)))")
                 }.help(match["prompt"].string)
                     .accessibilityLabel("Match \(position + 1). \(match["prompt"].string)")
-                    .accessibilityValue("\(match["mode"].string). \(matchStatus(match))")
+                    .accessibilityValue("\(match["mode"].string). \(ArenaPresentationPolicy.matchStatus(match))")
                     .accessibilityAddTraits(match["id"] == current?["id"] ? [.isSelected] : [])
             }
         } label: {
@@ -139,7 +136,7 @@ struct NativeArenaPage: View {
                     .fixedSize(horizontal: true, vertical: false)
                 Text(current?["prompt"].string ?? "Choose a match").font(Theme.ui(12.5)).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(current.map { "\($0["mode"].string) · \($0["slots"].array.count) · \(matchStatus($0))" } ?? "")
+                Text(current.map { "\($0["mode"].string) · \($0["slots"].array.count) · \(ArenaPresentationPolicy.matchStatus($0))" } ?? "")
                     .font(Theme.mono(10.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: true, vertical: false)
                 NativeIcon("chevrons-up-down", size: 12).foregroundStyle(Theme.faint)
             }.accessibilityElement(children: .ignore)
@@ -148,11 +145,8 @@ struct NativeArenaPage: View {
                 .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
             .accessibilityLabel("Selected match")
-            .accessibilityValue("\(index + 1) of \(visible.count). \(current.map { "\($0["mode"].string), \($0["slots"].array.count) contestants, \(matchStatus($0))" } ?? ""). \(current?["prompt"].string ?? "")")
+            .accessibilityValue("\(index + 1) of \(visible.count). \(current.map { "\($0["mode"].string), \($0["slots"].array.count) contestants, \(ArenaPresentationPolicy.matchStatus($0))" } ?? ""). \(current?["prompt"].string ?? "")")
             .help(current?["prompt"].string ?? "Choose a match")
-    }
-    private func matchStatus(_ match: JSONValue) -> String {
-        (match["verdict"].isNull ? match["status"].string : match["verdict"].string).replacingOccurrences(of: "_", with: " ")
     }
     private var matchRail: some View {
         ScrollView {
@@ -472,7 +466,6 @@ private struct NativeArenaMatchRow: View {
               let slot = match["slots"].array.first(where: { $0["idx"].int == first }), slot["revealed"].bool, !slot["model"].string.isEmpty else { return nil }
         return slot["model"].string
     }
-    private var status: String { match["verdict"].isNull ? match["status"].string : match["verdict"].string.replacingOccurrences(of: "_", with: " ") }
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 5) {
@@ -483,7 +476,7 @@ private struct NativeArenaMatchRow: View {
                     if let winner {
                         Text(winner).font(Theme.mono(11)).foregroundStyle(Theme.dim).truncationMode(.middle).help("Ranked best")
                     } else {
-                        Text(match["status"].string == "done" && match["voted_at"].isNull ? "ready to judge" : status).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                        Text(ArenaPresentationPolicy.matchStatus(match)).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
                     }
                     Spacer(minLength: 4)
                     Text(match["voted_at"].isNull ? "\(match["slots"].array.count) \(match["mode"].string)" : NativeListTimeFormat.ago(match["voted_at"].double))
