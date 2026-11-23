@@ -108,15 +108,21 @@ struct NativeArenaMatch: View {
                 }
             }
         } label: {
+            let slot = slots[pair[side]]
             HStack(spacing: 8) {
-                Text(name(slots[pair[side]])).lineLimit(1).truncationMode(.middle)
+                if slot["revealed"].bool {
+                    Text(slot["label"].string).fixedSize()
+                    Text("\(slot["model"].string) · \(slot["route"].string)").lineLimit(1).truncationMode(.middle)
+                } else {
+                    Text(slot["label"].string).lineLimit(1)
+                }
                 Spacer(minLength: 0)
                 NativeIcon("chevrons-up-down", size: 12).foregroundStyle(Theme.faint)
             }
         }.menuIndicator(.hidden).accessibilityLabel(title).accessibilityValue(name(slots[pair[side]]))
     }
     private func name(_ slot: JSONValue) -> String {
-        slot["revealed"].bool ? "\(slot["model"].string) · \(slot["route"].string)" : slot["label"].string
+        slot["revealed"].bool ? "\(slot["label"].string) · \(slot["model"].string) · \(slot["route"].string)" : slot["label"].string
     }
     @ViewBuilder private func columns(_ slots: [JSONValue]) -> some View {
         ForEach(Array(slots.enumerated()), id: \.element["id"]) { index, slot in
@@ -163,10 +169,11 @@ private struct NativeArenaPerformance: View {
                 let value = metric(slot, key: key)
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
+                        Text(slot["label"].string).font(Theme.ui(Theme.textXs, weight: .semibold))
                         Text(slot["model"].string).font(Theme.mono(Theme.textXs))
                         Text(slot["route"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
                     }.lineLimit(1).truncationMode(.middle).frame(width: 135, alignment: .leading)
-                        .help("\(slot["model"].string) · \(slot["route"].string)")
+                        .help("\(slot["label"].string) · \(slot["model"].string) · \(slot["route"].string)")
                     if let value { NativeGrowBar(fraction: value / maximum, color: Theme.pairColor(ArenaContestantPolicy.key(slot))) }
                     else { Theme.rule.frame(height: 1).frame(maxWidth: .infinity).accessibilityHidden(true) }
                     NativeNumberText(text: value.map(format) ?? "Not recorded", font: Theme.num(Theme.textXs, weight: .medium))

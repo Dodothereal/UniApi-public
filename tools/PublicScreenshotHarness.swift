@@ -35,7 +35,9 @@ private enum PublicArenaCapture {
         try await NativeArenaService.shared(runtime: runtime).start()
         guard page != "arena-empty" else { return }
         let now = Date().timeIntervalSince1970 * 1000
-        let models = ["sample-cedar", "sample-maple", "sample-alder", "sample-pine"]
+        let cedar = "reading-assistant-enterprise-cedar-regional-preview-2026"
+        let models = [(cedar, "sample-source"), ("reading-assistant-enterprise-maple-regional-preview-2026", "sample-source"),
+                      (cedar, "sample-alternate"), ("sample-pine", "sample-source")]
         let answers = [
             "Make Add a book the first focused action. It opens a search field and a short list of matches. Enter adds the highlighted book; Escape returns to the library without losing the query.\n\nWhen a book is in progress, put Resume reading first. Show a short excerpt and the last saved page beside it.",
             "Use one command palette for Add, Find, and Resume. A keyboard shortcut opens it from anywhere, and the default action changes when the library is empty.\n\nKeep a recent books section and show the last completed chapter inline.",
@@ -59,16 +61,16 @@ private enum PublicArenaCapture {
             ])
             var contestants: [JSONValue] = []
             for slot in 0..<count {
-                let name = models[(slot + (count == 4 ? 0 : index)) % models.count]
+                let (name, route) = models[(slot + (count == 4 ? 0 : index)) % models.count]
                 let duration = Double([18_500, 29_000, 24_000, 38_000][slot])
                 let workdir = runtime.paths.data.appendingPathComponent("arena/matches/\(id)/slot-\(slot)").path
                 try runtime.db.execute("INSERT INTO arena_slots(id,match_id,idx,route,model,status,workdir,final_text,duration_ms,turns,output_tokens,cost_usd,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-                    .string("\(id)-slot-\(slot)"), .string(id), .number(Double(slot)), "sample-source", .string(name), status,
+                    .string("\(id)-slot-\(slot)"), .string(id), .number(Double(slot)), .string(route), .string(name), status,
                     .string(workdir), status == "done" ? .string(answers[slot]) : "",
                     status == "done" ? .number(duration) : .null, .number(Double(slot + 3)),
                     .number(Double(640 + slot * 146)), slot == 1 ? 0 : .number(0.014 + Double(slot) * 0.009), .number(created + 1000)
                 ])
-                contestants.append(["route": "sample-source", "model": .string(name), "status": "done",
+                contestants.append(["route": .string(route), "model": .string(name), "status": "done",
                                      "rank": .number(Double((order.firstIndex(of: slot) ?? 0) + 1)), "duration_ms": .number(duration), "turns": .number(Double(slot + 3))])
             }
             if ranked {

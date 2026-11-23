@@ -28,7 +28,7 @@ struct NativeArenaHeadToHead: View {
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).pointingHand().accessibilityValue(expanded ? "Expanded" : "Collapsed")
             if expanded {
-                Text("Each row’s wins against the column model. Draws count in the sample, not as wins. A dash means the pair has not been rated.")
+                Text("Each row’s wins against the column model. Numbers identify the same model on both axes. Draws count in the sample, not as wins. A dash means the pair has not been rated.")
                     .font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 if pages > 1 {
                     HStack {
@@ -52,18 +52,32 @@ struct NativeArenaHeadToHead: View {
     }
 
     private var grid: some View {
-        let matrix = ArenaPairMatrix(comparisons), columns = page(columnPage)
+        let matrix = ArenaPairMatrix(comparisons), rowModels = page(rowPage), columns = page(columnPage)
         return HStack(alignment: .top, spacing: 4) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Model").font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).frame(height: 32)
-                ForEach(page(rowPage), id: \.self["key"]) { row in axis(row, width: 100, alignment: .leading) }
+                ForEach(rowModels.indices, id: \.self) { index in
+                    let row = rows[index]
+                    HStack(spacing: 6) {
+                        axisNumber(index)
+                        Text(row["model"].string).font(Theme.mono(11)).lineLimit(1).truncationMode(.middle)
+                    }.frame(width: 116, height: 32, alignment: .leading)
+                        .help(label(row)).accessibilityElement(children: .ignore).accessibilityLabel("\(index + 1). \(label(row))")
+                }
             }
             ScrollView(.horizontal) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
-                        ForEach(columns, id: \.self["key"]) { column in axis(column, width: 70, alignment: .center) }
+                        ForEach(columns.indices, id: \.self) { index in
+                            let column = rows[index]
+                            VStack(spacing: 0) {
+                                axisNumber(index)
+                                Text(column["model"].string).font(Theme.mono(10)).lineLimit(1).truncationMode(.middle)
+                            }.frame(width: 70, height: 32)
+                                .help(label(column)).accessibilityElement(children: .ignore).accessibilityLabel("\(index + 1). \(label(column))")
+                        }
                     }
-                    ForEach(page(rowPage), id: \.self["key"]) { row in
+                    ForEach(rowModels, id: \.self["key"]) { row in
                         HStack(spacing: 4) {
                             ForEach(columns, id: \.self["key"]) { column in
                                 cell(matrix[row["key"].string, column["key"].string], row: row, column: column)
@@ -77,9 +91,9 @@ struct NativeArenaHeadToHead: View {
 
     private func label(_ row: JSONValue) -> String { row["model"].string + " · " + row["route"].string }
 
-    private func axis(_ row: JSONValue, width: CGFloat, alignment: Alignment) -> some View {
-        Text(row["model"].string).font(Theme.mono(11)).lineLimit(1).truncationMode(.middle)
-            .frame(width: width, height: 32, alignment: alignment).help(label(row)).accessibilityLabel(label(row))
+    private func axisNumber(_ index: Int) -> some View {
+        Text("\(index + 1)").font(Theme.num(11, weight: .semibold)).foregroundStyle(Theme.ink)
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private func cell(_ result: ArenaPairResult?, row: JSONValue, column: JSONValue) -> some View {
