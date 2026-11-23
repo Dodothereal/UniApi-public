@@ -231,7 +231,7 @@ public actor NativeStatisticsService {
         let requestedSource = (input["source"] ?? "all").string
         let allowedSources = ["all"] + StatisticsSource.allCases.map(\.rawValue)
         let source = allowedSources.contains(requestedSource) ? requestedSource : "all"
-        let range = [0, 7, 30].contains(requestedRange) ? requestedRange : 0
+        let range = [0, 7, 30, 90, 365].contains(requestedRange) ? requestedRange : 0
         switch op {
         case "overview":
             let key = "statistics:\(ObjectIdentifier(runtime)):\(generation):\(statisticsDay(now, calendar: calendar)):\(range):\(source)"

@@ -22,7 +22,7 @@ import UniApiPresentation
         let saved = UserDefaults.standard.string(forKey: "uniapi.stats.source") ?? "all"
         let source = (["all"] + StatisticsSource.allCases.map(\.rawValue)).contains(saved) ? saved : "all"
         let savedRange = UserDefaults.standard.integer(forKey: "uniapi.stats.range")
-        await statistics.prefetch(source: source, range: [0, 7, 30].contains(savedRange) ? savedRange : 0)
+        await statistics.prefetch(source: source, range: [0, 7, 30, 90, 365].contains(savedRange) ? savedRange : 0)
     }
 }
 

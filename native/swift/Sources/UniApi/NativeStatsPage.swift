@@ -34,22 +34,22 @@ struct NativeStatsPage: View {
     @State private var readOwner = UUID()
     @State private var selectedModel: String?
     @AppStorage("uniapi.stats.view") private var view = "usage"
-    @State private var inspected: String?
-    @State private var detailRange = 0
     @State private var headerVisit: NativeStatsHeaderVisit?
     @State private var headerReadiness = NativePageReadiness.pending
     @Environment(\.nativePageVisit) private var navigationVisit
     @Environment(\.nativePageActivation) private var activation
     @Environment(\.nativeInterfaceDensity) private var density
     init(runtime: NativeRuntime, model: NativeStatsModel? = nil) { self.runtime = runtime; _state = StateObject(wrappedValue: model ?? NativeStatsModel(runtime: runtime)) }
-    private var scope: String { "\(source):\(selectedModel ?? ""):\(selectedModel == nil ? range : detailRange)" }
-    private var actualRange: Int { selectedModel == nil ? range : detailRange }
+    private var scope: String { "\(source):\(selectedModel ?? ""):\(range)" }
+    private var actualRange: Int { range }
     private var snapshot: NativeStatsSnapshot? { state.snapshot(source: source, range: actualRange, model: selectedModel) }
     private var current: JSONValue { snapshot?.payload ?? .null }
     private var currentBenchmark: JSONValue { snapshot?.benchmark ?? .null }
     private func load(mode: NativeStatsLoadMode = .cached) async {
         // This callback also serves stats.scanned. Its ordinary read must remain
         // eligible to publish the exact generation acknowledged by the header.
+        // The table and the app strip stay on the unscoped overview while a model is selected.
+        if selectedModel != nil { await state.prefetch(source: source, range: range) }
         await state.load(source: source, range: actualRange, model: selectedModel, mode: mode)
     }
     private var readiness: NativePageReadiness { state.busy ? .pending : !state.error.isEmpty ? .failed : current.isNull || currentBenchmark.isNull ? .pending : .ready }
@@ -114,33 +114,32 @@ struct NativeStatsPage: View {
             updateHeaderVisit(observation)
         }
     }
-    private var inspectedRow: JSONValue? {
-        guard selectedModel == nil, view == "models", let inspected else { return nil }
-        return current["derived"]["models"].array.first { $0["model"].string == inspected }
+    private var activeView: String { ["usage", "speed", "benchmark"].contains(view) ? view : "usage" }
+    /// The unscoped board for this app and range. While its replacement is
+    /// being read, the last complete one stays on screen.
+    private var overview: JSONValue {
+        if let hit = state.snapshot(source: source, range: range, model: nil) { return hit.payload }
+        return state.payload["loaded"].bool && state.payload["model"].isNull ? state.payload : .null
     }
+    private var detail: JSONValue { selectedModel.flatMap { state.snapshot(source: source, range: range, model: $0)?.payload } ?? .null }
+    /// Benchmark records are not attributed to a coding app.
+    private var bench: JSONValue { state.snapshot(source: "all", range: range, model: nil)?.benchmark ?? .null }
     var body: some View {
-        NativePage(title: selectedModel.map { $0.split(separator: "/").last.map(String.init) ?? $0 } ?? "Statistics", maxWidth: .infinity, readiness: measuredReadiness, scrolls: false,
-                   backTitle: "Statistics", back: selectedModel == nil ? nil : { selectedModel = nil },
-                   tabs: {
-                       if selectedModel == nil {
-                           NativeTabs(options: [("usage", "Usage"), ("models", "Models"), ("projects", "Projects"), ("speed", "Speed")], selection: view) { view = $0 }
-                       }
-                   },
+        NativePage(title: "Statistics", maxWidth: .infinity, readiness: measuredReadiness, scrolls: false,
+                   tabs: { NativeTabs(options: [("usage", "Usage"), ("speed", "Speed"), ("benchmark", "Benchmark")], selection: activeView) { view = $0 } },
                    actions: { headerActions }) {
             GeometryReader { geometry in
-                if selectedModel == nil, view == "models", current["loaded"].bool, !current["derived"]["models"].array.isEmpty {
-                    NativeInspectorSplit(open: inspectedRow != nil, width: 340, onClose: { inspected = nil }, main: {
-                        VStack(alignment: .leading, spacing: 0) {
-                            if !state.error.isEmpty { NativeError(message: state.error).padding(.horizontal, density.pageMargin).padding(.vertical, 8) }
-                            NativeStatsModelTable(models: current["derived"]["models"].array, lifetime: current["derived"]["isLifetime"].bool, colors: current["colors"], compact: inspectedRow != nil, selection: $inspected)
-                        }
-                    }, inspector: {
-                        if let row = inspectedRow { modelInspector(row) }
-                    })
+                let overview = self.overview
+                if overview["loaded"].bool {
+                    NativeStatsBoard(view: activeView, overview: overview, detail: detail, bench: bench, width: geometry.size.width,
+                                     busy: state.busy, error: state.error, progress: state.readProgress, range: range,
+                                     source: $source, model: $selectedModel,
+                                     export: { model in Task { await state.export(model: model, source: source, range: range) } })
                 } else {
                     NativePane(maxWidth: 1280) {
-                        if let model = selectedModel, model.contains("/") { Text(model).font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.muted).textSelection(.enabled) }
-                        pageContents(width: max(0, min(1280, geometry.size.width) - 2 * density.pageMargin))
+                        if !state.error.isEmpty { NativeError(message: state.error) }
+                        if state.busy { NativeStatsProgressLabel(progress: state.readProgress, hasContent: false) }
+                        else if state.error.isEmpty { ShimmerText(text: "Loading…", font: Theme.ui(12)) }
                     }
                 }
             }
@@ -150,64 +149,27 @@ struct NativeStatsPage: View {
             endHeaderVisit(reason: .scopeChanged)
             await state.begin(runtime: runtime, owner: readOwner) { await load() }
         }
+        .task(id: "\(activeView):\(source):\(range)") {
+            if activeView == "benchmark", source != "all" { await state.prefetch(source: "all", range: range) }
+        }
         .onAppear {
             if !(["all"] + StatisticsSource.allCases.map(\.rawValue)).contains(source) { source = "all" }
-            if ![0, 7, 30].contains(range) { range = 0 }
+            if ![0, 7, 30, 90, 365].contains(range) { range = 0 }
         }
+        .onChange(of: source) { _, _ in selectedModel = nil }
         .onChange(of: scope) { _, _ in endHeaderVisit(reason: .scopeChanged) }
         .onDisappear { endHeaderVisit(reason: .disappeared) }
         .nativePageActivity(suspended: { endHeaderVisit(reason: .inactive); state.stop(owner: readOwner) })
     }
     @ViewBuilder private var headerActions: some View {
-        if selectedModel == nil {
-            T3Segmented(options: [(7, "7d"), (30, "30d"), (0, "All")], selection: range) { range = $0 }
-        } else {
-            NativeMenuSelectLabel(title: detailRange == 0 ? "All time" : detailRange == 365 ? "1 year" : "\(detailRange) days") {
-                ForEach([7, 30, 90, 365, 0], id: \.self) { days in Button(days == 0 ? "All time" : days == 365 ? "1 year" : "\(days) days") { detailRange = days } }
-            }.fixedSize()
-        }
-        NativeMenuSelect(title: "Source", selection: $source,
-                         options: [("all", "All apps")] + StatisticsSource.allCases.map { ($0.rawValue, nativeStatsSourceName($0.rawValue)) }, width: 132)
-        if let model = selectedModel {
-            T3IconButton(system: "download", help: "Export daily CSV") { Task { await state.export(model: model, source: source, range: detailRange) } }
-                .disabled(current["derived"]["days"].array.isEmpty)
+        if activeView != "benchmark" {
+            T3Segmented(options: [(7, "7d"), (30, "30d"), (90, "90d"), (365, "1y"), (0, "All")], selection: range) { range = $0 }
         }
         T3IconButton(system: "refresh-cw", help: "Read new or changed usage") { reload(.refresh, trigger: .refresh) }.disabled(state.busy)
         NativeIconMenu(help: "Statistics actions") {
             Button("Rebuild all") { reload(.rebuild, trigger: .rebuild) }
                 .help("Reparse every usage file, including files whose size and modification time stayed the same")
         }.disabled(state.busy)
-    }
-    /// A model at a glance; its dated history opens from here.
-    private func modelInspector(_ row: JSONValue) -> some View {
-        let model = row["model"].string, totals = row["totals"]
-        return NativeInspector(title: model.split(separator: "/").last.map(String.init) ?? model, caption: model.contains("/") ? model : "", onClose: { inspected = nil }) {
-            VStack(spacing: 0) {
-                NativeFact(label: "Tokens", value: nativeStatsCount(nativeStatsGrand(totals)))
-                NativeFact(label: "Fresh input", value: nativeStatsCount(totals["input"].double))
-                NativeFact(label: "Output", value: nativeStatsCount(totals["output"].double))
-                NativeFact(label: "Thinking, inside output", value: nativeStatsCount(totals["thinking"].double))
-                NativeFact(label: "Cache reads", value: nativeStatsCount(totals["cacheRead"].double))
-                NativeFact(label: "Cache writes", value: nativeStatsCount(totals["cacheWrite"].double))
-                if !current["derived"]["isLifetime"].bool { NativeFact(label: "Responses", value: nativeStatsCount(totals["messages"].double)) }
-                NativeFact(label: "Sessions", value: "\(row["sessions"].int)")
-                NativeFact(label: "Active days", value: "\(row["days"].int)")
-            }
-            if row["viaProxy"].bool { Text("Served through a gateway, not by Anthropic.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true) }
-            if row["pruned"].bool { Text("Its transcripts were pruned. Totals are kept, dated history is not.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
-        } actions: {
-            Button("History", nativeIcon: "chart-line") { detailRange = range; selectedModel = model }.buttonStyle(T3Button(.primary))
-        }
-    }
-    @ViewBuilder private func pageContents(width: CGFloat) -> some View {
-        if !state.error.isEmpty { NativeError(message: state.error) }
-        if state.busy { NativeStatsProgressLabel(progress: state.readProgress, hasContent: current["loaded"].bool) }
-        if current["loaded"].bool {
-            NativeStatsContents(payload: current, benchmark: currentBenchmark, detail: selectedModel != nil, view: selectedModel != nil ? "detail" : view, selectModel: { model in detailRange = range; selectedModel = model }, selectSource: { source = $0 }, availableWidth: width)
-                .id(scope)
-        } else if !state.busy && state.error.isEmpty {
-            ShimmerText(text: "Loading…", font: Theme.ui(12))
-        }
     }
 }
 
@@ -217,19 +179,6 @@ private struct NativeStatsProgressLabel: View {
     var body: some View {
         ShimmerText(text: NativeStatsPresentationPolicy.progressText(progress.value), font: Theme.ui(12))
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct NativeStatsMenuLabel: View {
-    let title: String
-    var width: CGFloat? = nil
-    var body: some View {
-        HStack(spacing: 8) { Text(title).lineLimit(1); if width != nil { Spacer(minLength: 0) }; NativeIcon("chevrons-up-down", size: 11).foregroundStyle(Theme.faint) }
-            .font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.ink)
-            .padding(.horizontal, 10).frame(height: Theme.control)
-            .frame(width: width)
-            .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(Theme.input, lineWidth: 1))
     }
 }
 
@@ -265,296 +214,728 @@ private func nativeStatsFixed(_ value: Double, digits: Int) -> String {
 }
 func nativeStatsDate(_ ts: Double) -> String { Date(timeIntervalSince1970: ts / 1000).formatted(date: .abbreviated, time: .omitted) }
 
-private struct NativeStatsContents: View {
-    let payload: JSONValue, benchmark: JSONValue, detail: Bool
-    var view = "usage"
-    let selectModel: (String) -> Void
-    let selectSource: (String) -> Void
-    let availableWidth: CGFloat
-    private var d: JSONValue { payload["derived"] }
-    private var t: JSONValue { d["summary"]["totals"] }
-    var body: some View {
-        LazyVStack(alignment: .leading, spacing: 24) {
-            let benchmarked = view == "speed" && payload["source"].string == "all" && (benchmark["spend"]["calls"].int > 0 || !benchmark["trend"].array.isEmpty)
-            if !detail, nativeStatsGrand(t) == 0, t["messages"].double == 0, !benchmarked {
-                ForEach(Array(payload["warnings"].array.enumerated()), id: \.offset) { _, warning in NativeError(message: warning.string) }
-                NativeEmptyState(title: "No usage recorded", detail: payload["source"].string == "all" ? "Sessions from Claude Code, Codex, Antigravity, Z Code and OpenCode on this Mac are counted here." : "Try another range or source.", icon: "chart-line")
-            } else {
-            if view == "projects" { NativeStatsProjectBoard(rows: d["projects"].array, all: true) }
-            if view == "speed" {
-                NativeStatsThroughput(data: d["throughput"], colors: payload["colors"], availableWidth: availableWidth, selectModel: selectModel)
-                if payload["source"].string == "all" { NativeStatsBenchmark(data: benchmark) }
-            }
-            if view == "usage" || view == "detail" { usage }
-            }
-        }.font(Theme.ui(12)).foregroundStyle(Theme.ink)
-            .accessibilityElement(children: .contain)
-    }
-    @ViewBuilder private var usage: some View {
-            if payload["source"].string == "all" {
-                let total = max(1, StatisticsSource.allCases.map { nativeStatsGrand(payload["sources"][$0.rawValue]) }.reduce(0, +))
-                NativeStack {
-                    ForEach(StatisticsSource.allCases.filter { nativeStatsGrand(payload["sources"][$0.rawValue]) > 0 || payload["sources"][$0.rawValue]["messages"].double > 0 }, id: \.rawValue) { s in
-                        let value = payload["sources"][s.rawValue]
-                        let stream = NativeStatsThroughputPresentation.streamingSource(d["throughput"], source: s.rawValue)
-                        let hasUsage = nativeStatsGrand(value) > 0 || value["messages"].double > 0
-                        Button { selectSource(s.rawValue) } label: {
-                            HStack(alignment: .center, spacing: 16) {
-                                Text(nativeStatsSourceName(s.rawValue)).font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(hasUsage ? Theme.ink : Theme.muted).lineLimit(1).frame(width: 136, alignment: .leading)
-                                Text(hasUsage ? nativeStatsCount(nativeStatsGrand(value)) : "—").font(Theme.num(Theme.textSm)).foregroundStyle(hasUsage ? Theme.ink : Theme.faint).lineLimit(1).nativeStatsNumberTransition(value.isNull ? nil : nativeStatsGrand(value)).frame(width: 64, alignment: .trailing)
-                                NativeTickMeter(fraction: nativeStatsGrand(value) / total, color: Theme.ink, height: 10).frame(minWidth: 60, maxWidth: .infinity)
-                                if !detail, availableWidth >= 700 {
-                                    Text(hasUsage ? "\(nativeStatsCount(value["output"].double)) out · \(nativeStatsCount(value["cacheRead"].double)) cached" : "").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.muted).lineLimit(1).frame(width: 170, alignment: .trailing)
-                                    Group {
-                                        if let rate = NativeStatsThroughputPresentation.rate(stream) { Text(String(format: "%.1f tok/s", rate)).help(NativeStatsRateMetric.streaming.timingDetail(stream)) }
-                                        else { Text(hasUsage ? "—" : "").help(NativeStatsThroughputPresentation.missingClockLabel(source: s.rawValue) + ". A streaming rate needs token-arrival timestamps.") }
-                                    }.font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.dim).lineLimit(1).frame(width: 84, alignment: .trailing)
-                                }
-                                NativeIcon("chevron-right", size: 12).foregroundStyle(Theme.faint)
-                            }.padding(.vertical, 11).padding(.horizontal, 4).contentShape(Rectangle())
-                        }.buttonStyle(.plain).pointingHand().nativeStatsRowHover(radius: 0).accessibilityLabel("Open \(nativeStatsSourceName(s.rawValue)) statistics")
-                            .accessibilityValue(hasUsage ? "Streaming tokens per second: " + (NativeStatsThroughputPresentation.rate(stream).map { String(format: "%.1f", $0) } ?? "Unavailable") + ". " + NativeStatsRateMetric.streaming.coverage(stream) : "No recorded usage")
-                    }
-                }
-            }
-            if d["isLifetime"].bool { Text("Lifetime totals include Claude's cache. Dated charts use the response records still on disk.").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted) }
-            ForEach(Array(payload["warnings"].array.enumerated()), id: \.offset) { _, warning in NativeError(message: warning.string) }
-            ForEach(NativeStatsPresentationPolicy.excludedNotices(payload, detail: detail), id: \.source) { notice in
-                Text("\(nativeStatsSourceName(notice.source)): \(notice.count) records have no usable usage metadata.").font(Theme.ui(11)).foregroundStyle(Theme.muted)
-            }
-            NativeReadoutStrip(minCell: 190) {
-                NativeStatsValueTile(label: "Tokens processed", value: nativeStatsGrand(t), detail: "\(d["summary"]["models"].int) models\(d["isLifetime"].bool ? " · lifetime" : "")", accent: nativeStatsColor("06b6d4"), format: nativeStatsCount)
-                NativeStatsValueTile(label: "Generated output", value: t["output"].double, detail: "\(nativeStatsCount(t["thinking"].double)) reasoning inside output", accent: nativeStatsColor("10b981"), format: nativeStatsCount)
-                NativeStatsValueTile(label: detail ? "Cache efficiency" : "Served from cache", value: prompt > 0 ? t["cacheRead"].double * 100 / prompt : nil, unit: "%", detail: "\(nativeStatsCount(t["cacheRead"].double)) of \(nativeStatsCount(prompt)) prompt tokens", accent: nativeStatsColor("a855f7"), format: { String(format: "%.1f", $0) })
-                if detail {
-                    NativeStatsValueTile(label: "Recorded responses", value: payload["coverage"]["datedTotals"]["messages"].double, detail: "\(d["summary"]["sessions"].int) sessions · \(d["summary"]["projects"].int) projects", format: nativeStatsCount)
-                } else { costTile }
-            }
-            NativeStatsPricing(cost: d["cost"])
-            NativeStatsLedger(totals: t)
-            if detail { NativeStatsThroughput(data: d["throughput"], colors: payload["colors"], availableWidth: availableWidth, modelDetail: true) }
-            if d["days"].array.isEmpty { NativeEmptyState(title: "No dated history in this range", detail: d["isLifetime"].bool ? "Lifetime totals are available, but earlier transcripts are no longer on disk." : "Try another range or source.") }
-            else { NativeStatsDaily(data: d, colors: payload["colors"]); if detail { NativeStatsCumulative(days: d["days"].array) } }
-            if detail {
-                detailTiles
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 32, alignment: .top), count: availableWidth >= 600 ? 2 : 1), alignment: .leading, spacing: 24) {
-                    NativeStatsProjectBoard(rows: d["projects"].array, all: detail)
-                    NativeStatsHeat(grid: d["heat"].array)
-                }
-                NativeStatsDrive(summary: payload["datedSummary"])
-            } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 32, alignment: .top), count: availableWidth >= 600 ? 2 : 1), alignment: .leading, spacing: 24) {
-                    NativeStatsHeat(grid: d["heat"].array)
-                    NativeStatsDrive(summary: d["summary"])
-                }
-            }
-            if !payload["cache"].isNull { NativeCard {
-                NativeChartHeading(title: "Difference from /stats", caption: "Claude's lifetime cache includes repeated content blocks and retained pruned history. Dated charts deduplicate response IDs. Only responses on UTC days after the cache watermark are added to the lifetime baseline.")
-                Text("Lifetime \(nativeStatsCount(nativeStatsGrand(payload["cache"]["totals"]))) · raw disk \(nativeStatsCount(payload["scan"]["rawGrand"].double)) · deduplicated disk \(nativeStatsCount(d["onDiskGrand"].double))").font(Theme.num(Theme.textXs, weight: .regular))
-                Text("\(payload["scan"]["duplicates"].int) repeated blocks · \(payload["dayMatch"]["matched"].int)/\(payload["dayMatch"]["checked"].int) comparable UTC days agree").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.muted)
-            } }
-            // Detail uses an exact model/range-filtered benchmark payload.
-            // The unfiltered overview ledger belongs only to All apps.
-            if detail {
-                if (benchmark["spend"]["calls"].int > 0 || !benchmark["trend"].array.isEmpty) {
-                    NativeChartHeading(title: "Benchmarks", caption: "UniApi benchmark records for this exact model and date range, across providers. Separate from coding-app usage.")
-                }
-                NativeStatsBenchmark(data: benchmark)
-            }
-            Text("\(Int(t["messages"].double)) responses · \(d["summary"]["sessions"].int) sessions · \(d["summary"]["projects"].int) projects · \(d["summary"]["models"].int) models · \(d["summary"]["activeDays"].int) active days\(span)\(scanFooter)")
-                .font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.faint).textSelection(.enabled)
-    }
-    private var prompt: Double { t["input"].double + t["cacheRead"].double + t["cacheWrite"].double }
-    private var costTile: some View {
-        NativeStatsValueTile(label: "Estimated API cost", value: d["cost"]["pricedTokens"].double > 0 ? d["cost"]["usd"].double : nil, unit: "USD", detail: costDetail)
-    }
-    private var costDetail: String {
-        let cost = d["cost"]
-        if cost.isNull { return "Prices not available yet" }
-        if cost["pricedTokens"].double > 0 {
-            return cost["unpricedTokens"].double > 0 ? "Partial estimate · unknown costs excluded" : "Based on current API rates"
-        }
-        return cost["unpricedTokens"].double > 0 ? "Prices missing for this usage" : "No usage recorded yet"
-    }
-    private var span: String { let first = d["summary"]["first"], last = d["summary"]["last"]; return first.isNull ? "" : " · \(nativeStatsDate(first.double))–\(nativeStatsDate(last.double))" }
-    private var scanFooter: String { detail ? "" : " · \(payload["scan"]["files"].int) files, \(nativeStatsCount(payload["scan"]["bytes"].double)) bytes · scan \(payload["scan"]["elapsedMs"].double.formatted(.number.precision(.fractionLength(0)))) ms" }
-    private var detailTiles: some View {
-        let dated = payload["coverage"]["datedTotals"], messages = dated["messages"].double, days = d["summary"]["activeDays"].double
-        return NativeReadoutStrip(minCell: 170) {
-            NativeStatsValueTile(label: "Active days", value: days, detail: payload["coverage"]["first"].isNull ? "No dated records" : "First recorded \(nativeStatsDate(payload["coverage"]["first"].double))", format: nativeStatsCount)
-            NativeStatsValueTile(label: "Tokens per response", value: messages > 0 ? nativeStatsGrand(dated) / messages : nil, format: nativeStatsCount)
-            NativeStatsValueTile(label: "Output per response", value: messages > 0 ? dated["output"].double / messages : nil, format: nativeStatsCount)
-            NativeStatsValueTile(label: "Responses / active day", value: days > 0 ? messages / days : nil)
-            costTile
-        }
-    }
+func nativeStatsMoney(_ usd: Double) -> String { usd > 0 && usd < 0.01 ? "<$0.01" : "$" + usd.formatted(.number.precision(.fractionLength(2))) }
+
+private struct NativeStatsColumn {
+    let key: String, title: String, width: CGFloat
 }
 
-private struct NativeStatsLedger: View {
-    let totals: JSONValue
-    private var rows: [(String, String)] { [("Fresh input", "input"), ("Output", "output"), ("Thinking", "thinking"), ("Cache writes", "cacheWrite"), ("Cache reads", "cacheRead")].sorted { totals[$0.1].double > totals[$1.1].double } }
-    var body: some View { NativeCard {
-        NativeChartHeading(title: "Token kinds", caption: "Five token kinds. Thinking is counted inside output; its share is measured against output.")
-        ForEach(Array(rows.enumerated()), id: \.element.1) { index, row in
-            let (label, key) = row
-            let denominator = key == "thinking" ? totals["output"].double : nativeStatsGrand(totals)
-            let color = Theme.series[["input": 0, "output": 1, "thinking": 2, "cacheWrite": 3, "cacheRead": 4][key] ?? 0]
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 2, height: 10).accessibilityHidden(true)
-                    Text(label).font(Theme.ui(Theme.textXs, weight: .medium))
-                    Spacer(minLength: 8)
-                    Text(nativeStatsCount(totals[key].double)).font(Theme.num(Theme.textXs, weight: .medium)).lineLimit(1).nativeStatsNumberTransition(totals[key].double).frame(width: 70, alignment: .trailing)
-                    Text((denominator > 0 ? String(format: "%.1f%%", totals[key].double * 100 / denominator) : "—") + (key == "thinking" ? " of output" : "")).font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted).frame(width: 96, alignment: .trailing)
-                }
-                NativeGrowBar(fraction: totals[key].double / max(1, denominator), color: color, delay: Double(index) * 0.06)
-            }.help(key == "thinking" ? "Thinking is a subset of generated output; its percentage uses output as the denominator." : totals[key].double.formatted())
-        }
-    } }
-}
+/// One frame for every Statistics view: the headline is the chart's measure,
+/// the table under the chart is its legend, and the side pane describes the
+/// selection (the whole range when nothing is selected).
+private struct NativeStatsBoard: View {
+    let view: String
+    let overview: JSONValue, detail: JSONValue, bench: JSONValue
+    let width: CGFloat
+    let busy: Bool
+    let error: String
+    let progress: NativeStatsReadProgress
+    let range: Int
+    @Binding var source: String
+    @Binding var model: String?
+    let export: (String) -> Void
 
-/// Every model the selected apps used, one sortable row each.
-private struct NativeStatsModelTable: View {
-    let models: [JSONValue], lifetime: Bool, colors: JSONValue
-    /// Beside an open inspector: the meter and the columns the inspector repeats are dropped.
-    var compact = false
-    @Binding var selection: String?
-    @AppStorage("uniapi.stats.metric") private var sort = "tokens"
+    @AppStorage("uniapi.stats.measure") private var measure = "all"
+    @AppStorage("uniapi.stats.sort") private var sort = "tokens"
+    @AppStorage("uniapi.stats.ttft.log") private var logarithmic = true
     @State private var descending = true
+    @State private var breakdown = "models"
+    @State private var speedGroup = "models"
+    @State private var project: String?
+    @State private var target: String?
+    @State private var chosenMetric: NativeStatsRateMetric?
     @Environment(\.nativeInterfaceDensity) private var density
-    private func value(_ row: JSONValue, _ key: String) -> Double {
-        switch key {
-        case "output": return row["totals"]["output"].double
-        case "messages": return row["totals"]["messages"].double
-        case "sessions": return row["sessions"].double
-        case "days": return row["days"].double
-        default: return nativeStatsGrand(row["totals"])
-        }
+
+    private static let paneWidth: CGFloat = 320
+    private static let measures = [("all", "Tokens"), ("output", "Output"), ("thinking", "Thinking"), ("messages", "Responses")]
+    private var wide: Bool { width >= 920 }
+    private var mainWidth: CGFloat { wide ? width - Self.paneWidth - 1 : width }
+    private var margin: CGFloat { density.pageMargin }
+    private var d: JSONValue { overview["derived"] }
+    private var summary: JSONValue { d["summary"] }
+    private var lifetime: Bool { d["isLifetime"].bool }
+    private var modelRow: JSONValue? { model.flatMap { name in d["models"].array.first { $0["model"].string == name } } }
+    private var projectRow: JSONValue? { project.flatMap { path in d["projects"].array.first { $0["path"].string == path } } }
+    private var detailLoaded: Bool { model != nil && detail["loaded"].bool && detail["model"].string == model }
+    private var totals: JSONValue { projectRow?["totals"] ?? modelRow?["totals"] ?? summary["totals"] }
+    private var metric: NativeStatsRateMetric {
+        chosenMetric ?? (NativeStatsThroughputPresentation.hasMeasurements(NativeStatsRateMetric.streaming.board(d["throughput"])) ? .streaming : .response)
     }
-    private var columns: [(key: String, title: String, width: CGFloat)] {
-        [("tokens", "Tokens", 92), ("output", "Output", 84)] + (lifetime ? [] : [("messages", "Responses", 92)]) + (compact ? [] : [("sessions", "Sessions", 80), ("days", "Days", 60)])
+    private var speedBoard: JSONValue { metric.board(d["throughput"]) }
+    private var spend: JSONValue { bench["spend"] }
+    private var targetRow: JSONValue? { target.flatMap { key in spend["pairs"].array.first { $0["key"].string == key } } }
+    private var empty: Bool {
+        view == "benchmark" ? spend["calls"].int == 0 && bench["trend"].array.isEmpty
+            : nativeStatsGrand(summary["totals"]) == 0 && summary["totals"]["messages"].double == 0
     }
-    private var sorted: [JSONValue] {
-        models.sorted { a, b in
-            if sort == "model" { return descending ? a["model"].string > b["model"].string : a["model"].string < b["model"].string }
-            return descending ? value(a, sort) > value(b, sort) : value(a, sort) < value(b, sort)
-        }
-    }
+    private func short(_ model: String) -> String { model.split(separator: "/").last.map(String.init) ?? model }
+    private func clear() { model = nil; project = nil; target = nil }
+
     var body: some View {
-        let rows = sorted, top = max(1, models.map { value($0, sort == "model" ? "tokens" : sort) }.max() ?? 0)
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) {
-                heading("model", "Model").frame(maxWidth: .infinity, alignment: .leading)
-                if !compact { Color.clear.frame(width: 132) }
-                ForEach(columns, id: \.key) { column in heading(column.key, column.title).frame(width: column.width, alignment: .trailing) }
-                Color.clear.frame(width: 24)
-            }.frame(height: 32).padding(.horizontal, density.pageMargin)
+        HStack(alignment: .top, spacing: 0) {
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(rows, id: \.self["model"]) { row in
-                        let model = row["model"].string
-                        NativeStatsModelRow(selected: selection == model) {
-                            selection = selection == model ? nil : model
-                        } content: {
-                            HStack(spacing: 0) {
-                                HStack(spacing: 8) {
-                                    RoundedRectangle(cornerRadius: 1).fill(nativeStatsColor(colors[model].string)).frame(width: 2, height: 12).accessibilityHidden(true)
-                                    Text(model).font(Theme.mono(Theme.textXs, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle).help(model)
-                                    if row["viaProxy"].bool { MonoChip(text: "proxy", color: Theme.warnFg) }
-                                    if row["pruned"].bool { MonoChip(text: "pruned") }
-                                }.frame(maxWidth: .infinity, alignment: .leading)
-                                if !compact { NativeTickMeter(fraction: value(row, sort == "model" ? "tokens" : sort) / top, color: Theme.ink, height: 8).frame(width: 108).padding(.horizontal, 12) }
-                                ForEach(columns, id: \.key) { column in
-                                    Text(column.key == "sessions" || column.key == "days" ? "\(Int(value(row, column.key)))" : nativeStatsCount(value(row, column.key)))
-                                        .font(Theme.num(Theme.textXs, weight: column.key == sort ? .medium : .regular))
-                                        .foregroundStyle(column.key == sort ? Theme.ink : Theme.dim).frame(width: column.width, alignment: .trailing)
-                                }
-                                NativeIcon("chevron-right", size: 12).foregroundStyle(selection == model ? Theme.ink : Theme.faint).frame(width: 24, alignment: .trailing).accessibilityHidden(true)
-                            }
+                VStack(alignment: .leading, spacing: 0) {
+                    notices
+                    if empty {
+                        if view != "benchmark" { appStrip.padding(.top, 16) }
+                        Group {
+                            if view == "benchmark" { NativeEmptyState(title: "No benchmark runs yet", detail: "Tokens and first-token latency from Benchmark runs are counted here.", icon: "gauge") }
+                            else { NativeEmptyState(title: "No usage recorded", detail: source == "all" ? "Sessions from Claude Code, Codex, Antigravity, Z Code and OpenCode on this Mac are counted here." : "Try another range or app.", icon: "chart-line") }
+                        }.padding(.horizontal, margin).padding(.top, 24)
+                    } else {
+                        hero.padding(.horizontal, margin).padding(.top, 20)
+                        if view != "benchmark" { appStrip.padding(.top, 16) }
+                        chart.padding(.horizontal, margin).padding(.top, 16)
+                        table.padding(.top, 20)
+                        if !wide {
+                            pane.padding(.top, 24)
+                            paneActions
                         }
                     }
-                    if rows.isEmpty {
-                        Theme.rule.frame(height: 1)
-                        Text("No models in this range").font(Theme.ui(12)).foregroundStyle(Theme.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 16)
-                    }
-                }.padding(.horizontal, density.pageMargin).padding(.bottom, 32)
+                }.padding(.bottom, 32).frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .scrollContentBackground(.hidden)
             .focusable().focusEffectDisabled()
-            .onMoveCommand { direction in
-                guard let index = rows.firstIndex(where: { $0["model"].string == selection }) else { return }
-                let next = direction == .down ? index + 1 : direction == .up ? index - 1 : index
-                if next != index, rows.indices.contains(next) { selection = rows[next]["model"].string }
+            .onMoveCommand { direction in move(direction == .down ? 1 : direction == .up ? -1 : 0) }
+            if wide, !empty {
+                VStack(spacing: 0) {
+                    ScrollView { pane }.scrollContentBackground(.hidden)
+                    paneActions
+                }
+                .frame(width: Self.paneWidth).frame(maxHeight: .infinity, alignment: .top)
+                .overlay(alignment: .leading) { Theme.rule.frame(width: 1) }
             }
+        }
+        .font(Theme.ui(12)).foregroundStyle(Theme.ink)
+        .onExitCommand { clear() }
+        .onChange(of: view) { _, _ in project = nil; target = nil }
+        .onChange(of: d["models"].array.map { $0["model"].string }) { _, names in
+            if let model, !names.contains(model) { self.model = nil }
+        }
+        .onChange(of: d["projects"].array.map { $0["path"].string }) { _, paths in
+            if let project, !paths.contains(project) { self.project = nil }
         }
         .onChange(of: lifetime, initial: true) { _, yes in if yes && sort == "messages" { sort = "tokens" } }
     }
-    private func heading(_ key: String, _ title: String) -> some View {
-        Button { if sort == key { descending.toggle() } else { sort = key; descending = key != "model" } } label: {
-            HStack(spacing: 4) { Text(title); if sort == key { NativeIcon(descending ? "arrow-down" : "arrow-up", size: 12) } }
-                .font(Theme.ui(11, weight: .medium)).foregroundStyle(sort == key ? Theme.ink : Theme.muted).contentShape(Rectangle())
-        }.buttonStyle(.plain).help("Sort by \(title)").accessibilityLabel("Sort by \(title)")
-            .accessibilityValue(sort == key ? descending ? "Descending" : "Ascending" : "Not sorted")
+
+    // MARK: Notices
+
+    @ViewBuilder private var notices: some View {
+        let warnings = overview["warnings"].array
+        if !error.isEmpty || busy || !warnings.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                if !error.isEmpty { NativeError(message: error) }
+                ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in NativeError(message: warning.string) }
+                if busy { NativeStatsProgressLabel(progress: progress, hasContent: true) }
+            }.padding(.horizontal, margin).padding(.top, 12)
+        }
+    }
+
+    // MARK: Headline
+
+    private struct HeroFact: Identifiable { let label: String, value: String; var help = ""; var id: String { label } }
+
+    @ViewBuilder private var hero: some View {
+        switch view {
+        case "speed":
+            let reading = speedGroup == "models" && model != nil
+                ? speedBoard["models"].array.first { $0["model"].string == model } ?? .null : speedBoard["summary"]
+            heroRow(value: NativeStatsThroughputPresentation.rate(reading).map { String(format: "%.1f", $0) } ?? "—",
+                    numeric: NativeStatsThroughputPresentation.rate(reading), unit: "tok/s",
+                    facts: [HeroFact(label: "Timed", value: timed(reading), help: metric.coverage(reading)),
+                            HeroFact(label: "Output timed", value: reading["outputTokens"].isNull ? "—" : nativeStatsCount(reading["outputTokens"].double))]) {
+                measureMenu(metric.shortTitle, options: NativeStatsRateMetric.allCases.map { ($0.rawValue, $0.shortTitle) }) { chosenMetric = NativeStatsRateMetric(rawValue: $0) }
+            } trailing: { EmptyView() }
+        case "benchmark":
+            let row = targetRow ?? spend, tokens = row["input"].double + row["output"].double
+            heroRow(value: nativeStatsCount(tokens), numeric: tokens, unit: "",
+                    facts: [HeroFact(label: "Calls", value: nativeStatsCount(row["calls"].double))]
+                        + (targetRow == nil ? [HeroFact(label: "Runs", value: "\(spend["runs"].int)"), HeroFact(label: "Targets", value: "\(spend["pairs"].array.count)")] : [])
+                        + [HeroFact(label: "Estimated", value: row["calls"].double > 0 ? String(format: "%.0f%%", row["estimated"].double * 100 / row["calls"].double) : "—", help: "Share of calls whose token counts were estimated because the provider did not report them")]) {
+                Text("Benchmark tokens").lineLimit(1).fixedSize()
+            } trailing: {
+                T3Segmented(options: [(true, "Log"), (false, "Linear")], selection: logarithmic) { logarithmic = $0 }
+                    .help("Scale of the first-token chart")
+            }
+        default:
+            let amount = nativeStatsAmount(totals, measure)
+            let prompt = totals["input"].double + totals["cacheRead"].double + totals["cacheWrite"].double
+            heroRow(value: nativeStatsCount(amount), numeric: amount, unit: "",
+                    facts: [costFact,
+                            HeroFact(label: "From cache", value: prompt > 0 ? String(format: "%.1f%%", totals["cacheRead"].double * 100 / prompt) : "—", help: "\(nativeStatsCount(totals["cacheRead"].double)) of \(nativeStatsCount(prompt)) prompt tokens were cache reads")]
+                        + (lifetime ? [] : [HeroFact(label: "Responses", value: nativeStatsCount(totals["messages"].double))])
+                        + [HeroFact(label: "Sessions", value: "\((projectRow?["sessions"] ?? modelRow?["sessions"] ?? summary["sessions"]).int)")]) {
+                measureMenu(Self.measures.first { $0.0 == measure }?.1 ?? "Tokens", options: Self.measures) { measure = $0 }
+            } trailing: { EmptyView() }
+        }
+    }
+
+    private var costFact: HeroFact {
+        if project != nil { return HeroFact(label: "Est. cost", value: "—", help: "Cost is estimated per model, not per project") }
+        if let model {
+            let row = d["cost"]["rows"].array.first { $0["model"].string == model } ?? .null
+            return HeroFact(label: "Est. cost", value: row["usd"].isNull ? "—" : nativeStatsMoney(row["usd"].double) + (row["unpricedTokens"].double > 0 ? "+" : ""),
+                            help: row["usd"].isNull ? "No current API price is known for this model" : "At current API rates")
+        }
+        let cost = d["cost"]
+        guard cost["pricedTokens"].double > 0 else { return HeroFact(label: "Est. cost", value: "—", help: "No current API price is known for these models") }
+        let partial = cost["unpricedTokens"].double > 0
+        return HeroFact(label: "Est. cost", value: nativeStatsMoney(cost["usd"].double) + (partial ? "+" : ""),
+                        help: partial ? "Partial estimate at current API rates. Models without a known price are excluded." : "At current API rates")
+    }
+    private func timed(_ reading: JSONValue) -> String {
+        guard let timed = NativeStatsThroughputPresentation.count(reading["timedResponses"]),
+              let total = NativeStatsThroughputPresentation.count(reading["totalResponses"]) else { return "—" }
+        return "\(timed) / \(total)"
+    }
+
+    private func measureMenu(_ title: String, options: [(String, String)], select: @escaping (String) -> Void) -> some View {
+        Menu {
+            ForEach(options, id: \.0) { option in Button(option.1) { select(option.0) } }
+        } label: {
+            HStack(spacing: 4) { Text(title); NativeIcon("chevrons-up-down", size: 10) }.contentShape(Rectangle())
+        }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .help("Choose what the number and the chart measure").accessibilityLabel("Measure")
+    }
+
+    private var scopeName: String? {
+        if view == "benchmark" { return targetRow.map { "\(short($0["model"].string)) · \($0["providerName"].string)" } }
+        return projectRow?["name"].string ?? model.map(short)
+    }
+
+    private func heroRow<Label: View, Trailing: View>(value: String, numeric: Double?, unit: String, facts: [HeroFact],
+                                                     @ViewBuilder label: () -> Label, @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack(alignment: .lastTextBaseline, spacing: 28) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    label()
+                    if let scopeName {
+                        Button(action: clear) {
+                            HStack(spacing: 4) { Text(scopeName).font(Theme.mono(11)).lineLimit(1).truncationMode(.middle); NativeIcon("x", size: 10) }
+                                .foregroundStyle(Theme.ink).padding(.horizontal, 6).frame(height: 18)
+                                .background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous))
+                        }.buttonStyle(.plain).pointingHand().frame(maxWidth: 240, alignment: .leading)
+                            .help("Clear the selection").accessibilityLabel("Clear selection \(scopeName)")
+                    }
+                }.font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(value).font(Theme.num(32)).tracking(Theme.tracking(32)).lineLimit(1).fixedSize()
+                        .nativeStatsNumberTransition(numeric)
+                    if !unit.isEmpty { Text(unit).font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(Theme.muted) }
+                }
+            }
+            ForEach(mainWidth >= 620 ? facts : Array(facts.prefix(2))) { fact in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(fact.label).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(fact.value).font(Theme.num(15, weight: .medium)).lineLimit(1).fixedSize()
+                }.help(fact.help).accessibilityElement(children: .ignore).accessibilityLabel(fact.label).accessibilityValue(fact.value)
+            }
+            Spacer(minLength: 0)
+            trailing()
+        }
+    }
+
+    // MARK: Apps
+
+    /// The app filter, with what each app accounts for in this range.
+    @ViewBuilder private var appStrip: some View {
+        // The apps stay put while a model is selected; only their amounts follow it.
+        let all = overview["sources"], sources = detailLoaded ? detail["sources"] : all
+        let apps = StatisticsSource.allCases.map(\.rawValue).filter { nativeStatsGrand(all[$0]) > 0 || all[$0]["messages"].double > 0 || $0 == source }
+        let total = apps.reduce(0) { $0 + nativeStatsGrand(sources[$1]) }
+        if apps.count > 1 || source != "all" {
+            NativeScrollRail {
+                appCell("all", name: "All apps", value: total, fraction: 1, color: Theme.ink)
+                ForEach(apps, id: \.self) { app in
+                    appCell(app, name: nativeStatsSourceName(app), value: nativeStatsGrand(sources[app]), fraction: total > 0 ? nativeStatsGrand(sources[app]) / total : 0, color: nativeStatsHarnessColor(app))
+                }
+            }.padding(.horizontal, max(0, margin - 18))
+        }
+    }
+    private func appCell(_ id: String, name: String, value: Double, fraction: Double, color: Color) -> some View {
+        let selected = source == id
+        return Button { source = selected ? "all" : id } label: {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(name).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(selected ? Theme.ink : Theme.dim)
+                    Text(nativeStatsCount(value)).font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.muted)
+                }.lineLimit(1).fixedSize()
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Theme.track
+                        color.frame(width: max(fraction > 0 ? 2 : 0, geometry.size.width * min(1, fraction)))
+                    }
+                }.frame(height: 2)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 7)
+            .background(selected ? Theme.raised : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(selected ? Theme.input : .clear, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointingHand().nativeStatsRowHover()
+        .accessibilityLabel("\(name), \(nativeStatsCount(value)) tokens").accessibilityAddTraits(selected ? [.isSelected] : [])
+        .help(id == "all" ? "Every coding app on this Mac" : selected ? "Show every app" : "Show only \(name)")
+    }
+
+    // MARK: Chart
+
+    @ViewBuilder private var chart: some View {
+        switch view {
+        case "speed":
+            NativeStatsSpeedChart(board: speedBoard, colors: overview["colors"], metric: metric, group: speedGroup,
+                                  isolated: speedGroup == "models" ? model : nil)
+        case "benchmark":
+            NativeStatsBenchmarkChart(trend: bench["trend"].array, logarithmic: logarithmic, isolated: target)
+        default:
+            NativeStatsUsageChart(data: d, colors: overview["colors"], measure: measure, isolated: model)
+        }
+    }
+
+    // MARK: Table
+
+    private func heading(_ column: NativeStatsColumn) -> some View {
+        Button { if sort == column.key { descending.toggle() } else { sort = column.key; descending = true } } label: {
+            HStack(spacing: 3) { if sort == column.key { NativeIcon(descending ? "arrow-down" : "arrow-up", size: 11) }; Text(column.title) }
+                .font(Theme.ui(11, weight: .medium)).foregroundStyle(sort == column.key ? Theme.ink : Theme.muted).contentShape(Rectangle())
+        }.buttonStyle(.plain).frame(width: column.width, alignment: .trailing)
+            .help("Sort by \(column.title)").accessibilityLabel("Sort by \(column.title)")
+            .accessibilityValue(sort == column.key ? descending ? "Descending" : "Ascending" : "Not sorted")
+    }
+    private func tableHeader<Lead: View>(_ columns: [NativeStatsColumn], sortable: Bool = true, @ViewBuilder lead: () -> Lead) -> some View {
+        HStack(spacing: 0) {
+            lead()
+            Spacer(minLength: 8)
+            ForEach(columns, id: \.key) { column in
+                if sortable { heading(column) }
+                else { Text(column.title).font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).frame(width: column.width, alignment: .trailing) }
+            }
+        }.frame(height: 32).padding(.horizontal, margin)
+    }
+    private func cell(_ text: String, _ column: NativeStatsColumn, strong: Bool) -> some View {
+        Text(text).font(Theme.num(Theme.textXs, weight: strong ? .medium : .regular)).foregroundStyle(strong ? Theme.ink : Theme.dim)
+            .lineLimit(1).frame(width: column.width, alignment: .trailing)
+    }
+    private func name(_ text: String, color: Color, help: String = "") -> some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 3, height: 12).accessibilityHidden(true)
+            Text(text).font(Theme.mono(Theme.textXs, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle).help(help.isEmpty ? text : help)
+        }
+    }
+    private var meterWidth: CGFloat { mainWidth >= 760 ? 96 : 0 }
+    private func emptyRow(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Theme.rule.frame(height: 1)
+            Text(text).font(Theme.ui(12)).foregroundStyle(Theme.faint).padding(.vertical, 14)
+        }.padding(.horizontal, margin)
+    }
+
+    @ViewBuilder private var table: some View {
+        switch view {
+        case "speed": speedTable
+        case "benchmark": targetTable
+        default: breakdown == "projects" ? AnyView(projectTable) : AnyView(modelTable)
+        }
+    }
+
+    private var modelColumns: [NativeStatsColumn] {
+        [NativeStatsColumn(key: "tokens", title: "Tokens", width: 76), NativeStatsColumn(key: "output", title: "Output", width: 72)]
+            + (!lifetime && mainWidth >= 540 ? [NativeStatsColumn(key: "messages", title: "Responses", width: 84)] : [])
+            + (mainWidth >= 620 ? [NativeStatsColumn(key: "cost", title: "Est. cost", width: 80)] : [])
+            + (mainWidth >= 700 ? [NativeStatsColumn(key: "speed", title: "tok/s", width: 64)] : [])
+    }
+    private func sortedModels(costs: [String: Double], speeds: [String: Double]) -> [JSONValue] {
+        func value(_ row: JSONValue) -> Double {
+            switch sort {
+            case "output": return row["totals"]["output"].double
+            case "messages": return row["totals"]["messages"].double
+            case "cost": return costs[row["model"].string] ?? -1
+            case "speed": return speeds[row["model"].string] ?? -1
+            default: return nativeStatsGrand(row["totals"])
+            }
+        }
+        return d["models"].array.sorted { a, b in
+            let x = value(a), y = value(b)
+            return x == y ? a["model"].string < b["model"].string : descending ? x > y : x < y
+        }
+    }
+    private var modelCosts: [String: Double] {
+        Dictionary(d["cost"]["rows"].array.compactMap { $0["usd"].isNull ? nil : ($0["model"].string, $0["usd"].double) }, uniquingKeysWith: { first, _ in first })
+    }
+    private var modelSpeeds: [String: Double] {
+        Dictionary(speedBoard["models"].array.compactMap { row in NativeStatsThroughputPresentation.rate(row).map { (row["model"].string, $0) } }, uniquingKeysWith: { first, _ in first })
+    }
+    private var breakdownSwitch: some View {
+        T3Segmented(options: [("models", "Models"), ("projects", "Projects")], selection: breakdown) { breakdown = $0; project = nil }
+    }
+    private var modelTable: some View {
+        let costs = modelCosts, speeds = modelSpeeds, rows = sortedModels(costs: costs, speeds: speeds), columns = modelColumns
+        func value(_ row: JSONValue, _ key: String) -> Double? {
+            switch key {
+            case "output": return row["totals"]["output"].double
+            case "messages": return row["totals"]["messages"].double
+            case "cost": return costs[row["model"].string]
+            case "speed": return speeds[row["model"].string]
+            default: return nativeStatsGrand(row["totals"])
+            }
+        }
+        let meterKey = columns.contains { $0.key == sort } ? sort : "tokens"
+        let top = max(1e-9, rows.compactMap { value($0, meterKey) }.max() ?? 0)
+        return VStack(alignment: .leading, spacing: 0) {
+            tableHeader(columns) { breakdownSwitch }
+            LazyVStack(spacing: 0) {
+                ForEach(rows, id: \.self["model"]) { row in
+                    let id = row["model"].string
+                    NativeStatsRow(selected: model == id, margin: margin) { project = nil; model = model == id ? nil : id } content: {
+                        name(short(id), color: nativeStatsColor(overview["colors"][id].string), help: id).layoutPriority(1)
+                        if row["viaProxy"].bool { MonoChip(text: "proxy", color: Theme.warnFg).padding(.leading, 8).help("Served through a gateway, not by Anthropic") }
+                        if row["pruned"].bool { MonoChip(text: "pruned").padding(.leading, 8).help("Its transcripts were pruned. Totals are kept, dated history is not.") }
+                        Spacer(minLength: 12)
+                        if meterWidth > 0 { NativeTickMeter(fraction: (value(row, meterKey) ?? 0) / top, color: Theme.ink, height: 8).frame(width: meterWidth).padding(.trailing, 12) }
+                        ForEach(columns, id: \.key) { column in
+                            let reading = value(row, column.key)
+                            cell(reading.map { column.key == "cost" ? nativeStatsMoney($0) : column.key == "speed" ? String(format: "%.1f", $0) : nativeStatsCount($0) } ?? "—",
+                                 column, strong: column.key == sort)
+                        }
+                    }
+                }
+                if rows.isEmpty { emptyRow("No models in this range") }
+            }
+        }
+    }
+    private var projectTable: some View {
+        let columns = [NativeStatsColumn(key: "tokens", title: "Tokens", width: 76), NativeStatsColumn(key: "output", title: "Output", width: 72), NativeStatsColumn(key: "sessions", title: "Sessions", width: 76)]
+        func value(_ row: JSONValue, _ key: String) -> Double {
+            key == "output" ? row["totals"]["output"].double : key == "sessions" ? row["sessions"].double : nativeStatsGrand(row["totals"])
+        }
+        let key = columns.contains { $0.key == sort } ? sort : "tokens"
+        let rows = d["projects"].array.sorted { a, b in
+            let x = value(a, key), y = value(b, key)
+            return x == y ? a["path"].string < b["path"].string : descending ? x > y : x < y
+        }
+        let top = max(1, rows.map { value($0, key) }.max() ?? 0)
+        return VStack(alignment: .leading, spacing: 0) {
+            tableHeader(columns) { breakdownSwitch }
+            LazyVStack(spacing: 0) {
+                ForEach(rows, id: \.self["path"]) { row in
+                    let id = row["path"].string
+                    NativeStatsRow(selected: project == id, margin: margin) { model = nil; project = project == id ? nil : id } content: {
+                        name(row["name"].string, color: Theme.pairColor(id), help: id).layoutPriority(1)
+                        Spacer(minLength: 12)
+                        if meterWidth > 0 { NativeTickMeter(fraction: value(row, key) / top, color: Theme.ink, height: 8).frame(width: meterWidth).padding(.trailing, 12) }
+                        ForEach(columns, id: \.key) { column in
+                            cell(column.key == "sessions" ? "\(row["sessions"].int)" : nativeStatsCount(value(row, column.key)), column, strong: column.key == key)
+                        }
+                    }
+                }
+                if rows.isEmpty { emptyRow("No projects in this range") }
+            }
+        }
+    }
+
+    private var speedRows: [JSONValue] {
+        let all = speedBoard[speedGroup].array
+        let measured = speedGroup == "models" && metric == .streaming ? NativeStatsThroughputPresentation.measuredRows(all)
+            : all.filter { $0["totalResponses"].int > 0 }
+        return measured.sorted {
+            let a = NativeStatsThroughputPresentation.rate($0) ?? -1, b = NativeStatsThroughputPresentation.rate($1) ?? -1
+            return a == b ? $0["model"].string + $0["source"].string < $1["model"].string + $1["source"].string : a > b
+        }
+    }
+    private var speedTable: some View {
+        let rows = speedRows, peak = max(1, rows.compactMap { NativeStatsThroughputPresentation.rate($0) }.max() ?? 0)
+        let columns = [NativeStatsColumn(key: "speed", title: "tok/s", width: 72), NativeStatsColumn(key: "timed", title: "Timed", width: 96)]
+        let unmeasured = speedBoard[speedGroup].array.count - rows.count
+        return VStack(alignment: .leading, spacing: 0) {
+            tableHeader(columns, sortable: false) {
+                T3Segmented(options: [("models", "Models"), ("harnesses", "Apps")], selection: speedGroup) { speedGroup = $0 }
+            }
+            LazyVStack(spacing: 0) {
+                ForEach(rows, id: \.self) { row in
+                    let app = speedGroup == "harnesses", id = app ? row["source"].string : row["model"].string
+                    NativeStatsRow(selected: app ? source == id : model == id, margin: margin) {
+                        if app { source = source == id ? "all" : id } else { project = nil; model = model == id ? nil : id }
+                    } content: {
+                        name(app ? nativeStatsSourceName(id) : short(id), color: app ? nativeStatsHarnessColor(id) : nativeStatsColor(overview["colors"][id].string), help: app ? "" : id).layoutPriority(1)
+                        Spacer(minLength: 12)
+                        if meterWidth > 0 { NativeTickMeter(fraction: (NativeStatsThroughputPresentation.rate(row) ?? 0) / peak, color: Theme.ink, height: 8).frame(width: meterWidth).padding(.trailing, 12) }
+                        cell(NativeStatsThroughputPresentation.rate(row).map { String(format: "%.1f", $0) } ?? "—", columns[0], strong: true)
+                        cell(timed(row), columns[1], strong: false)
+                    }.help(metric.timingDetail(row))
+                }
+                if rows.isEmpty { emptyRow(metric == .streaming ? "These responses have token totals but no streaming clock. Response average uses elapsed response time instead." : "No timed responses in this range") }
+                else if unmeasured > 0, metric == .streaming { emptyRow("\(unmeasured) more without a usable streaming clock") }
+            }
+        }
+    }
+
+    private var targetRows: [JSONValue] {
+        spend["pairs"].array.sorted {
+            let a = $0["input"].double + $0["output"].double, b = $1["input"].double + $1["output"].double
+            return a == b ? $0["key"].string < $1["key"].string : a > b
+        }
+    }
+    private var targetTable: some View {
+        let rows = targetRows, top = max(1, rows.map { $0["input"].double + $0["output"].double }.max() ?? 0)
+        let columns = [NativeStatsColumn(key: "input", title: "Input", width: 76), NativeStatsColumn(key: "output", title: "Output", width: 72), NativeStatsColumn(key: "calls", title: "Calls", width: 64)]
+        return VStack(alignment: .leading, spacing: 0) {
+            tableHeader(columns, sortable: false) { Text("Targets").font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted) }
+            LazyVStack(spacing: 0) {
+                ForEach(rows, id: \.self["key"]) { row in
+                    let id = row["key"].string
+                    NativeStatsRow(selected: target == id, margin: margin) { target = target == id ? nil : id } content: {
+                        name(short(row["model"].string), color: Theme.pairColor(id), help: row["model"].string).layoutPriority(1)
+                        Text(row["providerName"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1).padding(.leading, 10)
+                        Spacer(minLength: 12)
+                        if meterWidth > 0 { NativeTickMeter(fraction: (row["input"].double + row["output"].double) / top, color: Theme.ink, height: 8).frame(width: meterWidth).padding(.trailing, 12) }
+                        cell(nativeStatsCount(row["input"].double), columns[0], strong: true)
+                        cell(nativeStatsCount(row["output"].double), columns[1], strong: false)
+                        cell("\(row["calls"].int)", columns[2], strong: false)
+                    }
+                }
+                if rows.isEmpty { emptyRow("No benchmark tokens recorded") }
+            }
+        }
+    }
+
+    private func move(_ step: Int) {
+        guard step != 0 else { return }
+        func next(_ ids: [String], _ current: String?) -> String? {
+            guard let current, let index = ids.firstIndex(of: current) else { return step > 0 ? ids.first : nil }
+            return ids.indices.contains(index + step) ? ids[index + step] : current
+        }
+        switch view {
+        case "benchmark": if let id = next(targetRows.map { $0["key"].string }, target) { target = id }
+        case "speed":
+            guard speedGroup == "models" else { return }
+            if let id = next(speedRows.map { $0["model"].string }, model) { model = id }
+        default:
+            if breakdown == "projects" {
+                if let id = next(d["projects"].array.map { $0["path"].string }, project) { project = id }
+            } else if let id = next(sortedModels(costs: modelCosts, speeds: modelSpeeds).map { $0["model"].string }, model) { model = id }
+        }
+    }
+
+    // MARK: Pane
+
+    private var rangeName: String { [7: "Last 7 days", 30: "Last 30 days", 90: "Last 90 days", 365: "Last year"][range] ?? "All time" }
+    private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).accessibilityAddTraits(.isHeader)
+            content()
+        }
+        .padding(.horizontal, wide ? 16 : margin).padding(.vertical, 14).frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
+    }
+    private func fact(_ label: String, _ value: String, mono: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.dim).lineLimit(1)
+            Spacer(minLength: 8)
+            Text(value).font(mono ? Theme.mono(11) : Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+        }
+    }
+    private func note(_ text: String, tone: Color = Theme.muted) -> some View {
+        Text(text).font(Theme.ui(11)).foregroundStyle(tone).fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private var pane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            paneHeader
+            if view == "benchmark" { benchmarkPane } else {
+                if view == "speed" { speedSection }
+                tokensSection
+                let heat = model == nil ? d["heat"].array : detailLoaded ? detail["derived"]["heat"].array : []
+                if project == nil, !heat.isEmpty { section("Hours") { NativeStatsHeat(grid: heat) } }
+                activitySection
+                if detailLoaded, !detail["derived"]["projects"].array.isEmpty { modelProjects }
+                if project == nil, model == nil || detailLoaded {
+                    section("Prices") { NativeStatsPricing(cost: detailLoaded ? detail["derived"]["cost"] : d["cost"]) }
+                }
+                notes
+            }
+        }.frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+    private var paneHeader: some View {
+        let selected = view == "benchmark" ? target != nil : model != nil || project != nil
+        let title: String = view == "benchmark" ? targetRow.map { short($0["model"].string) } ?? "All targets"
+            : projectRow?["name"].string ?? model.map(short) ?? (source == "all" ? "All apps" : nativeStatsSourceName(source))
+        let first = summary["first"], last = summary["last"]
+        let caption: String = view == "benchmark" ? targetRow?["providerName"].string ?? "Every benchmark run"
+            : projectRow?["path"].string ?? (model.map { $0.contains("/") ? $0 : rangeName } ?? rangeName + (first.isNull ? "" : " · \(nativeStatsDate(first.double)) – \(nativeStatsDate(last.double))"))
+        return HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(selected ? Theme.mono(Theme.textSm, weight: .semibold) : Theme.ui(Theme.textSm, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                    .accessibilityAddTraits(.isHeader)
+                Text(caption).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle).help(caption)
+            }
+            Spacer(minLength: 8)
+            if selected { T3IconButton(system: "x", help: "Clear the selection", size: 13, action: clear) }
+        }.padding(.leading, wide ? 16 : margin).padding(.trailing, wide ? 10 : margin).padding(.vertical, 14)
+    }
+    private var tokensSection: some View {
+        let rows: [(String, String, Int)] = [("Cache reads", "cacheRead", 4), ("Cache writes", "cacheWrite", 3), ("Fresh input", "input", 0), ("Output", "output", 1), ("Thinking, inside output", "thinking", 2)]
+        let grand = nativeStatsGrand(totals)
+        return section("Tokens") {
+            ForEach(rows, id: \.1) { label, key, tone in
+                let denominator = key == "thinking" ? totals["output"].double : grand
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(label).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.dim).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(nativeStatsCount(totals[key].double)).font(Theme.num(Theme.textXs, weight: .medium)).nativeStatsNumberTransition(totals[key].double)
+                        Text(denominator > 0 ? String(format: "%.1f%%", totals[key].double * 100 / denominator) : "—").font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted).frame(width: 46, alignment: .trailing)
+                    }
+                    NativeGrowBar(fraction: totals[key].double / max(1, denominator), color: Theme.series[tone], height: 3, entrance: false)
+                }.help(key == "thinking" ? "Thinking is part of generated output; its share is measured against output." : totals[key].double.formatted())
+            }
+        }
+    }
+    private var speedSection: some View {
+        let reading = speedGroup == "models" && model != nil ? speedBoard["models"].array.first { $0["model"].string == model } ?? .null : speedBoard["summary"]
+        return section(metric.title) {
+            fact("Speed", NativeStatsThroughputPresentation.rate(reading).map { String(format: "%.1f tok/s", $0) } ?? "—")
+            fact("Responses timed", timed(reading))
+            fact("Output timed", reading["outputTokens"].isNull ? "—" : nativeStatsCount(reading["outputTokens"].double))
+            fact("Time measured", reading["durationMs"].double > 0 ? Duration.seconds(reading["durationMs"].double / 1000).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .narrow)) : "—")
+            note(metric.caption)
+        }
+    }
+    private var activitySection: some View {
+        let s: JSONValue = model == nil ? summary : detailLoaded ? detail["datedSummary"] : .null
+        return section("Activity") {
+            if let row = projectRow {
+                fact("Sessions", "\(row["sessions"].int)")
+            } else if s.isNull, let row = modelRow {
+                fact("Sessions", "\(row["sessions"].int)"); fact("Active days", "\(row["days"].int)")
+            } else {
+                if !lifetime || model != nil { fact("Responses", nativeStatsCount(s["totals"]["messages"].double)) }
+                fact("Sessions", "\(s["sessions"].int)")
+                fact("Projects", "\(s["projects"].int)")
+                if model == nil { fact("Models", "\(s["models"].int)") }
+                fact("Active days", "\(s["activeDays"].int)")
+                if s["sidechainMessages"].int > 0 { fact("Subagent turns", "\(s["sidechainMessages"].int) · \(nativeStatsCount(s["sidechainTokens"].double))") }
+                if s["proxyMessages"].int > 0 { fact("Through a gateway", "\(s["proxyMessages"].int)") }
+                if s["totals"]["webSearch"].int > 0 { fact("Web searches", "\(s["totals"]["webSearch"].int)") }
+                if s["totals"]["webFetch"].int > 0 { fact("Page fetches", "\(s["totals"]["webFetch"].int)") }
+                let efforts = s["effort"].object.filter { $0.key != "not recorded" && $0.value.double > 0 }
+                if efforts.count > 1 || efforts.keys.first.map({ $0 != "default" }) == true {
+                    ForEach(efforts.keys.sorted(), id: \.self) { key in fact("Effort \(key)", "\(efforts[key]?.int ?? 0)") }
+                }
+            }
+        }
+    }
+    private var modelProjects: some View {
+        let rows = detail["derived"]["projects"].array, top = max(1, rows.map { nativeStatsGrand($0["totals"]) }.max() ?? 0)
+        return section("Projects") {
+            ForEach(Array(rows.prefix(6).enumerated()), id: \.offset) { _, row in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(row["name"].string).font(Theme.mono(11, weight: .medium)).lineLimit(1).truncationMode(.middle).help(row["path"].string)
+                        Spacer(minLength: 8)
+                        Text(nativeStatsCount(nativeStatsGrand(row["totals"]))).font(Theme.num(Theme.textXs, weight: .medium))
+                    }
+                    NativeGrowBar(fraction: nativeStatsGrand(row["totals"]) / top, color: Theme.pairColor(row["path"].string), height: 3, entrance: false)
+                }
+            }
+            if rows.count > 6 { note("\(rows.count - 6) more") }
+        }
+    }
+    @ViewBuilder private var notes: some View {
+        let payload = detailLoaded ? detail : overview
+        let excluded = NativeStatsPresentationPolicy.excludedNotices(payload, detail: detailLoaded)
+        let scan = overview["scan"], cache = overview["cache"]
+        section(cache.isNull || model != nil || project != nil ? "Records" : "Compared with /stats") {
+            if lifetime { note("Lifetime totals include Claude's cache. The chart uses the response records still on disk.") }
+            if let row = modelRow, row["viaProxy"].bool { note("Served through a gateway, not by Anthropic.", tone: Theme.warnFg) }
+            if let row = modelRow, row["pruned"].bool { note("Its transcripts were pruned. Totals are kept, dated history is not.") }
+            ForEach(excluded, id: \.source) { notice in note("\(nativeStatsSourceName(notice.source)): \(notice.count) records have no usable usage metadata.") }
+            if !cache.isNull, model == nil, project == nil {
+                fact("Lifetime", nativeStatsCount(nativeStatsGrand(cache["totals"])))
+                fact("Raw on disk", nativeStatsCount(scan["rawGrand"].double))
+                fact("De-duplicated on disk", nativeStatsCount(d["onDiskGrand"].double))
+                fact("Repeated blocks", "\(scan["duplicates"].int)")
+                fact("UTC days that agree", "\(overview["dayMatch"]["matched"].int) / \(overview["dayMatch"]["checked"].int)")
+            }
+            note("\(scan["files"].int) files · \(nativeStatsCount(scan["bytes"].double)) bytes · read in \(scan["elapsedMs"].double.formatted(.number.precision(.fractionLength(0)))) ms", tone: Theme.faint)
+        }
+    }
+    @ViewBuilder private var benchmarkPane: some View {
+        let row = targetRow ?? spend
+        section("Tokens") {
+            fact("Input", nativeStatsCount(row["input"].double))
+            fact("Cached, inside input", nativeStatsCount(row["cached"].double))
+            fact("Output", nativeStatsCount(row["output"].double))
+            fact("Reasoning, inside output", nativeStatsCount(row["reasoning"].double))
+        }
+        section("Calls") {
+            fact("Calls", "\(row["calls"].int)")
+            fact("With estimated counts", "\(row["estimated"].int)")
+            if targetRow == nil { fact("Runs", "\(spend["runs"].int)"); fact("Targets", "\(spend["pairs"].array.count)") }
+            else { fact("Provider", row["provider"].string, mono: true); fact("Model", row["model"].string, mono: true) }
+        }
+        section("Records") {
+            note("Tokens UniApi's own measuring sent through each provider. They are not part of coding-app usage.")
+            note("The chart is the median successful first-token latency per run. A rising line is a provider getting slower.")
+        }
+    }
+    @ViewBuilder private var paneActions: some View {
+        if view != "benchmark", let model {
+            HStack(spacing: 8) {
+                Button("Export daily CSV", nativeIcon: "download") { export(model) }.buttonStyle(T3Button(.outline))
+                    .disabled(d["days"].array.isEmpty)
+            }
+            .padding(.horizontal, wide ? 16 : margin).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .trailing)
+            .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
+        }
     }
 }
 
-private struct NativeStatsModelRow<Content: View>: View {
+private struct NativeStatsRow<Content: View>: View {
     let selected: Bool
+    let margin: CGFloat
     let action: () -> Void
     @ViewBuilder var content: () -> Content
     @State private var hovering = false
     var body: some View {
-        VStack(spacing: 0) {
-            Theme.rule.frame(height: 1)
-            Button(action: action) { content().frame(minHeight: 40).contentShape(Rectangle()) }.buttonStyle(.plain)
+        Button(action: action) {
+            HStack(spacing: 0) { content() }
+                .frame(minHeight: 36).padding(.horizontal, margin).contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .background(selected ? Theme.raised : hovering ? Theme.subtle : .clear)
-        .overlay(alignment: .leading) { Theme.accent.frame(width: 2).opacity(selected ? 1 : 0).offset(x: -8) }
+        .overlay(alignment: .top) { Theme.rule.frame(height: 1).padding(.horizontal, margin) }
+        .overlay(alignment: .leading) { Theme.accent.frame(width: 2).opacity(selected ? 1 : 0) }
         .onHover { hovering = $0 }
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }
 
-private struct NativeStatsProjectBoard: View {
-    let rows: [JSONValue], all: Bool
-    var body: some View { NativeCard {
-        NativeChartHeading(title: "Projects", caption: !all && rows.count > 8 ? "Top 8 of \(rows.count) working directories." : "Working directories recorded by the selected apps.")
-        ForEach(Array((all ? rows : Array(rows.prefix(8))).enumerated()), id: \.offset) { _, row in VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) { Text(row["name"].string).font(Theme.mono(Theme.textXs, weight: .medium)).lineLimit(1).help(row["path"].string); Spacer(minLength: 2); Text("\(row["sessions"].int) sessions").font(Theme.ui(10.5)).foregroundStyle(Theme.muted); Text(nativeStatsCount(nativeStatsGrand(row["totals"]))).font(Theme.mono(12, weight: .medium)) }
-            NativeGrowBar(fraction: nativeStatsGrand(row["totals"]) / max(1, rows.map { nativeStatsGrand($0["totals"]) }.max() ?? 0), color: Theme.pairColor(row["path"].string))
-        }.padding(.vertical, 7) }
-        if !all && rows.count > 8 { Text("\(rows.count - 8) more").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint) }
-    }.frame(maxWidth: .infinity) }
-}
-
+/// Responses by local weekday and hour.
 private struct NativeStatsHeat: View {
     let grid: [JSONValue]
     private var maximum: Double { grid.flatMap(\.array).map(\.double).max() ?? 0 }
-    var body: some View { NativeCard {
-        NativeChartHeading(title: "Hours", caption: "Responses by local weekday and hour, brightest at your busiest hour.")
-        VStack(spacing: 3) {
-        ForEach(0..<min(7, grid.count), id: \.self) { day in HStack(spacing: 3) { Text(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day]).frame(width: 35); ForEach(0..<24, id: \.self) { hour in let value = grid[day].array.count > hour ? grid[day].array[hour].double : 0; RoundedRectangle(cornerRadius: 2).fill(value > 0 ? Theme.accent.opacity(0.2 + 0.8 * value / max(1, maximum)) : Theme.track).frame(minWidth: 5, maxWidth: .infinity, minHeight: 12, maxHeight: 12).help("\(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][day]) \(hour):00: \(Int(value)) responses").accessibilityLabel("Day \(day + 1), hour \(hour), \(Int(value)) responses") } } }
-        }
-        HStack { Text("00"); Spacer(); Text("06"); Spacer(); Text("12"); Spacer(); Text("18"); Spacer(); Text("23") }.font(Theme.mono(10)).foregroundStyle(Theme.muted)
-        let hours = (0..<24).map { hour in grid.reduce(0) { $0 + ($1.array.count > hour ? $1.array[hour].double : 0) } }, best = hours.enumerated().max { $0.element < $1.element }
-        Text("\(maximum > 0 ? "Busiest hour: \(best?.offset ?? 0):00" : "No dated activity") · intensity 0–\(Int(maximum)) responses").foregroundStyle(Theme.muted)
-    }.frame(maxWidth: .infinity) }
-}
-
-private struct NativeStatsDrive: View {
-    let summary: JSONValue
-    var body: some View { NativeCard {
-        NativeChartHeading(title: "Sessions")
-        ForEach(summary["effort"].object.keys.sorted(), id: \.self) { key in HStack { Text("Effort \(key)"); Spacer(); Text(summary["effort"][key].string).font(Theme.mono(12)) } }
-        fact("Subagent turns", value: summary["sidechainMessages"].int, detail: "\(nativeStatsCount(summary["sidechainTokens"].double)) tokens")
-        fact("Through the proxy", value: summary["proxyMessages"].int, detail: "Claude responses from a gateway model")
-        fact("Web searches", value: summary["totals"]["webSearch"].int, detail: "Reported server-side searches")
-        fact("Page fetches", value: summary["totals"]["webFetch"].int, detail: "Reported server-side fetches")
-    } }
-    private func fact(_ title: String, value: Int, detail: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(title).font(Theme.ui(Theme.textXs, weight: .medium)); Text(detail).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1)
-            Spacer(); Text("\(value)").font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(value == 0 ? Theme.faint : Theme.ink)
+    var body: some View {
+        let peak = maximum
+        VStack(alignment: .leading, spacing: 6) {
+            VStack(spacing: 2) {
+                ForEach(0..<min(7, grid.count), id: \.self) { day in
+                    HStack(spacing: 2) {
+                        Text(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day]).font(Theme.ui(10)).foregroundStyle(Theme.muted).frame(width: 26, alignment: .leading)
+                        ForEach(0..<24, id: \.self) { hour in
+                            let value = grid[day].array.count > hour ? grid[day].array[hour].double : 0
+                            RoundedRectangle(cornerRadius: 1.5).fill(value > 0 ? Theme.accent.opacity(0.2 + 0.8 * value / max(1, peak)) : Theme.track)
+                                .frame(maxWidth: .infinity, minHeight: 10, maxHeight: 10)
+                                .help("\(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][day]) \(hour):00 · \(Int(value)) responses")
+                                .accessibilityLabel("Day \(day + 1), hour \(hour), \(Int(value)) responses")
+                        }
+                    }
+                }
+            }
+            HStack { Text("00"); Spacer(); Text("06"); Spacer(); Text("12"); Spacer(); Text("18"); Spacer(); Text("23") }
+                .font(Theme.mono(9)).foregroundStyle(Theme.faint).padding(.leading, 28)
+            let hours = (0..<24).map { hour in grid.reduce(0) { $0 + ($1.array.count > hour ? $1.array[hour].double : 0) } }
+            if peak > 0, let best = hours.enumerated().max(by: { $0.element < $1.element }) {
+                Text("Busiest at \(best.offset):00").font(Theme.ui(11)).foregroundStyle(Theme.muted)
+            }
         }
     }
 }
