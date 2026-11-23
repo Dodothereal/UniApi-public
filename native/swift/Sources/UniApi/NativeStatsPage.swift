@@ -51,6 +51,8 @@ struct NativeStatsPage: View {
         // The table and the app strip stay on the unscoped overview while a model is selected.
         if selectedModel != nil { await state.prefetch(source: source, range: range) }
         await state.load(source: source, range: actualRange, model: selectedModel, mode: mode)
+        // A refresh drops every snapshot; Benchmark reads the one for all apps.
+        if activeView == "benchmark", source != "all" { await state.prefetch(source: "all", range: range) }
     }
     private var readiness: NativePageReadiness { state.busy ? .pending : !state.error.isEmpty ? .failed : current.isNull || currentBenchmark.isNull ? .pending : .ready }
     private var measuredReadiness: NativePageReadiness {
