@@ -889,25 +889,7 @@ private struct NativeStatsBoard: View {
     }
 }
 
-private struct NativeStatsRow<Content: View>: View {
-    let selected: Bool
-    let margin: CGFloat
-    let action: () -> Void
-    @ViewBuilder var content: () -> Content
-    @State private var hovering = false
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 0) { content() }
-                .frame(minHeight: 36).padding(.horizontal, margin).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(selected ? Theme.raised : hovering ? Theme.subtle : .clear)
-        .overlay(alignment: .top) { Theme.rule.frame(height: 1).padding(.horizontal, margin) }
-        .overlay(alignment: .leading) { Theme.accent.frame(width: 2).opacity(selected ? 1 : 0) }
-        .onHover { hovering = $0 }
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-    }
-}
+private typealias NativeStatsRow<Content: View> = NativeBoardRow<Content>
 
 /// Responses by local weekday and hour.
 private struct NativeStatsHeat: View {

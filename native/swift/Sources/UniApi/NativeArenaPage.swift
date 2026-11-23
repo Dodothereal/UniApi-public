@@ -394,6 +394,12 @@ private struct NativeArenaMatchRow: View {
     let open: () -> Void
     @State private var hovering = false
     @Environment(\.nativeReducedMotion) private var reduceMotion
+    /// The model ranked best, once the match is judged and the names are revealed.
+    private var winner: String? {
+        guard !match["voted_at"].isNull, let first = match["ranking"].array.first?.int,
+              let slot = match["slots"].array.first(where: { $0["idx"].int == first }), slot["revealed"].bool, !slot["model"].string.isEmpty else { return nil }
+        return slot["model"].string
+    }
     private var status: String { match["verdict"].isNull ? match["status"].string : match["verdict"].string.replacingOccurrences(of: "_", with: " ") }
     var body: some View {
         Button(action: open) {
@@ -402,9 +408,14 @@ private struct NativeArenaMatchRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 6) {
                     StatusDot(color: match["status"].string == "failed" ? Theme.fail : match["status"].string == "done" ? (match["voted_at"].isNull ? Theme.warn : Theme.faint) : Theme.accent, pulse: match["status"].string == "running")
-                    Text(match["status"].string == "done" && match["voted_at"].isNull ? "ready to judge" : status).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                    if let winner {
+                        Text(winner).font(Theme.mono(11)).foregroundStyle(Theme.dim).truncationMode(.middle).help("Ranked best")
+                    } else {
+                        Text(match["status"].string == "done" && match["voted_at"].isNull ? "ready to judge" : status).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                    }
                     Spacer(minLength: 4)
-                    Text("\(match["slots"].array.count) \(match["mode"].string)").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint)
+                    Text(match["voted_at"].isNull ? "\(match["slots"].array.count) \(match["mode"].string)" : NativeListTimeFormat.ago(match["voted_at"].double))
+                        .font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint).fixedSize()
                 }.lineLimit(1)
             }.padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 10).contentShape(Rectangle())
                 .background(viewed ? Theme.raised : hovering ? Theme.subtle : .clear)

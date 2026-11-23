@@ -63,7 +63,7 @@ starts immediately.
 
 A destination can hold several pages as views. `NativeBenchmarkPage` (Run,
 Free test, Results, Charts, Runs), `NativeArenaHost` (Judge, Ranking,
-Presets, History, Prompts) and `NativeEnergyHost` (Flow, History, Sensors,
+Presets, History, Prompts) and `NativeEnergyHost` (Now, History, Sensors,
 Preferences, Charge limit) pass `NativeHostTabs` to the page they show, and
 the bar draws one strip with the destination's name. The identifiers
 `results`, `prompts` and `battery` still resolve; they open their view.
@@ -81,8 +81,18 @@ page. Use them instead of a page-specific arrangement.
   `NativeFact`). A row opens an inspector on the right with its facts and its
   actions pinned at the bottom. Rows do not expand in place and do not open a
   sheet. Escape closes the inspector, arrow keys move between rows, and below
-  720 points the inspector covers the list. Activity, Statistics (Models),
-  Switcher (providers) and Jobs use it.
+  720 points the inspector covers the list. Activity, Switcher (providers),
+  Arena (Ranking, Presets) and Jobs use it.
+- **Board** (`NativeBoard`, `NativeHero`, `NativeBoardRow`,
+  `NativePaneSection`, `NativePaneFact`). A page of measurements is one
+  frame: the headline is the number the chart plots, the table under the
+  chart is its legend, and a fixed pane on the right describes the selected
+  row, or the whole range when nothing is selected. Selecting a row
+  re-scopes the pane in place; it does not open another page. Export sits at
+  the foot of the pane. Below 920 points the pane moves under the table.
+  Statistics (Usage, Speed, Benchmark) and Energy (Now, History, Sensors)
+  use it. `NativeSplitTicks` divides one quantity into its parts on the tick
+  scale, as Energy does for where power comes from and where it goes.
 - **List and detail panes.** A page about one selected object keeps the list
   on the left and the object on the right: Transcribe, Settings (categories),
   Benchmark Run (providers and models on the left, the run on the right).

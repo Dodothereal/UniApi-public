@@ -60,7 +60,7 @@ struct NativeEnergyHost: View {
     var opens: String?
     @AppStorage(NativeEnergyHost.viewKey) private var view = "flow"
     @Environment(\.nativeBatterySupported) private var batterySupported
-    private static let energy: [(value: String, label: String)] = [("flow", "Flow"), ("history", "History"), ("sensors", "Sensors"), ("settings", "Preferences")]
+    private static let energy: [(value: String, label: String)] = [("flow", "Now"), ("history", "History"), ("sensors", "Sensors"), ("settings", "Preferences")]
     var body: some View {
         let charge = batterySupported != false
         Group {

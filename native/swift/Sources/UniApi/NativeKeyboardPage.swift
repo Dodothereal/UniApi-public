@@ -247,19 +247,20 @@ struct NativeKeyboardPage: View {
     private var tiles: some View {
         let time = duration(totals["activeMs"].double), liveWpm = live["wpm"].double
         let peak = totals["peakWpm"].double
-        return NativeReadoutStrip(minCell: 160) {
-            NativeReadout(label: "Now", value: recording && liveWpm > 0 ? String(format: "%.0f", liveWpm) : "—", unit: recording && liveWpm > 0 ? "WPM" : "",
-                          detail: recording ? "" : enabled ? "Waiting for permission" : "Recording is off", tone: liveWpm > 0 ? Theme.accent : Theme.faint)
-            NativeReadout(label: "Average", value: String(format: "%.0f", totals["wpm"].double), unit: "WPM",
-                          detail: String(format: "%.0f after corrections", totals["netWpm"].double) + (peak > 0 ? String(format: " · peak %.0f", peak) : ""))
-            NativeReadout(label: "Keys", value: NativeNumberFormat.compact(totals["keys"].double),
-                          detail: NativeNumberFormat.compact(totals["words"].double) + " words · " + NativeNumberFormat.compact(totals["keysPerDay"].double.rounded()) + " a day")
-            NativeReadout(label: "Corrected", value: percent(totals["correctionRate"].double), unit: "%",
-                          detail: NativeNumberFormat.compact(totals["corrections"].double) + (totals["corrections"].int == 1 ? " correction" : " corrections"))
-            NativeReadout(label: "Typing time", value: time.0, unit: time.1, detail: NativeNumberFormat.compact(totals["bursts"].double) + (totals["bursts"].int == 1 ? " burst" : " bursts"))
-            NativeReadout(label: "Streak", value: "\(totals["streak"].int)", unit: totals["streak"].int == 1 ? "day" : "days",
-                          detail: "longest \(totals["longestStreak"].int) · \(totals["days"].int) active")
-        }
+        var facts: [NativeHeroFact] = []
+        if recording && liveWpm > 0 { facts.append(NativeHeroFact(label: "Now", value: String(format: "%.0f WPM", liveWpm), tone: Theme.accent)) }
+        if peak > 0 { facts.append(NativeHeroFact(label: "Peak", value: String(format: "%.0f WPM", peak))) }
+        facts.append(NativeHeroFact(label: "Keys", value: NativeNumberFormat.compact(totals["keys"].double),
+                                    help: NativeNumberFormat.compact(totals["words"].double) + " words, " + NativeNumberFormat.compact(totals["keysPerDay"].double.rounded()) + " a day"))
+        facts.append(NativeHeroFact(label: "Corrected", value: percent(totals["correctionRate"].double) + "%",
+                                    help: NativeNumberFormat.compact(totals["corrections"].double) + (totals["corrections"].int == 1 ? " correction" : " corrections")))
+        facts.append(NativeHeroFact(label: "Typing time", value: time.0 + " " + time.1, help: NativeNumberFormat.compact(totals["bursts"].double) + (totals["bursts"].int == 1 ? " burst" : " bursts")))
+        facts.append(NativeHeroFact(label: "Streak", value: "\(totals["streak"].int) " + (totals["streak"].int == 1 ? "day" : "days"),
+                                    help: "Longest \(totals["longestStreak"].int), \(totals["days"].int) active"))
+        return NativeHero(value: String(format: "%.0f", totals["wpm"].double), numeric: totals["wpm"].double, unit: "WPM", facts: facts,
+                          maxFacts: contentWidth >= 900 ? 6 : contentWidth >= 640 ? 4 : contentWidth >= 480 ? 2 : 0) {
+            Text("Average speed")
+        } trailing: { EmptyView() }
     }
 
     private func heat(_ count: Double, _ peak: Double) -> Double { peak > 0 && count > 0 ? (count / peak).squareRoot() : 0 }

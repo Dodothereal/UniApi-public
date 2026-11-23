@@ -11,7 +11,6 @@ struct NativeEnergyPage: View {
     @Environment(\.nativeReducedMotion) private var reduceMotion
     @Environment(\.nativeMotionVisible) private var motionVisible
     private static let tabs = ["flow", "history", "sensors", "settings"]
-    @State private var contentWidth: CGFloat = 882
     @State private var reads = NativePageReadScope()
     @State private var preferencesRestored = false
     @State private var state: JSONValue = .null
@@ -20,6 +19,9 @@ struct NativeEnergyPage: View {
     @Environment(\.nativeHostTabs) private var host
     @AppStorage("uniapi.energy.range") private var range = "24h"
     @AppStorage("uniapi.energy.statistic") private var statistic = "mean"
+    @AppStorage("uniapi.energy.chart") private var chartMeasure = "power"
+    @State private var bucket: Double?
+    @State private var sensor: String?
     @State private var query = ""
     @State private var group = "All"
     @State private var favorites = Set<String>()
@@ -85,37 +87,27 @@ struct NativeEnergyPage: View {
         return .ready
     }
 
+    private var supported: Bool { state["supported"].bool }
+    private var margin: CGFloat { density.pageMargin }
+    private static let categories = ["All", "Favorites", "Telemetry", "System Power", "Processor & SoC", "Rails & Ports", "Power (W)", "Voltage (V)", "Current (A)"]
+
     var body: some View {
-        GeometryReader { viewport in
-            NativePage(title: "Energy", maxWidth: 1280, readiness: pageReadiness, tabs: {
-                if state["supported"].bool {
-                    NativeTabs(options: [("flow", "Flow"), ("history", "History"), ("sensors", "Sensors"), ("settings", "Preferences")], selection: tab) { tab = $0; host?.select($0) }
-                        .nativeHostedView(["flow", "history", "sensors", "settings"]) { tab = $0 }
-                }
-            }, actions: {
-                if state["supported"].bool, ["flow", "history"].contains(tab) {
-                    NativeMenuSelect(title: "Range", selection: $range, options: [("30m", "30 minutes"), ("1h", "1 hour"), ("6h", "6 hours"), ("24h", "24 hours"), ("7d", "7 days"), ("30d", "30 days"), ("all", "All time"), ("custom", "Custom")], width: 120)
-                }
-                if tab == "history" { T3IconButton(system: "download", help: "Export CSV") { exportHistory() }.disabled(history["points"].array.isEmpty) }
-                T3IconButton(system: "refresh-cw", help: "Refresh") { Task { await reload(force: true); if ["flow", "history", "settings"].contains(tab) { await loadHistory() } } }
-            }) {
-                if let statusReadError { statusError(statusReadError) }
-                if let error { NativeError(message: error) }
-                if !state["error"].string.isEmpty { statusError(state["error"].string) }
-                if state.isNull {
-                    if error == nil && statusReadError == nil { ShimmerText(text: "Loading…") }
-                } else if !state["supported"].bool {
-                    NativeEmptyState(title: "No power readings", detail: "This Mac does not expose its power controller.", icon: "zap")
-                } else {
-                    switch tab {
-                    case "history": historyTab
-                    case "sensors": sensorsTab
-                    case "settings": preferencesTab
-                    default: powerFlowTab
-                    }
-                }
+        NativePage(title: "Energy", maxWidth: .infinity, readiness: pageReadiness, scrolls: false, tabs: {
+            if supported {
+                NativeTabs(options: [("flow", "Now"), ("history", "History"), ("sensors", "Sensors"), ("settings", "Preferences")], selection: tab) { tab = $0; host?.select($0) }
+                    .nativeHostedView(Self.tabs) { tab = $0 }
             }
-            .onChange(of: max(0, min(1280, viewport.size.width) - 2 * density.pageMargin), initial: true) { _, width in contentWidth = width }
+        }, actions: {
+            if supported, tab == "sensors" {
+                T3Field(placeholder: "Filter channels", text: $query, width: 200, leadingIcon: "search")
+                NativeMenuSelect(title: "Sensor category", selection: $group, options: Self.categories.map { ($0, $0) }, width: 150)
+            }
+            if supported, ["flow", "history"].contains(tab) {
+                NativeMenuSelect(title: "Range", selection: $range, options: [("30m", "30 minutes"), ("1h", "1 hour"), ("6h", "6 hours"), ("24h", "24 hours"), ("7d", "7 days"), ("30d", "30 days"), ("all", "All time"), ("custom", "Custom")], width: 120)
+            }
+            T3IconButton(system: "refresh-cw", help: "Refresh") { Task { await reload(force: true); if ["flow", "history", "settings"].contains(tab) { await loadHistory() } } }
+        }) {
+            GeometryReader { geometry in content(width: geometry.size.width) }
         }
         .nativePageTask {
             if !preferencesRestored {
@@ -147,7 +139,405 @@ struct NativeEnergyPage: View {
                 await reload()
             }
         }
+        .onChange(of: tab) { _, _ in bucket = nil; sensor = nil }
+        .onChange(of: historyScope) { _, _ in bucket = nil }
         .nativePageActivity(reads: reads)
+    }
+
+    @ViewBuilder private var notices: some View {
+        if let statusReadError { statusError(statusReadError) }
+        if let error { NativeError(message: error) }
+        if !state["error"].string.isEmpty { statusError(state["error"].string) }
+    }
+
+    @ViewBuilder private func content(width: CGFloat) -> some View {
+        if state.isNull || !supported || tab == "settings" {
+            NativePane(maxWidth: 1280) {
+                if tab != "settings" || !supported { notices }
+                if state.isNull {
+                    if error == nil && statusReadError == nil { ShimmerText(text: "Loading…") }
+                } else if !supported {
+                    NativeEmptyState(title: "No power readings", detail: "This Mac does not expose its power controller.", icon: "zap")
+                } else {
+                    preferencesTab
+                }
+            }
+        } else {
+            let mainWidth = NativeBoard<EmptyView, EmptyView, EmptyView>.mainWidth(width)
+            NativeBoard(width: width, onMove: tab == "flow" ? nil : { move($0) }) {
+                VStack(alignment: .leading, spacing: 12) { notices; if let historyError, tab != "sensors" { NativeError(message: historyError) } }
+                    .padding(.horizontal, margin).padding(.top, error == nil && statusReadError == nil && state["error"].string.isEmpty && historyError == nil ? 0 : 16)
+                switch tab {
+                case "history": historyMain(mainWidth)
+                case "sensors": sensorsMain(mainWidth)
+                default: flowMain(mainWidth)
+                }
+            } pane: {
+                VStack(alignment: .leading, spacing: 0) {
+                    if tab == "sensors" { sensorPane }
+                    else if tab == "history", let point = selectedBucket { bucketPane(point) }
+                    else { rangePane }
+                }
+            } actions: { paneActions }
+            .onExitCommand { bucket = nil; sensor = nil }
+        }
+    }
+
+    private func watts(_ value: Double?) -> String { NativeHardwareDisplayPolicies.formatWatts(value) }
+    private func columnHeader(_ title: String, _ width: CGFloat? = nil) -> some View {
+        Text(title).font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).lineLimit(1)
+            .frame(width: width, alignment: .trailing).frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+    }
+    private func split(_ text: String) -> (String, String) {
+        guard let space = text.lastIndex(of: " ") else { return (text, "") }
+        return (String(text[..<space]), String(text[text.index(after: space)...]))
+    }
+
+    // MARK: - Now
+
+    private func flowMain(_ mainWidth: CGFloat) -> some View {
+        let wallW = number(snapshot["wallPowerW"]), sysLoadW = number(snapshot["systemLoadW"]), eff = number(snapshot["efficiencyPercent"])
+        let hourly = ((wallW ?? sysLoadW ?? 0) / 1000.0) * ratePerKwh
+        var facts = [NativeHeroFact(label: "Wall", value: watts(wallW), help: "Drawn from the outlet, before the adapter's conversion loss")]
+        if let eff { facts.append(NativeHeroFact(label: "Efficiency", value: String(format: "%.1f%%", eff), help: "Share of wall power that reaches the Mac")) }
+        if batteryPresent { facts.append(NativeHeroFact(label: "Battery", value: String(format: "%.0f%%", battery["percent"].double))) }
+        facts.append(NativeHeroFact(label: "Per hour", value: String(format: "%@%.3f", currency, hourly), help: "At the current draw and your electricity price"))
+        return VStack(alignment: .leading, spacing: 0) {
+            NativeHero(value: sysLoadW.map { String(format: "%.1f", $0) } ?? "—", numeric: sysLoadW, unit: "W", facts: facts, maxFacts: mainWidth >= 760 ? 4 : mainWidth >= 560 ? 2 : 0) {
+                Text("System load")
+            } trailing: { statisticPicker }
+                .padding(.horizontal, margin).padding(.top, 20)
+            flowSplit.padding(.horizontal, margin).padding(.top, 20)
+            if range == "custom" { customRange.padding(.horizontal, margin).padding(.top, 16) }
+            NativeLineChart(series: powerSeries(kind: statistic), height: 200, showPoints: false, includeZero: true, xFormat: { formatAxisDate($0) }, yFormat: { String(format: "%.1f W", $0) })
+                .padding(.horizontal, margin).padding(.top, 20)
+            rails(mainWidth).padding(.top, 20)
+        }
+    }
+
+    /// Where the power comes from and where it goes, on one scale.
+    private var flowSplit: some View {
+        let wall = max(0, number(snapshot["wallPowerW"]) ?? 0), batt = number(snapshot["batteryPowerW"]) ?? 0
+        let system = max(0, number(snapshot["systemLoadW"]) ?? 0), loss = max(0, number(snapshot["adapterLossW"]) ?? 0)
+        var from: [NativeSplitPart] = [], to = [NativeSplitPart(id: "system", label: "System", amount: system, color: Theme.ink)]
+        if wall > 0.05 { from.append(NativeSplitPart(id: "wall", label: "Wall", amount: wall, color: Theme.ink)) }
+        if batt < -0.05 { from.append(NativeSplitPart(id: "battery", label: "Battery", amount: -batt, color: Theme.accent)) }
+        if batt > 0.05 { to.append(NativeSplitPart(id: "charge", label: "Battery", amount: batt, color: Theme.accent)) }
+        if loss > 0.01 { to.append(NativeSplitPart(id: "loss", label: "Conversion loss", amount: loss, color: Theme.faint)) }
+        let total = max(from.reduce(0) { $0 + $1.amount }, to.reduce(0) { $0 + $1.amount })
+        return VStack(alignment: .leading, spacing: 14) {
+            if !from.isEmpty { splitRow("From", from, total, note: sourceLabel) }
+            splitRow("To", to, total)
+        }
+    }
+    private func splitRow(_ title: String, _ parts: [NativeSplitPart], _ total: Double, note: String = "") -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 16) {
+                Text(title).font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).frame(width: 34, alignment: .leading)
+                ForEach(parts) { part in
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 1).fill(part.color).frame(width: 3, height: 12).accessibilityHidden(true)
+                        Text(part.label).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.dim).lineLimit(1)
+                        Text(watts(part.amount)).font(Theme.num(Theme.textXs, weight: .medium)).lineLimit(1)
+                        if total > 0, parts.count > 1 { Text(String(format: "%.0f%%", part.amount * 100 / total)).font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted) }
+                    }.fixedSize().accessibilityElement(children: .combine)
+                }
+                Spacer(minLength: 0)
+                if !note.isEmpty { Text(note).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1) }
+            }
+            NativeSplitTicks(parts: parts, total: total)
+        }
+    }
+
+    private func rails(_ mainWidth: CGFloat) -> some View {
+        let subsystems = snapshot["subsystems"].array.sorted { $0["watts"].double > $1["watts"].double }
+        let load = max(0.1, snapshot["systemLoadW"].double)
+        let top = max(0.1, subsystems.first?["watts"].double ?? load)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) { columnHeader("Rail"); columnHeader("Share", 48); columnHeader("Now", 72) }.frame(height: 30).padding(.horizontal, margin)
+            ForEach(Array(subsystems.enumerated()), id: \.offset) { _, item in
+                let value = max(0, item["watts"].double)
+                HStack(spacing: 12) {
+                    Text(item["label"].string).font(Theme.ui(Theme.textSm)).lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading).help(item["group"].string)
+                    if mainWidth >= 620 { NativeTickMeter(fraction: min(1, value / top), color: Theme.ink, height: 8).frame(width: 140) }
+                    Text(String(format: "%.0f%%", min(1, value / load) * 100)).font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted).frame(width: 48, alignment: .trailing)
+                    Text(String(format: "%.2f W", value)).font(Theme.num(Theme.textXs, weight: .medium)).frame(width: 72, alignment: .trailing)
+                }
+                .frame(height: 36).padding(.horizontal, margin)
+                .overlay(alignment: .top) { Theme.rule.frame(height: 1).padding(.horizontal, margin) }
+                .accessibilityElement(children: .combine)
+            }
+            Theme.rule.frame(height: 1).padding(.horizontal, margin)
+            if subsystems.isEmpty { Text("No rail readings").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint).padding(.horizontal, margin).padding(.vertical, 12) }
+        }
+    }
+
+    // MARK: - History
+
+    private var recentBuckets: [JSONValue] { Array(history["points"].array.suffix(60).reversed()) }
+    private var selectedBucket: JSONValue? { bucket.flatMap { date in history["points"].array.first { $0["mean"]["date"].double == date } } }
+
+    private func historyMain(_ mainWidth: CGFloat) -> some View {
+        let summary = history["summary"], points = history["points"].array, recent = recentBuckets
+        let used = split(wh(summary["systemEnergyWh"]))
+        let facts = [NativeHeroFact(label: "At the wall", value: wh(summary["wallEnergyWh"])),
+                     NativeHeroFact(label: "Cost", value: cost(summary["wallEnergyWh"])),
+                     NativeHeroFact(label: "Average", value: watts(number(summary["avgSystemLoadW"]))),
+                     NativeHeroFact(label: "Peak", value: watts(number(summary["peakSystemLoadW"])))]
+        let wide = mainWidth >= 640
+        return VStack(alignment: .leading, spacing: 0) {
+            NativeHero(value: used.0, numeric: number(summary["systemEnergyWh"]), unit: used.1, facts: facts, maxFacts: mainWidth >= 860 ? 4 : mainWidth >= 700 ? 2 : 0) {
+                Text("Energy used")
+            } trailing: {
+                HStack(spacing: 8) {
+                    if chartMeasure == "power" { statisticPicker }
+                    T3Segmented(options: [("power", "Power"), ("energy", "Energy")], selection: chartMeasure) { chartMeasure = $0 }
+                }
+            }
+                .padding(.horizontal, margin).padding(.top, 20)
+            if range == "custom" { customRange.padding(.horizontal, margin).padding(.top, 16) }
+            Group {
+                if chartMeasure == "energy" {
+                    NativeLineChart(series: energyBucketSeries, height: 220, showPoints: points.count <= 48, includeZero: true, xFormat: { formatAxisDate($0) }, yFormat: { String(format: "%.2f Wh", $0) })
+                } else {
+                    NativeLineChart(series: powerSeries(kind: statistic), height: 220, showPoints: points.count <= 48, includeZero: true, xFormat: { formatAxisDate($0) }, yFormat: { String(format: "%.1f W", $0) })
+                }
+            }.padding(.horizontal, margin).padding(.top, 20)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    columnHeader("Time"); columnHeader("Average", 82); columnHeader("Peak", 82)
+                    if wide { columnHeader("Wall", 82) }
+                    columnHeader("Energy", 92)
+                    if wide { columnHeader("Cost", 76) }
+                }.frame(height: 30).padding(.horizontal, margin)
+                ForEach(Array(recent.enumerated()), id: \.offset) { _, pt in
+                    let date = pt["mean"]["date"].double
+                    NativeBoardRow(selected: bucket == date, margin: margin, height: 32) { bucket = bucket == date ? nil : date } content: {
+                        HStack(spacing: 10) {
+                            Text(Date(timeIntervalSince1970: date / 1000).formatted(.dateTime.day().month(.abbreviated).hour().minute()))
+                                .foregroundStyle(Theme.dim).lineLimit(1).fixedSize().frame(maxWidth: .infinity, alignment: .leading)
+                            Text(watts(number(pt["mean"]["systemLoadW"]))).fontWeight(.medium).frame(width: 82, alignment: .trailing)
+                            Text(watts(number(pt["max"]["systemLoadW"]))).foregroundStyle(Theme.dim).frame(width: 82, alignment: .trailing)
+                            if wide { Text(watts(number(pt["mean"]["wallPowerW"]))).foregroundStyle(Theme.dim).frame(width: 82, alignment: .trailing) }
+                            Text(wh(pt["systemEnergyWh"])).fontWeight(.medium).frame(width: 92, alignment: .trailing)
+                            if wide { Text(cost(pt["wallEnergyWh"])).foregroundStyle(Theme.muted).frame(width: 76, alignment: .trailing) }
+                        }.font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.ink)
+                    }
+                }
+                Theme.rule.frame(height: 1).padding(.horizontal, margin)
+                Text(recent.isEmpty ? "No buckets in this range" : points.count > recent.count ? "Latest \(recent.count) of \(points.count) buckets" : "\(points.count) buckets")
+                    .font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.faint).padding(.horizontal, margin).padding(.top, 10)
+            }.padding(.top, 20)
+        }
+    }
+
+    private func move(_ step: Int) {
+        guard step != 0 else { return }
+        if tab == "history" {
+            let dates = recentBuckets.map { $0["mean"]["date"].double }
+            guard !dates.isEmpty else { return }
+            let index = bucket.flatMap { dates.firstIndex(of: $0) }
+            bucket = dates[min(dates.count - 1, max(0, (index ?? (step > 0 ? -1 : dates.count)) + step))]
+        } else if tab == "sensors" {
+            let ids = sensorRows.map { $0["id"].string }
+            guard !ids.isEmpty else { return }
+            let index = sensor.flatMap { ids.firstIndex(of: $0) }
+            sensor = ids[min(ids.count - 1, max(0, (index ?? (step > 0 ? -1 : ids.count)) + step))]
+        }
+    }
+
+    // MARK: - Sensors
+
+    private func sensorsMain(_ mainWidth: CGFloat) -> some View {
+        let peaks = sessionStats["sensorPeaks"], avgs = sessionStats["sensorAverages"], rows = sensorRows
+        let wide = mainWidth >= 700
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                columnHeader("Channel")
+                if wide { Text("Category").font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).frame(width: 130, alignment: .leading) }
+                columnHeader("Now", 90); columnHeader("Mean", 84); columnHeader("Peak", 84)
+            }.frame(height: 36).padding(.horizontal, margin)
+            ForEach(rows, id: \.self["id"]) { row in
+                let id = row["id"].string, unit = row["unit"].string
+                NativeBoardRow(selected: sensor == id, margin: margin) { sensor = sensor == id ? nil : id } content: {
+                    HStack(spacing: 12) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(NativeHardwareDisplayPolicies.energySensorName(id)).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.ink).lineLimit(1)
+                            Text(id).font(Theme.mono(10.5)).foregroundStyle(Theme.faint).lineLimit(1)
+                            if favorites.contains(id) { NativeIcon("star", size: 11).foregroundStyle(Theme.accent).accessibilityLabel("Favorite") }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        if wide {
+                            Text(NativeHardwareDisplayPolicies.energySensorGroup(id, unit: unit)).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1).frame(width: 130, alignment: .leading)
+                        }
+                        NativeNumberText(text: formatSensorValue(number(row["value"]), unit: unit), font: Theme.num(Theme.textSm, weight: .medium)).frame(width: 90, alignment: .trailing)
+                        Text(formatSensorValue(number(avgs[id]), unit: unit)).font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.dim).frame(width: 84, alignment: .trailing)
+                        Text(formatSensorValue(number(peaks[id]), unit: unit)).font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.muted).frame(width: 84, alignment: .trailing)
+                    }
+                }
+            }
+            Theme.rule.frame(height: 1).padding(.horizontal, margin)
+            if rows.isEmpty { Text("No match").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint).padding(.horizontal, margin).padding(.vertical, 12) }
+        }
+    }
+
+    private func toggleFavorite(_ id: String) {
+        if !favorites.insert(id).inserted { favorites.remove(id) }
+        if !runtime.paths.readOnly { UserDefaults.standard.set(Array(favorites).sorted(), forKey: "uniapi.energy.favorites") }
+    }
+
+    // MARK: - Pane
+
+    private func paneHeader(_ title: String, _ caption: String, mono: Bool = false, clear: (() -> Void)? = nil) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(Theme.ui(Theme.textSm, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                if !caption.isEmpty { Text(caption).font(mono ? Theme.mono(11) : Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(2) }
+            }
+            Spacer(minLength: 0)
+            if let clear { T3IconButton(system: "x", help: "Clear the selection", size: 13, action: clear) }
+        }.padding(.horizontal, 16).padding(.vertical, 14).frame(minHeight: 56, alignment: .top)
+    }
+
+    /// What was used in the range, since boot and in total.
+    @ViewBuilder private var rangePane: some View {
+        let summary = history["summary"]
+        let short = ["30m": "30 min", "1h": "1 hour", "6h": "6 hours", "24h": "24 hours", "7d": "7 days", "30d": "30 days", "all": "Recorded", "custom": "Custom"][historyRange] ?? historyRange
+        let rows: [(String, String, String, String)] = [
+            ("System", wh(summary["systemEnergyWh"]), wh(bootStats["systemEnergyWh"]), wh(allTimeStats["systemEnergyWh"])),
+            ("Wall", wh(summary["wallEnergyWh"]), wh(bootStats["wallEnergyWh"]), wh(allTimeStats["wallEnergyWh"])),
+            ("Loss", wh(summary["adapterLossWh"]), wh(bootStats["adapterLossWh"]), wh(allTimeStats["adapterLossWh"])),
+            ("Cost", cost(summary["wallEnergyWh"]), cost(bootStats["wallEnergyWh"]), cost(allTimeStats["wallEnergyWh"]))
+        ]
+        let basisW = number(bootStats["avgSystemPowerInW"]) ?? number(snapshot["wallPowerW"]) ?? number(snapshot["systemLoadW"]) ?? 0
+        let monthlyWh = basisW * 24.0 * 30.0
+        paneHeader(rangeDisplayName, history.isNull ? "" : "\(history["points"].array.count) buckets")
+        NativePaneSection(title: "Used") {
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Text("").frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach([short, "Boot", "All time"], id: \.self) { Text($0).lineLimit(1).frame(width: 70, alignment: .trailing) }
+                }.font(Theme.ui(11)).foregroundStyle(Theme.muted).padding(.bottom, 6)
+                ForEach(rows, id: \.0) { row in
+                    HStack(spacing: 6) {
+                        Text(row.0).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.dim).frame(maxWidth: .infinity, alignment: .leading)
+                        ForEach(Array([row.1, row.2, row.3].enumerated()), id: \.offset) { index, value in
+                            Text(value).font(Theme.num(11, weight: index == 0 ? .medium : .regular)).foregroundStyle(value == "—" ? Theme.faint : index == 0 ? Theme.ink : Theme.dim)
+                                .lineLimit(1).minimumScaleFactor(0.8).frame(width: 70, alignment: .trailing)
+                        }
+                    }.frame(height: 24).accessibilityElement(children: .combine)
+                }
+            }
+        }
+        NativePaneSection(title: "Load") {
+            NativePaneFact(label: "Average", value: watts(number(summary["avgSystemLoadW"])))
+            NativePaneFact(label: "95th percentile", value: watts(number(summary["p95SystemLoadW"])))
+            NativePaneFact(label: "Peak", value: watts(number(summary["peakSystemLoadW"])))
+            NativePaneFact(label: "Minimum", value: watts(number(summary["minSystemLoadW"])))
+            if let boot = number(bootStats["avgSystemLoadW"]) { NativePaneFact(label: "Average since boot", value: watts(boot)) }
+        }
+        NativePaneSection(title: "At this rate") {
+            NativePaneFact(label: "Per month", value: String(format: "%.2f kWh", monthlyWh / 1000.0))
+            NativePaneFact(label: "Cost per month", value: NativeHardwareDisplayPolicies.formatCost(wh: monthlyWh, ratePerKwh: ratePerKwh, currency: currency))
+            NativePaneFact(label: "Price", value: String(format: "%@%.2f per kWh", currency, ratePerKwh))
+        }
+        if batteryPresent {
+            NativePaneSection(title: "Battery") {
+                NativePaneFact(label: "Charge", value: String(format: "%.0f%% · %.1f of %.1f Wh", battery["percent"].double, battery["remainingWh"].double, battery["maxCapacityWh"].double))
+                NativePaneFact(label: "Flow", value: NativeHardwareDisplayPolicies.formatWatts(number(snapshot["batteryPowerW"]), signed: true))
+                if battery["designCapacityWh"].double > 0 { NativePaneFact(label: "Capacity", value: String(format: "%.0f%% of design", battery["maxCapacityWh"].double * 100 / battery["designCapacityWh"].double)) }
+                if !battery["cycleCount"].isNull { NativePaneFact(label: "Cycles", value: "\(battery["cycleCount"].int)") }
+                if let temperature = number(battery["temperatureC"]) { NativePaneFact(label: "Temperature", value: String(format: "%.1f °C", temperature)) }
+                if !battery["timeRemainingMinutes"].isNull { NativePaneFact(label: battery["charging"].bool ? "Until full" : "Remaining", value: "\(battery["timeRemainingMinutes"].int / 60) h \(battery["timeRemainingMinutes"].int % 60) min") }
+            }
+        }
+        NativePaneSection(title: "Supply") {
+            NativePaneFact(label: "Input", value: String(format: "%.2f V · %.2f A", snapshot["voltageInV"].double, snapshot["currentInA"].double))
+            if let budget = number(snapshot["powerBudgetW"]), budget > 0 { NativePaneFact(label: "Budget", value: String(format: "%.0f W", budget)) }
+            if !battery["adapterDescription"].string.isEmpty { NativePaneFact(label: "Adapter", value: battery["adapterDescription"].string) }
+            if let loss = number(snapshot["adapterLossW"]) { NativePaneFact(label: "Conversion loss", value: String(format: "%.2f W", loss)) }
+        }
+    }
+
+    @ViewBuilder private func bucketPane(_ point: JSONValue) -> some View {
+        let mean = point["mean"], high = point["max"], low = point["min"]
+        let minutes = point["resolutionMs"].double / 60000
+        paneHeader(Date(timeIntervalSince1970: mean["date"].double / 1000).formatted(date: .abbreviated, time: .shortened),
+                   minutes >= 60 ? String(format: "%.0f-hour bucket", minutes / 60) : minutes >= 1 ? String(format: "%.0f-minute bucket", minutes) : "", clear: { bucket = nil })
+        NativePaneSection(title: "System load") {
+            NativePaneFact(label: "Average", value: watts(number(mean["systemLoadW"])))
+            NativePaneFact(label: "Peak", value: watts(number(high["systemLoadW"])))
+            NativePaneFact(label: "Minimum", value: watts(number(low["systemLoadW"])))
+        }
+        NativePaneSection(title: "Supply") {
+            NativePaneFact(label: "Wall, average", value: watts(number(mean["wallPowerW"])))
+            NativePaneFact(label: "Wall, peak", value: watts(number(high["wallPowerW"])))
+            NativePaneFact(label: "Conversion loss", value: watts(number(mean["adapterLossW"])))
+            if batteryPresent { NativePaneFact(label: "Battery", value: NativeHardwareDisplayPolicies.formatWatts(number(mean["batteryPowerW"]), signed: true)) }
+        }
+        NativePaneSection(title: "Energy") {
+            NativePaneFact(label: "System", value: wh(point["systemEnergyWh"]))
+            NativePaneFact(label: "Wall", value: wh(point["wallEnergyWh"]))
+            NativePaneFact(label: "Cost", value: cost(point["wallEnergyWh"]))
+        }
+        let rails = mean["subsystems"].array.sorted { $0["watts"].double > $1["watts"].double }.prefix(6)
+        if !rails.isEmpty {
+            NativePaneSection(title: "Rails") {
+                ForEach(Array(rails.enumerated()), id: \.offset) { _, rail in
+                    NativePaneFact(label: rail["label"].string, value: String(format: "%.2f W", rail["watts"].double))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var sensorPane: some View {
+        let all = snapshot["sensors"].array
+        if let id = sensor, let row = all.first(where: { $0["id"].string == id }) {
+            let unit = row["unit"].string, value = number(row["value"])
+            paneHeader(NativeHardwareDisplayPolicies.energySensorName(id), id, mono: true, clear: { sensor = nil })
+            NativePaneSection(title: "Reading") {
+                NativePaneFact(label: "Now", value: formatSensorValue(value, unit: unit))
+                NativePaneFact(label: "Mean", value: formatSensorValue(number(sessionStats["sensorAverages"][id]), unit: unit))
+                NativePaneFact(label: "Peak", value: formatSensorValue(number(sessionStats["sensorPeaks"][id]), unit: unit))
+                if unit == "W", let value, snapshot["systemLoadW"].double > 0 {
+                    NativePaneFact(label: "Of system load", value: String(format: "%.0f%%", min(1, max(0, value / snapshot["systemLoadW"].double)) * 100))
+                }
+            }
+            NativePaneSection(title: "Channel") {
+                NativePaneFact(label: "Category", value: NativeHardwareDisplayPolicies.energySensorGroup(id, unit: unit))
+                NativePaneFact(label: "Key", value: id, mono: true)
+            }
+        } else {
+            let pinned = all.filter { favorites.contains($0["id"].string) }
+            paneHeader("\(all.count) channels", "Mean and peak are measured since UniApi started.")
+            NativePaneSection(title: "Favorites") {
+                if pinned.isEmpty {
+                    Text("Select a channel to mark it as a favorite.").font(Theme.ui(11)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(pinned, id: \.self["id"]) { row in
+                    NativePaneFact(label: NativeHardwareDisplayPolicies.energySensorName(row["id"].string), value: formatSensorValue(number(row["value"]), unit: row["unit"].string))
+                }
+            }
+            NativePaneSection(title: "Units") {
+                ForEach([("W", "Power"), ("V", "Voltage"), ("A", "Current")], id: \.0) { unit, name in
+                    NativePaneFact(label: name, value: "\(all.filter { $0["unit"].string == unit }.count)")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var paneActions: some View {
+        HStack(spacing: 8) {
+            if tab == "sensors" {
+                if let id = sensor {
+                    Button(favorites.contains(id) ? "Remove favorite" : "Favorite", nativeIcon: "star") { toggleFavorite(id) }.buttonStyle(T3Button(.outline))
+                }
+            } else {
+                Button("Export CSV", nativeIcon: "download") { exportHistory() }.buttonStyle(T3Button(.outline)).disabled(history["points"].array.isEmpty)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16).frame(height: tab == "sensors" && sensor == nil ? 0 : 52).clipped()
+        .overlay(alignment: .top) { Theme.rule.frame(height: tab == "sensors" && sensor == nil ? 0 : 1) }
     }
 
     private func statusError(_ message: String) -> some View {
@@ -185,198 +575,26 @@ struct NativeEnergyPage: View {
         T3Segmented(options: [("mean", "Average"), ("max", "Peak"), ("min", "Minimum")], selection: statistic) { statistic = $0 }
     }
 
-    // MARK: - Flow
-
-    private var powerFlowTab: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            pipeline
-            if range == "custom" { customRange }
-            energySummaryStrip
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 32) {
-                    rails.frame(minWidth: 400, maxWidth: .infinity)
-                    ledger.frame(width: 400)
-                }
-                VStack(alignment: .leading, spacing: 24) { rails; ledger }
-            }
-            if let historyError { NativeError(message: historyError) }
-            NativeSection(rangeDisplayName, detail: "\(history["points"].array.count) buckets", trailing: { statisticPicker }) {
-                NativeLineChart(series: powerSeries(kind: statistic), height: 200, showPoints: false, includeZero: true, xFormat: { formatAxisDate($0) }, yFormat: { String(format: "%.1f W", $0) })
-            }
-        }
-    }
-
-    /// Wall to load, left to right. Every meter is a share of the supply's budget.
-    private var pipeline: some View {
-        let wallW = number(snapshot["wallPowerW"]), sysInW = number(snapshot["systemPowerInW"]), lossW = number(snapshot["adapterLossW"])
-        let sysLoadW = number(snapshot["systemLoadW"]), battW = number(snapshot["batteryPowerW"]), eff = number(snapshot["efficiencyPercent"])
-        let budgetW = number(snapshot["powerBudgetW"]).flatMap { $0 > 0 ? $0 : nil }
-        let socW = snapshot["subsystems"].array.first(where: { $0["id"].string == "soc" }).flatMap { number($0["watts"]) }
-        let thermalW = snapshot["subsystems"].array.first(where: { $0["id"].string == "thermal" }).flatMap { number($0["watts"]) }
-        let hourlyCost = ((wallW ?? sysLoadW ?? 0) / 1000.0) * ratePerKwh
-        func share(_ watts: Double?) -> Double? { budgetW.map { min(1, max(0, (watts ?? 0) / $0)) } }
-        return NativeSection("Now", detail: sourceLabel) {
-            NativeReadoutStrip(minCell: 170) {
-                NativeReadout(label: "Wall", value: NativeHardwareDisplayPolicies.formatWatts(wallW),
-                              detail: [eff.map { String(format: "%.1f%% efficient", $0) }, lossW.map { String(format: "%.2f W lost", $0) }].compactMap { $0 }.joined(separator: " · "),
-                              icon: "plug-zap", meter: share(wallW))
-                NativeReadout(label: "DC in", value: NativeHardwareDisplayPolicies.formatWatts(sysInW),
-                              detail: budgetW.map { String(format: "%.0f W of %.0f W", sysInW ?? 0, $0) } ?? String(format: "%.2f V × %.2f A", number(snapshot["voltageInV"]) ?? 0, number(snapshot["currentInA"]) ?? 0),
-                              icon: "plug", meter: share(sysInW))
-                NativeReadout(label: "System", value: NativeHardwareDisplayPolicies.formatWatts(sysLoadW),
-                              detail: String(format: "%@%.3f per hour", currency, hourlyCost), icon: "cpu", meter: share(sysLoadW), meterColor: Theme.accent)
-                if batteryPresent {
-                    NativeReadout(label: (battW ?? 0) > 0.05 ? "Battery, charging" : (battW ?? 0) < -0.05 ? "Battery, discharging" : "Battery",
-                                  value: NativeHardwareDisplayPolicies.formatWatts(battW, signed: true),
-                                  detail: String(format: "%.0f%% · %.1f of %.1f Wh", battery["percent"].double, battery["remainingWh"].double, battery["maxCapacityWh"].double),
-                                  icon: "battery-charging", meter: max(0, min(1, battery["percent"].double / 100.0)))
-                } else {
-                    NativeReadout(label: "SoC", value: NativeHardwareDisplayPolicies.formatWatts(socW ?? thermalW ?? sysLoadW),
-                                  detail: thermalW.map { String(format: "Thermal zone %.2f W", $0) } ?? "",
-                                  icon: "activity", meter: (sysLoadW ?? 0) > 0 ? min(1, max(0, (socW ?? 0) / max(1, sysLoadW ?? 1))) : nil)
-                }
-            }
-        }
-    }
-
-    private var energySummaryStrip: some View {
-        let summary = history["summary"]
-        let windowAvgW = number(summary["avgSystemLoadW"]), bootAvgW = number(bootStats["avgSystemLoadW"])
-        let basisW = bootAvgW ?? windowAvgW ?? number(snapshot["systemLoadW"]) ?? 0
-        let wallBasisW = number(bootStats["avgSystemPowerInW"]) ?? number(snapshot["wallPowerW"]) ?? basisW
-        let monthlyWh = wallBasisW * 24.0 * 30.0
-        return NativeReadoutStrip(minCell: 170) {
-            NativeReadout(label: "Used", value: wh(summary["systemEnergyWh"]), detail: "\(wh(summary["wallEnergyWh"])) at the wall · \(cost(summary["wallEnergyWh"]))")
-            NativeReadout(label: "Since boot", value: wh(bootStats["systemEnergyWh"]), detail: bootAvgW.map { String(format: "%.1f W average", $0) } ?? "")
-            NativeReadout(label: "Load, min to peak", value: NativeHardwareDisplayPolicies.formatWatts(number(summary["minSystemLoadW"])) + " – " + NativeHardwareDisplayPolicies.formatWatts(number(summary["peakSystemLoadW"])),
-                          detail: [windowAvgW.map { String(format: "%.1f W average", $0) }, number(summary["p95SystemLoadW"]).map { String(format: "p95 %.1f W", $0) }].compactMap { $0 }.joined(separator: " · "))
-            NativeReadout(label: "At this rate", value: String(format: "%.2f", monthlyWh / 1000.0), unit: "kWh / month",
-                          detail: NativeHardwareDisplayPolicies.formatCost(wh: monthlyWh, ratePerKwh: ratePerKwh, currency: currency) + " per month")
-        }
-    }
-
-    private var rails: some View {
-        let subsystems = snapshot["subsystems"].array
-        let sysLoad = max(0.1, snapshot["systemLoadW"].double)
-        let maxRail = max(sysLoad, subsystems.map { $0["watts"].double }.max() ?? sysLoad)
-        return NativeSection("Rails", trailing: {
-            Button("\(snapshot["sensors"].array.count) sensors", nativeIcon: "arrow-right") { tab = "sensors" }.buttonStyle(T3Button(.ghost))
-        }) {
-            VStack(spacing: 0) {
-                Theme.rule.frame(height: 1)
-                ForEach(Array(subsystems.enumerated()), id: \.offset) { _, item in
-                    let watts = max(0, item["watts"].double)
-                    HStack(spacing: 12) {
-                        Text(item["label"].string).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.ink).lineLimit(1).frame(width: 150, alignment: .leading).help(item["group"].string)
-                        NativeTickMeter(fraction: min(1, max(0, watts / maxRail)), color: Theme.ink, height: 10)
-                        Text(String(format: "%.0f%%", min(1, max(0, watts / sysLoad)) * 100)).font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted).frame(width: 38, alignment: .trailing)
-                        Text(String(format: "%.2f W", watts)).font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(Theme.ink).frame(width: 64, alignment: .trailing)
-                    }.frame(height: 34).overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
-                        .accessibilityElement(children: .combine)
-                }
-                if subsystems.isEmpty { Text("No rail readings").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 10) }
-            }
-        }
-    }
-
-    /// One table: what was used, by period.
-    private var ledger: some View {
-        let summary = history["summary"]
-        let short = ["30m": "30 min", "1h": "1 hour", "6h": "6 hours", "24h": "24 hours", "7d": "7 days", "30d": "30 days", "all": "Recorded", "custom": "Custom"][historyRange] ?? historyRange
-        let rows: [(String, String, String, String)] = [
-            ("System", wh(summary["systemEnergyWh"]), wh(bootStats["systemEnergyWh"]), wh(allTimeStats["systemEnergyWh"])),
-            ("Wall", wh(summary["wallEnergyWh"]), wh(bootStats["wallEnergyWh"]), wh(allTimeStats["wallEnergyWh"])),
-            ("Conversion loss", wh(summary["adapterLossWh"]), wh(bootStats["adapterLossWh"]), "—"),
-            ("Efficiency", "—", bootStats["efficiencyPercent"].isNull ? "—" : String(format: "%.1f%%", bootStats["efficiencyPercent"].double), "—"),
-            ("Cost", cost(summary["wallEnergyWh"]), cost(bootStats["wallEnergyWh"]), cost(allTimeStats["wallEnergyWh"]))
-        ]
-        return NativeSection("Ledger") {
-            VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Text("").frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach([short, "Since boot", "All time"], id: \.self) { Text($0).frame(width: 84, alignment: .trailing) }
-                }.font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).frame(height: 24, alignment: .top)
-                Theme.rule.frame(height: 1)
-                ForEach(rows, id: \.0) { row in
-                    HStack(spacing: 8) {
-                        Text(row.0).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.dim).frame(maxWidth: .infinity, alignment: .leading)
-                        ForEach(Array([row.1, row.2, row.3].enumerated()), id: \.offset) { _, value in
-                            Text(value).font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(value == "—" ? Theme.faint : Theme.ink).lineLimit(1).minimumScaleFactor(0.8).frame(width: 84, alignment: .trailing)
-                        }
-                    }.frame(height: 34).overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
-                }
-            }
-        }
-    }
-
-    // MARK: - History
-
-    private var historyTab: some View {
-        let points = history["points"].array
-        return VStack(alignment: .leading, spacing: 24) {
-            HStack(spacing: 8) { statisticPicker; if range == "custom" { customRange } else { Spacer(minLength: 0) } }
-            if let historyError { NativeError(message: historyError) }
-            energySummaryStrip
-            NativeCard(title: "Power") {
-                NativeLineChart(series: powerSeries(kind: statistic), height: 220, showPoints: points.count <= 48, includeZero: true, xFormat: { formatAxisDate($0) }, yFormat: { String(format: "%.1f W", $0) })
-            }
-            NativeCard(title: "Energy per bucket") {
-                NativeLineChart(series: energyBucketSeries, height: 190, showPoints: points.count <= 48, includeZero: true, xFormat: { formatAxisDate($0) }, yFormat: { String(format: "%.2f Wh", $0) })
-            }
-            historyBucketTableCard(points: points)
-            Text("\(points.count) buckets · \(ByteCountFormatter.string(fromByteCount: Int64(history["storage"]["bytes"].double), countStyle: .file)) stored")
-                .font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.faint)
-        }
-    }
-
-    private func historyBucketTableCard(points: [JSONValue]) -> some View {
-        let recent = Array(points.suffix(60).reversed())
-        return NativeSection("Buckets", detail: points.count > recent.count ? "latest \(recent.count) of \(points.count)" : "") {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 10) {
-                    Text("Time").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("Average").frame(width: 82, alignment: .trailing)
-                    Text("Peak").frame(width: 82, alignment: .trailing)
-                    Text("Wall").frame(width: 82, alignment: .trailing)
-                    Text("Energy").frame(width: 92, alignment: .trailing)
-                    Text("Cost").frame(width: 76, alignment: .trailing)
-                }.font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).frame(height: 30)
-                ForEach(Array(recent.enumerated()), id: \.offset) { _, pt in
-                    Theme.rule.frame(height: 1)
-                    HStack(spacing: 10) {
-                        Text(Date(timeIntervalSince1970: pt["mean"]["date"].double / 1000).formatted(date: .abbreviated, time: .standard))
-                            .foregroundStyle(Theme.dim).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                        Text(NativeHardwareDisplayPolicies.formatWatts(number(pt["mean"]["systemLoadW"]))).fontWeight(.medium).frame(width: 82, alignment: .trailing)
-                        Text(NativeHardwareDisplayPolicies.formatWatts(number(pt["max"]["systemLoadW"]))).foregroundStyle(Theme.dim).frame(width: 82, alignment: .trailing)
-                        Text(NativeHardwareDisplayPolicies.formatWatts(number(pt["mean"]["wallPowerW"]))).foregroundStyle(Theme.dim).frame(width: 82, alignment: .trailing)
-                        Text(wh(pt["systemEnergyWh"])).fontWeight(.medium).frame(width: 92, alignment: .trailing)
-                        Text(cost(pt["wallEnergyWh"])).foregroundStyle(Theme.muted).frame(width: 76, alignment: .trailing)
-                    }.font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.ink).frame(height: 32)
-                }
-                Theme.rule.frame(height: 1)
-                if recent.isEmpty { Text("No buckets in this range").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint).padding(.vertical, 12) }
-            }
-        }
-    }
-
     private func formatAxisDate(_ ms: Double) -> String {
         let d = Date(timeIntervalSince1970: ms / 1000)
-        if ["30m", "1h", "6h"].contains(historyRange) {
+        if ["30m", "1h", "6h", "24h"].contains(historyRange) {
             return d.formatted(date: .omitted, time: .shortened)
         }
-        return d.formatted(date: .abbreviated, time: .shortened)
+        if historyRange == "7d" { return d.formatted(.dateTime.weekday(.abbreviated).hour()) }
+        return d.formatted(.dateTime.day().month(.abbreviated))
     }
 
     private func powerSeries(kind: String) -> [NativeChartSeries] {
         let samples = NativeEnergyHistory.discontinuousSamples(history["points"].array, kind: kind)
-        var defs: [(id: String, label: String, key: String)] = [
-            ("systemLoad", "System", "systemLoadW"),
-            ("wallPower", "Wall", "wallPowerW")
+        // The same colours as the From and To bars above the chart.
+        var defs: [(id: String, label: String, key: String, color: Color)] = [
+            ("systemLoad", "System", "systemLoadW", Theme.ink),
+            ("wallPower", "Wall", "wallPowerW", Theme.muted)
         ]
         if batteryPresent {
-            defs.append(("batteryPower", "Battery", "batteryPowerW"))
+            defs.append(("batteryPower", "Battery", "batteryPowerW", Theme.accent))
         } else {
-            defs.append(("adapterLoss", "Conversion loss", "adapterLossW"))
+            defs.append(("adapterLoss", "Conversion loss", "adapterLossW", Theme.faint))
         }
         return defs.map { def in
             NativeChartSeries(
@@ -384,7 +602,8 @@ struct NativeEnergyPage: View {
                 label: def.label,
                 points: samples.map { s in
                     NativeChartPoint(x: s["date"].double, y: NativeHardwareDisplayPolicies.number(s[def.key]))
-                }
+                },
+                color: def.color
             )
         }
     }
@@ -397,67 +616,20 @@ struct NativeEnergyPage: View {
                 label: "System",
                 points: points.map { pt in
                     NativeChartPoint(x: pt["mean"]["date"].double, y: NativeHardwareDisplayPolicies.number(pt["systemEnergyWh"]))
-                }
+                },
+                color: Theme.ink
             ),
             NativeChartSeries(
                 id: "wallWh",
                 label: "Wall",
                 points: points.map { pt in
                     NativeChartPoint(x: pt["mean"]["date"].double, y: NativeHardwareDisplayPolicies.number(pt["wallEnergyWh"]))
-                }
+                },
+                color: Theme.muted
             )
         ]
     }
 
-
-    // MARK: - Sensors
-
-    private var sensorsTab: some View {
-        let peaks = sessionStats["sensorPeaks"], avgs = sessionStats["sensorAverages"]
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                T3Field(placeholder: "Filter \(snapshot["sensors"].array.count) channels by key or name", text: $query, leadingIcon: "search").frame(maxWidth: 320)
-                NativeMenuSelect(title: "Sensor category", selection: $group,
-                                 options: ["All", "Favorites", "Telemetry", "System Power", "Processor & SoC", "Rails & Ports", "Power (W)", "Voltage (V)", "Current (A)"].map { ($0, $0) }, width: 160)
-                Spacer(minLength: 0)
-            }
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 12) {
-                    Color.clear.frame(width: 22, height: 1)
-                    Text("Channel").frame(maxWidth: .infinity, alignment: .leading)
-                    if contentWidth >= 760 { Text("Category").frame(width: 130, alignment: .leading) }
-                    Text("Now").frame(width: 90, alignment: .trailing)
-                    Text("Mean").frame(width: 84, alignment: .trailing)
-                    Text("Peak").frame(width: 84, alignment: .trailing)
-                }.font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).frame(height: 30)
-                ForEach(sensorRows, id: \.self["id"]) { sensor in
-                    let id = sensor["id"].string, unit = sensor["unit"].string, favorite = favorites.contains(id)
-                    Theme.rule.frame(height: 1)
-                    HStack(spacing: 12) {
-                        Button {
-                            if !favorites.insert(id).inserted { favorites.remove(id) }
-                            if !runtime.paths.readOnly { UserDefaults.standard.set(Array(favorites).sorted(), forKey: "uniapi.energy.favorites") }
-                        } label: {
-                            NativeIcon("star", size: 13).foregroundStyle(favorite ? Theme.accent : Theme.faint).frame(width: 22, height: 22).contentShape(Rectangle())
-                        }.buttonStyle(.plain).pointingHand()
-                            .accessibilityLabel("\(favorite ? "Unfavorite" : "Favorite") \(NativeHardwareDisplayPolicies.energySensorName(id))")
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(NativeHardwareDisplayPolicies.energySensorName(id)).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.ink).lineLimit(1)
-                            Text(id).font(Theme.mono(10.5)).foregroundStyle(Theme.faint).lineLimit(1)
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                        if contentWidth >= 760 {
-                            Text(NativeHardwareDisplayPolicies.energySensorGroup(id, unit: unit)).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1).frame(width: 130, alignment: .leading)
-                        }
-                        NativeNumberText(text: formatSensorValue(number(sensor["value"]), unit: unit), font: Theme.num(Theme.textSm, weight: .medium)).frame(width: 90, alignment: .trailing)
-                        Text(formatSensorValue(number(avgs[id]), unit: unit)).font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.dim).frame(width: 84, alignment: .trailing)
-                        Text(formatSensorValue(number(peaks[id]), unit: unit)).font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.muted).frame(width: 84, alignment: .trailing)
-                    }.frame(height: 36)
-                }
-                Theme.rule.frame(height: 1)
-                if sensorRows.isEmpty { Text("No match").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint).padding(.leading, 34).padding(.vertical, 12) }
-            }
-        }
-    }
 
     private func formatSensorValue(_ value: Double?, unit: String) -> String {
         guard let value, value.isFinite else { return "—" }
@@ -469,6 +641,7 @@ struct NativeEnergyPage: View {
     private var preferencesTab: some View {
         let storage = history["storage"]
         return NativeSheet {
+            if let error { NativeError(message: error) }
             NativeSection("Sidebar") {
                 SettingRow(title: "Reading beside Energy") {
                     NativeMenuSelect(title: "Sidebar badge metric",

@@ -238,3 +238,166 @@ struct NativeRouteLine<Stops: View, Action: View>: View {
         .overlay { RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1) }
     }
 }
+
+// MARK: - Board
+
+/// A board: the main column and, beside it, a fixed pane that describes the
+/// selection, or the whole range when nothing is selected. The pane moves
+/// under the column on narrow windows.
+struct NativeBoard<Main: View, Pane: View, Actions: View>: View {
+    static var paneWidth: CGFloat { 320 }
+    static func wide(_ width: CGFloat) -> Bool { width >= 920 }
+    static func mainWidth(_ width: CGFloat) -> CGFloat { wide(width) ? width - paneWidth - 1 : width }
+    var width: CGFloat
+    var showsPane = true
+    /// Arrow keys step through the table when set.
+    var onMove: ((Int) -> Void)? = nil
+    @ViewBuilder var main: () -> Main
+    @ViewBuilder var pane: () -> Pane
+    @ViewBuilder var actions: () -> Actions
+    var body: some View {
+        let wide = Self.wide(width)
+        HStack(alignment: .top, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    main()
+                    if !wide, showsPane { pane().padding(.top, 24); actions() }
+                }.padding(.bottom, 32).frame(maxWidth: .infinity, alignment: .topLeading)
+            }.scrollContentBackground(.hidden)
+            .focusable(onMove != nil).focusEffectDisabled()
+            .onMoveCommand { direction in onMove?(direction == .down ? 1 : direction == .up ? -1 : 0) }
+            if wide, showsPane {
+                VStack(spacing: 0) {
+                    ScrollView { pane().frame(maxWidth: .infinity, alignment: .topLeading) }.scrollContentBackground(.hidden)
+                    actions()
+                }
+                .frame(width: Self.paneWidth).frame(maxHeight: .infinity, alignment: .top)
+                .overlay(alignment: .leading) { Theme.rule.frame(width: 1) }
+            }
+        }
+        .font(Theme.ui(12)).foregroundStyle(Theme.ink)
+    }
+}
+
+struct NativeHeroFact: Identifiable {
+    var label: String
+    var value: String
+    var help = ""
+    var tone: Color = Theme.ink
+    var id: String { label }
+}
+
+/// The headline of a board: the number the chart below it plots, then the
+/// figures that qualify it.
+struct NativeHero<Label: View, Trailing: View>: View {
+    var value: String
+    var numeric: Double? = nil
+    var unit = ""
+    var facts: [NativeHeroFact] = []
+    var maxFacts = 4
+    @ViewBuilder var label: () -> Label
+    @ViewBuilder var trailing: () -> Trailing
+    var body: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 28) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) { label() }.font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(value).font(Theme.num(32)).tracking(Theme.tracking(32)).lineLimit(1).fixedSize()
+                        .nativeStatsNumberTransition(numeric)
+                    if !unit.isEmpty { Text(unit).font(Theme.ui(Theme.textSm, weight: .medium)).foregroundStyle(Theme.muted) }
+                }
+            }
+            ForEach(Array(facts.prefix(maxFacts))) { fact in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(fact.label).font(Theme.ui(11)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(fact.value).font(Theme.num(15, weight: .medium)).foregroundStyle(fact.tone).lineLimit(1).fixedSize()
+                }.help(fact.help).accessibilityElement(children: .ignore).accessibilityLabel(fact.label).accessibilityValue(fact.value)
+            }
+            Spacer(minLength: 0)
+            trailing()
+        }
+    }
+}
+
+/// A ruled block of the side pane.
+struct NativePaneSection<Content: View>: View {
+    var title: String
+    var inset: CGFloat = 16
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !title.isEmpty { Text(title).font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).accessibilityAddTraits(.isHeader) }
+            content()
+        }
+        .padding(.horizontal, inset).padding(.vertical, 14).frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
+    }
+}
+
+struct NativePaneFact: View {
+    var label: String
+    var value: String
+    var mono = false
+    var tone: Color = Theme.ink
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.dim).lineLimit(1)
+            Spacer(minLength: 8)
+            Text(value).font(mono ? Theme.mono(11) : Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(tone).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+        }
+    }
+}
+
+/// A row of a board table. Selecting it re-scopes the pane.
+struct NativeBoardRow<Content: View>: View {
+    var selected: Bool
+    var margin: CGFloat
+    var height: CGFloat = 36
+    var action: () -> Void
+    @ViewBuilder var content: () -> Content
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 0) { content() }
+                .frame(minHeight: height).padding(.horizontal, margin).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(selected ? Theme.raised : hovering ? Theme.subtle : .clear)
+        .overlay(alignment: .top) { Theme.rule.frame(height: 1).padding(.horizontal, margin) }
+        .overlay(alignment: .leading) { Theme.accent.frame(width: 2).opacity(selected ? 1 : 0) }
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
+struct NativeSplitPart: Identifiable {
+    var id: String
+    var label: String
+    var amount: Double
+    var color: Color
+}
+
+/// One quantity divided into its parts, drawn in the tick motif: each tick
+/// takes the colour of the part it falls in.
+struct NativeSplitTicks: View {
+    var parts: [NativeSplitPart]
+    var total: Double? = nil
+    var height: CGFloat = 14
+    var body: some View {
+        let sum = max(total ?? 0, parts.reduce(0) { $0 + max(0, $1.amount) })
+        Canvas { context, size in
+            let tick: CGFloat = 2, gap: CGFloat = 3
+            let count = max(1, Int((size.width + gap) / (tick + gap)))
+            var bounds: [(Double, Color)] = [], running = 0.0
+            for part in parts { running += max(0, part.amount); bounds.append((sum > 0 ? running / sum : 0, part.color)) }
+            for index in 0..<count {
+                let position = (Double(index) + 0.5) / Double(count)
+                let color = bounds.first { position <= $0.0 }?.1 ?? Theme.track
+                context.fill(Path(roundedRect: CGRect(x: CGFloat(index) * (tick + gap), y: 0, width: tick, height: size.height), cornerRadius: 1), with: .color(color))
+            }
+        }
+        .frame(height: height).frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(parts.map(\.label).joined(separator: ", "))
+    }
+}

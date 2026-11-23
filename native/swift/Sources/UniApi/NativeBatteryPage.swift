@@ -61,11 +61,6 @@ struct NativeBatteryPage: View {
     var body: some View {
         NativePage(title: "Battery", readiness: state.error != nil ? .failed : state.status.isNull ? .pending : .ready, actions: {
             T3IconButton(system: "refresh-cw", help: "Refresh") { Task { if let service = session.battery { await state.reload(service, force: true) } } }
-            if status["supported"].bool, !status["hold"]["installed"].bool {
-                Button("Install helper", nativeIcon: "download") { Task { await install() } }
-                    .buttonStyle(T3Button(.primary)).disabled(runtime.paths.readOnly || state.pending || status["busy"].bool)
-                    .help("Limits below 100% need the charging helper installed once")
-            }
         }) {
             if let error = state.error { NativeError(message: error) }
             if !status["error"].isNull { NativeError(message: status["error"].string) }
@@ -77,7 +72,12 @@ struct NativeBatteryPage: View {
                     detail: status["installed"] == .bool(false) ? "This build does not include the battery helper." : "This version of macOS does not offer one.",
                     icon: "battery")
             } else {
-                readouts
+                headline
+                if !status["hold"]["installed"].bool {
+                    NativeSetup(steps: [NativeSetupStep(id: "helper", title: "Install the charging helper", detail: "Limits below 100% need it. It is installed once.",
+                                                        done: false, enabled: !(runtime.paths.readOnly || state.pending || status["busy"].bool),
+                                                        actionTitle: "Install", actionIcon: "download", action: { Task { await install() } })])
+                }
                 limit
             }
         }
@@ -99,29 +99,26 @@ struct NativeBatteryPage: View {
     private var power: String {
         status["battery"].isNull ? "" : status["battery"]["externalConnected"].bool ? (status["battery"]["charging"].bool ? "Charging" : "Plugged in, not charging") : "On battery"
     }
-    private var readouts: some View {
-        NativeReadoutStrip(minCell: 150) {
-            NativeReadout(label: "Charge", value: percent.map { String(format: "%.0f", $0) } ?? "—", unit: percent == nil ? "" : "%", detail: power,
-                          icon: status["battery"]["externalConnected"].bool ? "plug" : "battery", meter: percent.map { $0 / 100 })
-            NativeReadout(label: "Limit", value: !targetKnown ? "—" : target == 100 ? "Off" : "\(target)", unit: targetKnown && target < 100 ? "%" : "",
-                          tone: targetKnown && target < 100 ? Theme.accent : Theme.ink)
-            if !status["battery"]["health"].isNull { NativeReadout(label: "Health", value: "\(status["battery"]["health"].int)", unit: "%") }
-            if !status["battery"]["cycleCount"].isNull { NativeReadout(label: "Cycles", value: "\(status["battery"]["cycleCount"].int)") }
-        }
+    private var headline: some View {
+        var facts = [NativeHeroFact(label: "Limit", value: !targetKnown ? "—" : target == 100 ? "Off" : "\(target)%", tone: targetKnown && target < 100 ? Theme.accent : Theme.ink)]
+        if !status["battery"]["health"].isNull { facts.append(NativeHeroFact(label: "Health", value: "\(status["battery"]["health"].int)%")) }
+        if !status["battery"]["cycleCount"].isNull { facts.append(NativeHeroFact(label: "Cycles", value: "\(status["battery"]["cycleCount"].int)")) }
+        return NativeHero(value: percent.map { String(format: "%.0f", $0) } ?? "—", numeric: percent, unit: percent == nil ? "" : "%", facts: facts) {
+            Text("Charge")
+            Text(power).foregroundStyle(Theme.faint).lineLimit(1).fixedSize()
+        } trailing: { EmptyView() }
     }
     private var limit: some View {
-        NativeSection("Charge limit", trailing: {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
+                Text(phase).font(Theme.ui(Theme.textSm)).foregroundStyle(status["phase"].string == "control-error" ? Theme.failFg : Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
                 if state.pending { ProgressView().controlSize(.mini).accessibilityHidden(true) }
                 Text(targetHint).font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(interaction.draft != nil ? Theme.accent : Theme.muted)
-            }
-        }) {
-            VStack(alignment: .leading, spacing: 0) {
-                control
-                targetRange
-                Text(phase).font(Theme.ui(Theme.textSm)).foregroundStyle(status["phase"].string == "control-error" ? Theme.failFg : Theme.dim)
-                    .fixedSize(horizontal: false, vertical: true).padding(.top, 16)
-            }
+            }.padding(.bottom, 14)
+            control
+            targetRange
         }
     }
     private var control: some View {
