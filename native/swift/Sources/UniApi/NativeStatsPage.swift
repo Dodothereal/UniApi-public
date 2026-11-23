@@ -810,7 +810,8 @@ private struct NativeStatsBoard: View {
             if let row = projectRow {
                 // The headline stays with the chart, so the project's own counts live here.
                 let t = row["totals"], prompt = t["input"].double + t["cacheRead"].double + t["cacheWrite"].double
-                if !lifetime { fact("Responses", nativeStatsCount(t["messages"].double)) }
+                // Project rows are counted from the records on disk in every range, so they always carry responses.
+                fact("Responses", nativeStatsCount(t["messages"].double))
                 fact("Sessions", "\(row["sessions"].int)")
                 fact("Prompt from cache", prompt > 0 ? String(format: "%.1f%%", t["cacheRead"].double * 100 / prompt) : "—")
             } else if s.isNull, let row = modelRow {
