@@ -291,6 +291,9 @@ public actor NativeAppUpdater {
             while true {
                 try Task.checkCancellation()
                 let work = try await io.work()
+                // A cancel can land while the read is away from this actor.
+                // A cancelled install writes no state after it.
+                try Task.checkCancellation()
                 if work.idle { break }
                 await set(.waiting, NativeAppUpdatePolicy.busyMessage(jobs: work.jobs, code: work.code))
                 try await io.sleep(2)
@@ -322,6 +325,8 @@ public actor NativeAppUpdater {
             await set(.failed, "The installer has not reported a result after five minutes, so the state of the installation is unknown. Check the log before continuing: " + log.path)
         } catch is CancellationError {
         } catch {
+            // Only cancelInstall cancels this task, and it has already published the state.
+            guard !Task.isCancelled else { return }
             installation = nil
             await set(.failed, error.localizedDescription)
         }
