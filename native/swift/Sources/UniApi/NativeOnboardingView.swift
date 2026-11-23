@@ -128,7 +128,7 @@ struct NativeOnboardingView: View {
     private var appearanceControl: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Appearance").font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
-            T3Segmented(options: [("auto", "System"), ("light", "Light"), ("dark", "Dark")], selection: appearance) { appearance = $0 }
+            T3Segmented(options: [("light", "Light"), ("dark", "Dark"), ("auto", "Auto")], selection: appearance) { appearance = $0 }
                 .accessibilityLabel("Appearance")
         }
     }
@@ -136,7 +136,7 @@ struct NativeOnboardingView: View {
     private var spacingControl: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Spacing").font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
-            T3Segmented(options: [("compact", "Compact"), ("standard", "Default"), ("spacious", "Roomy")], selection: density) { density = $0 }
+            T3Segmented(options: [("compact", "Compact"), ("standard", "Default"), ("spacious", "Spacious")], selection: density) { density = $0 }
                 .accessibilityLabel("Page spacing")
         }
     }

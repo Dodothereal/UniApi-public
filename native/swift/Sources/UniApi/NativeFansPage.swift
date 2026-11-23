@@ -129,20 +129,14 @@ struct NativeFansPage: View {
         if snapshot["thermal"].double >= 2 { return NativeHardwareDisplayPolicies.fanThermalLabel(snapshot) }
         return state["keep"].isNull ? "" : "Kept"
     }
+    /// The processor leads; what else is measured sits beside it.
     private var thermal: some View {
-        NativeReadoutStrip(minCell: 150) {
-            ForEach(["CPU", "GPU", "Battery"], id: \.self) { name in
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 6) {
-                        NativeIcon(name == "CPU" ? "cpu" : name == "GPU" ? "circuit-board" : "battery", size: 13).foregroundStyle(Theme.faint)
-                        Text(name).font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
-                    }
-                    NativeNumberText(text: thermalFormat(temperature(name)), font: Theme.num(24), isolateLayout: true).fixedSize().padding(.top, 10)
-                    Text(name == "CPU" ? "Die average" : name == "GPU" ? "Hottest sensor" : "Pack").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).padding(.top, 4)
-                }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .accessibilityElement(children: .combine)
-            }
-        }
+        NativeHero(value: thermalFormat(temperature("CPU")), numeric: temperature("CPU"), unit: temperature("CPU") == nil ? "" : unit.uppercased(),
+                   facts: [NativeHeroFact(label: "GPU, hottest sensor", value: thermalFormat(temperature("GPU"))),
+                           NativeHeroFact(label: "Battery pack", value: thermalFormat(temperature("Battery")))]) {
+            Text("CPU, die average")
+        } trailing: { EmptyView() }
+            .padding(.top, 4)
     }
     private func controlCountdown(at date: Date) -> some View {
         Text(countdown(max(0, state["control"]["until"].double - date.timeIntervalSince1970 * 1000)) + " left").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.accent)

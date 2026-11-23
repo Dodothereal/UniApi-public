@@ -349,7 +349,11 @@ struct NativeSwitcherPage: View {
             if let issue = codexCatalogIssue { Text(issue).font(Theme.ui(12)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true) }
             VStack(alignment: .leading, spacing: 6) {
                 let providers = state.catalogDraft.visibleProviders(state.codex["catalog"]["providers"].array)
+                // One cause that holds every provider back is said once, not under each row.
+                let reasons = providers.map { $0["reason"].string }
+                let shared = providers.count > 1 && !reasons[0].isEmpty && Set(reasons).count == 1 ? reasons[0] : ""
                 Text("API providers").font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(Theme.muted)
+                if !shared.isEmpty { Text(shared).font(Theme.ui(11)).foregroundStyle(Theme.warnFg).fixedSize(horizontal: false, vertical: true) }
                 if providers.isEmpty {
                     Text("No providers. Add one to offer its models in Codex.").font(Theme.ui(12)).foregroundStyle(Theme.faint)
                 }
@@ -359,7 +363,7 @@ struct NativeSwitcherPage: View {
                             .disabled(state.controlsBusy || !state.catalogDraft.providerIDs.contains(provider["id"].string) && provider["available"] != true)
                         Button("Check route") { run("verifyProvider", ["id": provider["id"]]) }.buttonStyle(T3Button(.ghost)).disabled(state.controlsBusy || !state.codex["catalog"]["providers"].array.contains { $0["id"] == provider["id"] }).padding(.top, 4)
                     }
-                    if !provider["reason"].isNull { Text(provider["reason"].string).font(Theme.ui(11)).foregroundStyle(Theme.warnFg).padding(.leading, 34) }
+                    if !provider["reason"].isNull, provider["reason"].string != shared { Text(provider["reason"].string).font(Theme.ui(11)).foregroundStyle(Theme.warnFg).padding(.leading, 34) }
                 }
             }
             VStack(alignment: .leading, spacing: 8) {

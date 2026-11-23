@@ -482,30 +482,6 @@ struct NativeStatus: View {
 // Everything a list row puts to the right of its title sits in a column of a
 // fixed width, so a row's neighbours never move when its numbers change.
 
-/// A count with its status dot, pinned to a fixed column.
-struct StatCount: View {
-    var count: Int
-    var label: String
-    var color: Color
-    var width: CGFloat = 68
-    /// Draws the slot but leaves it blank, so a row with nothing to report
-    /// still reserves the column and everything after it stays put.
-    var placeholder: Bool = false
-
-    var body: some View {
-        HStack(spacing: 5) {
-            StatusDot(color: color, size: 5)
-            Text("\(count) \(label)")
-                .font(Theme.mono(11))
-                .foregroundStyle(Theme.dim)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .opacity(placeholder ? 0 : 1)
-        .frame(width: width, alignment: .leading)
-    }
-}
-
 /// Fixed-width trailing slot for a row's action, so two labels of different
 /// length still start at the same x.
 struct RowActionLabel: View {

@@ -13,7 +13,7 @@ The system lives in five files. Use them; do not restate their values in a page.
 | --- | --- |
 | `NativeTheme.swift` | `Theme` colour, type, radius and size tokens, density, appearance |
 | `NativeControls.swift` | `T3Button`, `T3IconButton`, `T3Switch`, `T3Field`, `.nativeField()`, `T3Segmented`, `NativeTabs`, `NativeMenuSelect`, `MonoChip`, `NativeKbd`, `NativeStatus` |
-| `NativeLayout.swift` | `NativePage`, `NativePageBar`, `NativeSheet`, `NativeSection`, `NativeStack`, `NativeDisclosure`, `SettingRow`, `Card`, `NativeLinkRow`, `NativeReadoutStrip`, `NativeReadout`, `NativeTickMeter`, `NativeGrowBar`, `EmptyState`, `NativeError` |
+| `NativeLayout.swift` | `NativePage`, `NativePageBar`, `NativeSheet`, `NativeSection`, `NativeStack`, `NativeDisclosure`, `SettingRow`, `NativeCard`, `NativeLinkRow`, `NativeTickMeter`, `NativeGrowBar`, `EmptyState`, `NativeError` |
 | `NativePatterns.swift` | `NativeSetup`, `NativeInspectorSplit`, `NativeInspector`, `NativeFact`, `NativeIconMenu`, `NativeRouteLine` |
 | `NativeMotion.swift` | `NativeMotion` curves and springs, `nativeEntrance`, `NativeNumberText`, visibility and reduced motion |
 
@@ -24,7 +24,8 @@ icon that names the object or the verb; do not decorate text with one.
 
 - Surfaces, lightest to deepest: `Theme.raised`, `surface`, `bg`, `sunken`.
   `surface` is a sheet lying on the page `bg`; `sunken` is recessed (sidebar,
-  wells). Never put a `Card` inside a `Card`.
+  wells). Measurements are not boxed: there is no bordered tile or card
+  component, and a group of numbers is a `NativeHero` line.
 - Ink: `ink`, `dim`, `muted`, `faint`. `faint` is for rulers, placeholders,
   group labels and disabled marks, not for text someone must read.
 - Lines: `rule` between rows, `border` around a sheet, `input` around
@@ -90,8 +91,10 @@ page. Use them instead of a page-specific arrangement.
   row, or the whole range when nothing is selected. Selecting a row
   re-scopes the pane in place; it does not open another page. Export sits at
   the foot of the pane. Below 920 points the pane moves under the table.
-  Statistics (Usage, Speed, Benchmark) and Energy (Now, History, Sensors)
-  use it. `NativeSplitTicks` divides one quantity into its parts on the tick
+  Statistics (Usage, Speed, Benchmark), Energy (Now, History, Sensors) and
+  Benchmark (Results, Charts, Runs) use it. In Benchmark the measure chosen
+  on the headline also orders the table and sets its tick scale, and the
+  selected target is the one line drawn in Charts. `NativeSplitTicks` divides one quantity into its parts on the tick
   scale, as Energy does for where power comes from and where it goes.
 - **List and detail panes.** A page about one selected object keeps the list
   on the left and the object on the right: Transcribe, Settings (categories),
@@ -103,8 +106,8 @@ page. Use them instead of a page-specific arrangement.
 Lists are tables: fixed columns, hairlines between rows, a tone step under
 the pointer (`nativeRowHover`), and the action revealed where the pointer
 is. `NativeLinkRow` is the standard row that goes somewhere. Group with
-hairlines and tone steps; a bordered `Card` is for a chart or a keyboard, not
-for wrapping a list.
+hairlines and tone steps. `NativeCard` is a ruled, titled block on the page
+ground, not a box.
 
 `NativeTickMeter` is the UniApi meter for a level, a load, a share or
 progress. A chart bar stays a `NativeGrowBar`.

@@ -45,17 +45,6 @@ struct CountUpText: View {
     }
 }
 
-struct StatTile: View {
-    var label: String
-    var value: Double?
-    var format: (Double) -> String
-    var detail: String
-    var accent: Color = Theme.accent
-    var body: some View {
-        NativeValueTile(label: label, value: value, detail: detail, accent: accent, format: format)
-    }
-}
-
 struct ModelChip: View {
     var model: String
     var color: Color

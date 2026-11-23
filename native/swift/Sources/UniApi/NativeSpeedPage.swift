@@ -253,25 +253,30 @@ struct NativeSpeedPage: View {
         } else {
             let report = state.free["report"], rows = BenchmarkPresentation.freeRows(report, query: freeQuery, outcome: freeFilter)
             let working = report["rows"].array.filter { $0["outcome"] == "works" }.count
-            NativeReadoutStrip {
-                NativeReadout(label: "Working", value: "\(working)", detail: "One eight-token request per Claude route", tone: working > 0 ? Theme.okFg : Theme.ink)
-                NativeReadout(label: "Tested", value: "\(report["done"].int)", unit: "of \(report["total"].int)",
-                              detail: !state.free["job"].isNull ? (state.free["job"]["progress_text"].string.isEmpty ? "Starting…" : state.free["job"]["progress_text"].string) : report["cancelled"].bool ? "Stopped early, partial results kept" : report["finishedAt"].isNull ? "" : Date(timeIntervalSince1970: report["finishedAt"].double / 1000).formatted(date: .abbreviated, time: .shortened),
-                              meter: report["total"].double > 0 ? report["done"].double / report["total"].double : nil, meterColor: state.freeRunning ? Theme.accent : Theme.ink)
-                VStack(alignment: .leading, spacing: 9) {
-                    Text("Daily").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                    HStack(spacing: 8) {
-                        T3Switch(isOn: Binding(get: { state.free["schedule"]["enabled"].bool }, set: { flag in Task { await state.saveSchedule(enabled: flag, time: scheduleTime) } }))
-                            .accessibilityLabel("Run free test automatically")
-                        T3Field(placeholder: "04:00", text: Binding(get: { scheduleTime }, set: { scheduleTime = $0; scheduleRestored = true }), mono: true, width: 72)
-                            .accessibilityLabel("Daily free-test time")
-                        if scheduleTime != state.free["schedule"]["time"].string {
-                            Button("Save") { Task { await state.saveSchedule(enabled: state.free["schedule"]["enabled"].bool, time: scheduleTime) } }.buttonStyle(T3Button()).disabled(!NativeBenchmarkService.validTime(scheduleTime))
-                                .transition(.opacity)
-                        }
+            let job = state.free["job"], total = report["total"].double
+            let status = !job.isNull ? (job["progress_text"].string.isEmpty ? "Starting…" : job["progress_text"].string)
+                : report["cancelled"].bool ? "Stopped early" : report["finishedAt"].isNull ? "—"
+                : Date(timeIntervalSince1970: report["finishedAt"].double / 1000).formatted(date: .abbreviated, time: .shortened)
+            NativeHero(value: "\(working)", numeric: Double(working), unit: "working",
+                       facts: [NativeHeroFact(label: "Tested", value: "\(report["done"].int) of \(report["total"].int)", help: "One eight-token request per Claude route"),
+                               NativeHeroFact(label: job.isNull ? "Last run" : "Now", value: status)]) {
+                Text("Free routes")
+            } trailing: {
+                HStack(spacing: 8) {
+                    Text("Daily at").font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
+                    T3Field(placeholder: "04:00", text: Binding(get: { scheduleTime }, set: { scheduleTime = $0; scheduleRestored = true }), mono: true, width: 72)
+                        .accessibilityLabel("Daily free-test time")
+                    if scheduleTime != state.free["schedule"]["time"].string {
+                        Button("Save") { Task { await state.saveSchedule(enabled: state.free["schedule"]["enabled"].bool, time: scheduleTime) } }.buttonStyle(T3Button()).disabled(!NativeBenchmarkService.validTime(scheduleTime))
+                            .transition(.opacity)
                     }
-                    Text("Catches up after sleep.").font(Theme.ui(11)).foregroundStyle(Theme.muted)
+                    T3Switch(isOn: Binding(get: { state.free["schedule"]["enabled"].bool }, set: { flag in Task { await state.saveSchedule(enabled: flag, time: scheduleTime) } }))
+                        .accessibilityLabel("Run free test automatically").help("Runs every day at this time and catches up after sleep")
                 }
+            }
+            if state.freeRunning, total > 0 {
+                NativeTickMeter(fraction: report["done"].double / total, color: Theme.accent, height: 8)
+                    .accessibilityLabel("Free test progress").accessibilityValue("\(report["done"].int) of \(report["total"].int)")
             }
             HStack(spacing: 8) {
                 T3Field(placeholder: "Filter by model or provider", text: $freeQuery, mono: true, leadingIcon: "search")

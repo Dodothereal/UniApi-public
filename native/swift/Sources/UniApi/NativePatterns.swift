@@ -252,6 +252,7 @@ struct NativeBoard<Main: View, Pane: View, Actions: View>: View {
     var showsPane = true
     /// Arrow keys step through the table when set.
     var onMove: ((Int) -> Void)? = nil
+    @Environment(\.nativeInterfaceDensity) private var density
     @ViewBuilder var main: () -> Main
     @ViewBuilder var pane: () -> Pane
     @ViewBuilder var actions: () -> Actions
@@ -261,7 +262,10 @@ struct NativeBoard<Main: View, Pane: View, Actions: View>: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     main()
-                    if !wide, showsPane { pane().padding(.top, 24); actions() }
+                    if !wide, showsPane {
+                        // Stacked, the pane keeps the page margin its sections are inset from.
+                        Group { pane().padding(.top, 24); actions() }.padding(.horizontal, max(0, density.pageMargin - 16))
+                    }
                 }.padding(.bottom, 32).frame(maxWidth: .infinity, alignment: .topLeading)
             }.scrollContentBackground(.hidden)
             .focusable(onMove != nil).focusEffectDisabled()
