@@ -49,9 +49,6 @@ struct NativePromptsPage: View {
         GeometryReader { geometry in
         NativePage(title: "Prompts", readiness: pageError != nil ? .failed : catalog.isNull || selected != nil && detail.isNull ? .pending : .ready, scrolls: false, actions: {
             T3IconButton(system: "refresh-cw", help: "Reload") { Task { await reload() } }
-            if !detail.isNull {
-                Button { beginResult() } label: { HStack(spacing: 6) { NativeIcon("plus", size: 13); Text("Add result") } }.buttonStyle(T3Button(.outline))
-            }
             Button { error = nil; promptEditor = NativePresentedValue(value: .null) } label: {
                 HStack(spacing: 6) { NativeIcon("plus", size: 13); Text("New prompt") }
             }.buttonStyle(T3Button(.primary))
@@ -143,26 +140,21 @@ struct NativePromptsPage: View {
                 Text(detail["prompt"]["text"].string).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.dim).lineSpacing(5)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 14).overlay(alignment: .leading) { Theme.border.frame(width: 2) }
-                NativeSection("Results", detail: results.isEmpty ? "" : "\(results.count)") {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .center, spacing: 8) {
+                        Text("Results").font(Theme.ui(Theme.textSm, weight: .semibold)).accessibilityAddTraits(.isHeader)
+                        if !results.isEmpty { Text("\(results.count)").font(Theme.num(Theme.textXs, weight: .regular)).foregroundStyle(Theme.muted) }
+                        Spacer(minLength: 8)
+                        Button("Add result", nativeIcon: "plus") { beginResult() }.buttonStyle(T3Button(.outline))
+                    }.padding(.bottom, 10)
                     if results.isEmpty {
-                        HStack(spacing: 10) {
-                            NativeIcon("upload", size: 15).foregroundStyle(Theme.faint)
-                            Text("Drop files anywhere on this page, or add a URL. Any type, 50 MiB per file.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
-                            Spacer(minLength: 0)
-                        }.padding(16)
-                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(Theme.input, style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
+                        Theme.rule.frame(height: 1)
+                        Text("Drop files anywhere on this page, or add a URL. Any type, 50 MiB per file.").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+                            .padding(.vertical, 14)
                     } else {
-                        NativeStack {
-                            ForEach(Array(results.enumerated()), id: \.element["id"]) { index, result in
-                                NativePromptResultRow {
-                                    ViewThatFits(in: .horizontal) {
-                                        HStack(spacing: 12) { resultMetadata(result, index: index); resultActions(result, index: index) }
-                                        VStack(alignment: .leading, spacing: 6) {
-                                            resultMetadata(result, index: index)
-                                            HStack { Spacer(minLength: 0); resultActions(result, index: index) }
-                                        }
-                                    }
-                                }
+                        ForEach(Array(results.enumerated()), id: \.element["id"]) { index, result in
+                            NativePromptResultRow {
+                                HStack(spacing: 12) { resultMetadata(result, index: index); resultActions(result, index: index) }
                             }
                         }
                     }
@@ -173,8 +165,10 @@ struct NativePromptsPage: View {
     private func promptActions(_ prompt: JSONValue) -> some View {
         HStack(spacing: 1) {
             promptIcon("clipboard", help: "Copy prompt") { copy(prompt["text"].string) }
-            promptIcon("pencil", help: "Edit prompt") { error = nil; promptEditor = NativePresentedValue(value: prompt) }
-            promptIcon("trash-2", help: "Delete prompt") { deleteAction = ["kind": "prompt", "id": prompt["id"]] }
+            NativeIconMenu(help: "Prompt actions") {
+                Button("Edit prompt") { error = nil; promptEditor = NativePresentedValue(value: prompt) }
+                Button("Delete prompt", role: .destructive) { deleteAction = ["kind": "prompt", "id": prompt["id"]] }
+            }
         }
     }
     private func resultMetadata(_ result: JSONValue, index: Int) -> some View {
@@ -193,6 +187,7 @@ struct NativePromptsPage: View {
         let size = result["fileSize"].isNull ? "" : " · " + ByteCountFormatter.string(fromByteCount: Int64(result["fileSize"].double), countStyle: .file)
         return provider + " · " + source + size
     }
+    /// Reordering and the one way to look at the result stay on the row; the rest is in its menu.
     private func resultActions(_ result: JSONValue, index: Int) -> some View {
         HStack(spacing: 1) {
             promptIcon("arrow-up", help: "Rank higher") { Task { await reorder(index, -1) } }.disabled(ordering || index == 0)
@@ -202,14 +197,21 @@ struct NativePromptsPage: View {
                     guard let owner = mediaReads.beginPreview() else { return }
                     Task { await previewResult(result, owner: owner) }
                 }
-                promptIcon("download", help: "Save result") { Task { await saveResult(result) } }
+            } else {
+                promptIcon("external-link", help: "Open result") {
+                    let owner = mediaReads.beginPreview()
+                    Task { await openResult(result, owner: owner) }
+                }
             }
-            promptIcon("external-link", help: "Open result") {
-                let owner = mediaReads.beginPreview()
-                Task { await openResult(result, owner: owner) }
+            NativeIconMenu(help: "Result actions") {
+                if result["kind"].string == "upload" {
+                    Button("Open in its app") { let owner = mediaReads.beginPreview(); Task { await openResult(result, owner: owner) } }
+                    Button("Save a copy…") { Task { await saveResult(result) } }
+                    Divider()
+                }
+                Button("Edit result") { beginResult(result) }
+                Button("Delete result", role: .destructive) { deleteAction = ["kind": "result", "id": result["id"]] }
             }
-            promptIcon("pencil", help: "Edit result") { beginResult(result) }
-            promptIcon("trash-2", help: "Delete result") { deleteAction = ["kind": "result", "id": result["id"]] }
         }.fixedSize()
     }
     private func promptIcon(_ name: String, help: String, action: @escaping () -> Void) -> some View {
@@ -568,7 +570,10 @@ private struct NativePromptResultRow<Content: View>: View {
     @ViewBuilder var content: () -> Content
     @State private var hovering = false
     var body: some View {
-        content().padding(.vertical, 8).contentShape(Rectangle()).onHover { hovering = $0 }
+        content().padding(.vertical, 8).contentShape(Rectangle())
+            .background(hovering ? Theme.subtle : .clear)
+            .overlay(alignment: .top) { Theme.rule.frame(height: 1) }
+            .onHover { hovering = $0 }
     }
 }
 

@@ -124,15 +124,16 @@ struct NativeCodePage: View {
                     else { Button("Retry", nativeIcon: "refresh-cw") { Task { await reload() } }.buttonStyle(T3Button(.outline)) }
                 }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else if selectedThread.isEmpty {
-                Group {
-                    if state.projects.isEmpty {
-                        EmptyState(icon: "folder-open", title: "No project", detail: "A project is a folder the agent works in. Its threads run in parallel and keep running when the window is closed.", actionTitle: "Add project folder", actionIcon: "folder-plus", action: addProject)
-                    } else if project.isEmpty {
-                        EmptyState(icon: "folder-open", title: "No project chosen", detail: "Choose one from the menu above the thread list.")
-                    } else {
-                        EmptyState(icon: "bot", title: "No thread open", detail: "Each thread keeps its own route, permissions and transcript.", actionTitle: "New thread") { Task { await newThread() } }
-                    }
-                }.padding(.horizontal, 40).padding(.top, 56).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                // What Code needs before there is anything to read: a folder, then a thread in it.
+                NativeSetup(steps: [
+                    NativeSetupStep(id: "project", title: "Add a project folder",
+                                    detail: state.projects.isEmpty ? "The agent works inside this folder." : project.isEmpty ? "Choose one from the menu above the thread list." : (state.projects.first { $0["id"].string == project }?["path"].string ?? ""),
+                                    done: !project.isEmpty, actionTitle: "Add folder", actionIcon: "folder-plus", action: addProject),
+                    NativeSetupStep(id: "thread", title: "Open a thread, or start one",
+                                    detail: "Threads run in parallel and keep running when the window is closed.",
+                                    done: false, enabled: !project.isEmpty, actionTitle: "New thread", actionIcon: "plus", action: { Task { await newThread() } })
+                ]).frame(maxWidth: 620, alignment: .leading)
+                    .padding(.horizontal, 32).padding(.top, 40).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else if thread.isNull || state.detailLoading {
                 VStack(alignment: .leading, spacing: 12) {
                     if state.error.isEmpty { ShimmerText(text: "Loading…", font: Theme.ui(12)) }
@@ -172,12 +173,11 @@ struct NativeCodePage: View {
                 if thread["cost_usd"].double > 0 { Text(String(format: "$%.2f", thread["cost_usd"].double)).help("Estimated cost") }
             }.font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted).fixedSize()
             T3IconButton(system: "git-branch", help: "Changes", active: showGit) { showGit.toggle() }
-            Menu {
+            NativeIconMenu(help: "Thread actions") {
                 Button("Close session") { Task { _ = await state.call("close", ["id": .string(selectedThread)]); await reload() } }
                 Divider()
                 Button("Delete thread", role: .destructive) { Task { if confirm("Delete this thread and its history?"), await state.call("thread.delete", ["id": .string(selectedThread)]) != nil { selectedThread = ""; await reload() } } }
-            } label: { NativeIcon("ellipsis", size: 15).foregroundStyle(Theme.muted).frame(width: Theme.control, height: Theme.control).contentShape(Rectangle()) }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("Thread actions").accessibilityLabel("Thread actions")
+            }
         }.padding(.leading, 24).padding(.trailing, 14).frame(height: Theme.barHeight)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
@@ -210,57 +210,70 @@ struct NativeCodePage: View {
                 .animation(NativeMotion.hover, value: composerFocused)
         }.frame(maxWidth: 820).frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 18)
     }
+    /// Where this thread's requests go, left to right, in the order Switcher uses: source, model, effort.
+    private var routeStops: some View {
+        HStack(spacing: 6) {
+            sourceMenu
+            NativeRouteArrow()
+            modelMenu
+            if !efforts.isEmpty || !effort.isEmpty { NativeRouteArrow(); effortMenu }
+        }
+    }
     private var routeControls: some View {
         VStack(alignment: .leading, spacing: 6) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 6) {
-                    routeModelMenu(width: 250)
+                HStack(spacing: 10) {
+                    routeStops
                     permissionRail
-                    if !efforts.isEmpty || !effort.isEmpty { effortMenu }
                     Spacer(minLength: 0)
                     composerActions
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) { routeModelMenu(); composerActions }
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 6) { permissionRail; if !efforts.isEmpty || !effort.isEmpty { effortMenu } }
-                        VStack(alignment: .leading, spacing: 6) { permissionRail; if !efforts.isEmpty || !effort.isEmpty { effortMenu } }
-                    }
+                    HStack(spacing: 6) { routeStops; Spacer(minLength: 0); composerActions }
+                    permissionRail
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) { sourceMenu; modelMenu; Spacer(minLength: 0) }
+                    HStack(spacing: 6) { if !efforts.isEmpty || !effort.isEmpty { effortMenu }; Spacer(minLength: 0); composerActions }
+                    permissionRail
                 }
             }
             if let agent = state.routes.first(where: { $0["id"].string == route })?["agent"], !agent.isNull { agentSetup(agent) }
         }
     }
-    private func routeModelMenu(width: CGFloat? = nil) -> some View {
+    private var sourceMenu: some View {
         let name = state.routes.first(where: { $0["id"].string == route })?["name"].string ?? route
         return Menu {
-            Section("Route") {
-                if !state.routes.contains(where: { $0["id"].string == route }) { Text(route + " (unavailable)") }
-                ForEach(Array(state.routes.enumerated()), id: \.offset) { _, r in
-                    Button(r["name"].string) { let value = r["id"].string; route = value; let chosen = state.routes.first { $0["id"].string == value }; model = chosen?["defaultModel"].string ?? ""; Task { await patch(["route_id": .string(value), "model": .string(model)]) } }
-                }
+            if !state.routes.contains(where: { $0["id"].string == route }) { Text(route + " (unavailable)") }
+            ForEach(Array(state.routes.enumerated()), id: \.offset) { _, r in
+                Button(r["name"].string) { let value = r["id"].string; route = value; let chosen = state.routes.first { $0["id"].string == value }; model = chosen?["defaultModel"].string ?? ""; Task { await patch(["route_id": .string(value), "model": .string(model)]) } }
             }
-            Divider()
+        } label: { stopLabel(name, mono: false) }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("Source").accessibilityValue(name).help("Source: " + name)
+    }
+    private var modelMenu: some View {
+        Menu {
             if !route.hasPrefix("agent:") {
-                Button("Use route default") { model = ""; Task { await patch(["model": .string("")]) } }
+                Button("Use the source's default") { model = ""; Task { await patch(["model": .string("")]) } }
             }
             Button("Search models…", nativeIcon: "search") {
                 if let chosen = state.routes.first(where: { $0["id"].string == route }) {
                     modelPicker = NativeCodeModelPickerItem(threadID: selectedThread, route: chosen, options: state.detail["options"], currentModel: model)
                 }
             }
-        } label: {
-            HStack(spacing: 6) {
-                (Text(name).foregroundColor(Theme.ink) + Text(" · ").foregroundColor(Theme.muted)
-                    + Text(model.isEmpty ? "default" : model).font(Theme.mono(11)).foregroundColor(Theme.dim))
-                    .lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
-                NativeIcon("chevrons-up-down", size: 11).foregroundStyle(Theme.faint)
-            }.font(Theme.ui(11.5, weight: .medium)).padding(.horizontal, 8).frame(width: width, height: 28)
-                .background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)).pointingHand()
-                .accessibilityElement(children: .ignore)
-        }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
-            .accessibilityLabel("Route and model").accessibilityValue(name + " · " + (model.isEmpty ? "default" : model))
-            .help(name + " · " + (model.isEmpty ? "default" : model))
+        } label: { stopLabel(model.isEmpty ? "default" : model, mono: true) }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("Model").accessibilityValue(model.isEmpty ? "default" : model).help("Model: " + (model.isEmpty ? "default" : model))
+    }
+    private func stopLabel(_ value: String, mono: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(value).font(mono ? Theme.mono(11) : Theme.ui(11.5, weight: .medium)).foregroundStyle(mono ? Theme.dim : Theme.ink).lineLimit(1).truncationMode(.middle).frame(maxWidth: 190)
+                .fixedSize(horizontal: true, vertical: false)
+            NativeIcon("chevrons-up-down", size: 11).foregroundStyle(Theme.faint)
+        }.padding(.horizontal, 8).frame(height: 28)
+            .background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)).pointingHand()
+            .accessibilityElement(children: .ignore)
     }
     private var composerActions: some View {
         HStack(spacing: 4) {
@@ -299,13 +312,8 @@ struct NativeCodePage: View {
             ForEach(Array(efforts.filter { !$0["value"].string.isEmpty }.enumerated()), id: \.offset) { _, e in
                 Button(e["displayName"].string) { let value = e["value"].string; effort = value; Task { await patch(["effort": value.isEmpty ? .null : .string(value)]) } }
             }
-        } label: { controlLabel(effort.isEmpty ? "Effort" : effort, width: 96) }
-            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).disabled(route.hasPrefix("agent:") && efforts.isEmpty).accessibilityLabel("Effort").accessibilityValue(effort.isEmpty ? "default" : effort)
-    }
-    private func controlLabel(_ value: String, width: CGFloat) -> some View {
-        HStack(spacing: 6) { Text(value).lineLimit(1); Spacer(minLength: 0); NativeIcon("chevrons-up-down", size: 11).foregroundStyle(Theme.faint) }
-            .font(Theme.ui(11.5, weight: .medium)).foregroundStyle(Theme.dim).padding(.horizontal, 8).frame(width: width, height: 28)
-            .background(Theme.subtle, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)).pointingHand().help(value).accessibilityElement(children: .ignore)
+        } label: { stopLabel(effort.isEmpty ? "default effort" : effort, mono: false) }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().disabled(route.hasPrefix("agent:") && efforts.isEmpty).accessibilityLabel("Effort").accessibilityValue(effort.isEmpty ? "default" : effort)
     }
     private func agentSetup(_ agent: JSONValue) -> some View {
         let setup = CodeAgentSetup(agent)
