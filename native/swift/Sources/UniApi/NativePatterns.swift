@@ -93,6 +93,8 @@ struct NativeInspectorSplit<Main: View, Inspector: View>: View {
                     // A fixed width: content wider than its share is clipped, never pushed over the inspector.
                     main().frame(width: max(0, geometry.size.width - (open ? width : 0)), alignment: .topLeading)
                         .frame(maxHeight: .infinity, alignment: .topLeading).clipped()
+                        // A clicked row leaves key focus in the list, so Escape and arrows reach this split.
+                        .focusable().focusEffectDisabled()
                 }
                 if open {
                     inspector()
@@ -101,9 +103,10 @@ struct NativeInspectorSplit<Main: View, Inspector: View>: View {
                         .background(Theme.surface)
                         .overlay(alignment: .leading) { Theme.border.frame(width: 1) }
                         .transition(reduced ? .opacity : .move(edge: .trailing).combined(with: .opacity))
-                        .onExitCommand(perform: onClose)
                 }
             }
+            // Escape closes it from the list as well; a clicked row leaves focus there.
+            .onExitCommand { if open { onClose() } }
             .animation(reduced ? nil : NativeMotion.toggle, value: open)
         }
     }

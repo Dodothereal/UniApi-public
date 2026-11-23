@@ -435,7 +435,7 @@ struct NativeCodeEvent: View {
             }
         } }
         else if type == "compact" { NativeDisclosure("Context compacted", tone: Theme.muted) { Text(json(p)).font(Theme.mono(10)).foregroundStyle(Theme.muted).textSelection(.enabled) } }
-        else if type == "init" { Text("Session \(p["resumed"].bool ? "resumed" : "started") · \(p["model"].string) · \(p["engine"]["name"].string.isEmpty ? "Claude Code " + p["claude_code_version"].string : p["engine"]["name"].string)").font(Theme.ui(11)).foregroundStyle(Theme.muted) }
+        else if type == "init" { Text(["Session \(p["resumed"].bool ? "resumed" : "started")", p["model"].string, p["engine"]["name"].string.isEmpty ? "Claude Code " + p["claude_code_version"].string : p["engine"]["name"].string].filter { !$0.isEmpty }.joined(separator: " · ")).font(Theme.ui(11)).foregroundStyle(Theme.muted) }
         else if !["permission", "permission.decision"].contains(type) { NativeDisclosure(type, tone: Theme.muted) { Text(json(p)).font(Theme.mono(10)).textSelection(.enabled) } }
     }
     private func json(_ value: JSONValue) -> String { String(decoding: (try? value.encoded(pretty: true)) ?? Data(), as: UTF8.self) }

@@ -161,7 +161,7 @@ struct NativeArenaPage: View {
                                 } content: {
                                     Text(item["title"].string).font(Theme.ui(Theme.textSm, weight: .medium)).lineLimit(1).frame(width: 220, alignment: .leading)
                                     Text(item["prompt"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                                    if item["builtin"].bool { MonoChip(text: "built-in").fixedSize().padding(.leading, 8) }
+                                    if !item["builtin"].bool { Text("yours").font(Theme.ui(11)).foregroundStyle(Theme.dim).fixedSize().padding(.leading, 8) }
                                     NativeIcon("chevron-right", size: 12).foregroundStyle(presetID == item["id"].string ? Theme.ink : Theme.faint).padding(.leading, 12).accessibilityHidden(true)
                                 }
                             }
@@ -176,7 +176,7 @@ struct NativeArenaPage: View {
                 }
             }, inspector: {
                 if let item = inspectedPreset {
-                    NativeInspector(title: item["title"].string, caption: item["category"].string, onClose: { presetID = "" }) {
+                    NativeInspector(title: item["title"].string, caption: item["category"].string + (item["builtin"].bool ? " · built-in" : ""), onClose: { presetID = "" }) {
                         Text(item["prompt"].string).font(Theme.ui(Theme.textSm)).lineSpacing(3).foregroundStyle(Theme.ink).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } actions: {

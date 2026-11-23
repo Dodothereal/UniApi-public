@@ -155,6 +155,9 @@ private struct NativeArenaSlot: View {
             }.padding(.horizontal, 16).frame(height: 32).background(Theme.sunken)
         }
         if tab == "Transcript" { NativeCodeScroll(jump: jump, follows: $follows) { VStack(alignment: .leading, spacing: 10) {
+            if model.transcripts[id]?.isEmpty == true, slot["status"].string != "running", model.contentError(id, tab: tab).isEmpty {
+                Text("No transcript was recorded").font(Theme.ui(12)).foregroundStyle(Theme.muted)
+            }
             NativeCodeTranscript(events: model.transcripts[id] ?? [], running: slot["status"].string == "running")
             NativeCodeLiveView(live: CodeLiveState(json: model.live[id] ?? .null), events: model.transcripts[id] ?? [])
         } }.frame(maxHeight: .infinity).overlay(alignment: .bottomTrailing) { if !follows { Button("Jump to latest", nativeIcon: "arrow-down") { jump += 1 }.buttonStyle(T3Button(.outline)).padding(8) } } }
