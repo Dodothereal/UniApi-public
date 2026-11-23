@@ -264,14 +264,14 @@
       "appearance": "light",
       "image": "arena-home-light.png",
       "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
-      "sha256": "6845e442ce10b255f1081b06a4b54d9190018fc5583011e99e02baed34b754b5",
+      "sha256": "6d1fdd8f419b63d16442a4d372d754a3bb6ccb619087ebd4f3e53ed281d3e76f",
       "viewport": [
         1050,
         800
       ],
       "parentVisualReviewed": true,
       "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
-      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
       "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
     },
     {
@@ -279,14 +279,14 @@
       "appearance": "dark",
       "image": "arena-home-dark.png",
       "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
-      "sha256": "ab5c1647eb08d067cc1820765284d06e73d553b428a2b604928072fa72760c85",
+      "sha256": "f9621856105fbd01dccd1e868181a6e66ed56ac8f87714da627d94b364e0d4c1",
       "viewport": [
         1050,
         800
       ],
       "parentVisualReviewed": true,
       "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
-      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
       "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
     },
     {
@@ -294,14 +294,14 @@
       "appearance": "light",
       "image": "arena-home-light-720x700.png",
       "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
-      "sha256": "0036d7bc8081d3083159db502e50d5304c2cf20c3d455abb0d16d7d9fd878218",
+      "sha256": "265c5ecdcc3322fe077f908962a21caae3d88c27eba34a2098009d2e04727d62",
       "viewport": [
         720,
         700
       ],
       "parentVisualReviewed": true,
       "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
-      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
       "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
     },
     {
@@ -309,14 +309,14 @@
       "appearance": "dark",
       "image": "arena-home-dark-720x700.png",
       "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
-      "sha256": "70b5397135cc0eecee6495109e5607e51b07442b275a17ccad41e742753db767",
+      "sha256": "08590da05fb2c3be1183d62ac498e96ab7d834d10517a8fa2d9718fbc5a044a6",
       "viewport": [
         720,
         700
       ],
       "parentVisualReviewed": true,
       "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
-      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
       "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
     },
     {
@@ -444,14 +444,14 @@
       "appearance": "light",
       "image": "arena-revealed-light.png",
       "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
-      "sha256": "fdbbd9b16a8e716ab5051f8250baa7613ee5c1e734240341f49d7049ae19d210",
+      "sha256": "f0a96f81bfd34f068f36e0ac5de1a9d5ab13348ef0bdd6f3b5e1b832170dc746",
       "viewport": [
         1050,
         800
       ],
       "parentVisualReviewed": true,
       "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
-      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
       "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
     },
     {
@@ -459,14 +459,14 @@
       "appearance": "dark",
       "image": "arena-revealed-dark.png",
       "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
-      "sha256": "bc23faf9769666a9711570fd047689d42e7541700ea1b96359b980e33ae0ffd7",
+      "sha256": "e3311c03e8571ac94b8054bfa0eabadb4b0fca2fefafaaf8e27cacc900b0e8d1",
       "viewport": [
         1050,
         800
       ],
       "parentVisualReviewed": true,
       "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
-      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
       "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
     },
     {
@@ -474,14 +474,14 @@
       "appearance": "light",
       "image": "arena-revealed-light-720x700.png",
       "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
-      "sha256": "2275a936cff1e1a3edcbd481c61f9800dec7ab652ed13a0de5ad5b7de6f52c1a",
+      "sha256": "c11053f415ab4d9aebf107af8cc3a7b2c55e80106ae53286b58ca1eca5df4e34",
       "viewport": [
         720,
         700
       ],
       "parentVisualReviewed": true,
       "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
-      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
       "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
     },
     {
@@ -489,14 +489,14 @@
       "appearance": "dark",
       "image": "arena-revealed-dark-720x700.png",
       "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
-      "sha256": "be70ead69ad58030d7d5c56f76ec304883541bd44c30173b16ffb737888f710a",
+      "sha256": "e2c45d851b64c2da246dbe934aa71bd281bea552668031de389f0c01ca42270e",
       "viewport": [
         720,
         700
       ],
       "parentVisualReviewed": true,
       "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
-      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
       "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
     },
     {

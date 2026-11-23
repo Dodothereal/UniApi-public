@@ -173,7 +173,7 @@ struct NativeArenaMatch: View {
             let a = rank[ArenaContestantPolicy.key($0)] ?? Int.max, b = rank[ArenaContestantPolicy.key($1)] ?? Int.max
             return a == b ? $0["idx"].int < $1["idx"].int : a < b
         }
-        let names = compactNames
+        let names = ArenaPresentationPolicy.compactModelNames(slots.map { $0["model"].string }, trimSharedSuffix: true)
         return VStack(alignment: .leading, spacing: 8) {
             Text(match["verdict"].isNull ? "Contestants revealed" : match["verdict"].string.replacingOccurrences(of: "_", with: " ").capitalized)
                 .font(Theme.ui(18, weight: .semibold)).accessibilityAddTraits(.isHeader)
@@ -192,9 +192,10 @@ struct NativeArenaMatch: View {
                                 }
                             }
                             Text(names[name] ?? name).font(Theme.mono(Theme.textSm))
-                                .truncationMode(names[name] == nil ? .middle : .tail).accessibilityLabel(name)
-                            Text(slot["route"].string).foregroundStyle(Theme.muted)
-                        }.lineLimit(1).padding(10).frame(width: 218, alignment: .leading)
+                                .lineLimit(2, reservesSpace: true).truncationMode(names[name] == nil ? .middle : .tail)
+                                .accessibilityLabel(name)
+                            Text(slot["route"].string).foregroundStyle(Theme.muted).lineLimit(1)
+                        }.padding(10).frame(width: 218, alignment: .leading)
                             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
                             .help("\(slot["label"].string) · \(slot["model"].string) · \(slot["route"].string)")
                             .accessibilityElement(children: .combine)

@@ -22,6 +22,25 @@ final class ArenaMatrixTests: XCTestCase {
         ])
     }
 
+    func testCompactCardNamesRemoveSharedSuffixWithoutCollidingWithFullNames() {
+        let cedar = "reading-assistant-enterprise-cedar-regional-preview-2026"
+        let maple = "reading-assistant-enterprise-maple-regional-preview-2026"
+        XCTAssertEqual(ArenaPresentationPolicy.compactModelNames([maple, cedar, cedar], trimSharedSuffix: true), [
+            cedar: "…cedar", maple: "…maple"
+        ])
+        XCTAssertEqual(ArenaPresentationPolicy.compactModelNames([maple, cedar, "…cedar"], trimSharedSuffix: true), [
+            cedar: "…cedar-regional-preview-2026", maple: "…maple-regional-preview-2026"
+        ])
+    }
+
+    func testTrendTicksDeduplicateLabelsAndKeepRoomBetweenThem() {
+        let day: (Double) -> String = { String(Int($0 / 10)) }
+        XCTAssertEqual(ArenaPresentationPolicy.trendTicks([30, 0, 12, 12, 1, 29], label: day), [0, 12, 30])
+        XCTAssertEqual(ArenaPresentationPolicy.trendTicks([0, 1, 2, 19, 30], label: day), [0, 19, 30])
+        XCTAssertEqual(ArenaPresentationPolicy.trendTicks([0, 1, 2, 29, 30], label: day), [0, 30])
+        XCTAssertEqual(ArenaPresentationPolicy.trendTicks([0, 1, 2], label: day), [0])
+    }
+
     func testScopeDrawsMissingPairsAndDirectionFollowLedgerOutcomes() {
         func slot(_ model: String, _ rank: JSONValue, status: JSONValue = "done") -> JSONValue {
             ["model": .string(model), "route": "route", "status": status, "rank": rank]

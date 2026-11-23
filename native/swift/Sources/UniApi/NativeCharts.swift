@@ -144,6 +144,7 @@ struct NativeLegendEntry: Identifiable {
     var id: String
     var label: String
     var color: Color
+    var detail: String? = nil
 }
 
 struct NativeChartLegend: View {
@@ -170,7 +171,8 @@ struct NativeChartLegend: View {
                 }
                 .buttonStyle(.plain).pointingHand()
                 .accessibilityAddTraits(selected ? [.isSelected] : [])
-                .help(selected ? "Show every series" : "Show only " + entry.label)
+                .accessibilityLabel(entry.detail ?? entry.label)
+                .help(selected ? "Show every series" : "Show only " + (entry.detail ?? entry.label))
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: selection)
@@ -268,6 +270,8 @@ struct NativeLineChart: View {
     var focus: String? = nil
     var xFormat: (Double) -> String = NativeNumberFormat.compact
     var yFormat: (Double) -> String = NativeNumberFormat.compact
+    var xTicks: (([Double]) -> [Double])? = nil
+    var legend: [NativeLegendEntry]? = nil
     @State private var picked: String?
     @Environment(\.nativeReducedMotion) private var reduceMotion
     @Environment(\.nativeMotionVisible) private var visible
@@ -289,7 +293,7 @@ struct NativeLineChart: View {
             }
             // With a series chosen outside, that choice is the only control: no legend to click.
             if focus == nil {
-                NativeChartLegend(entries: series.map { NativeLegendEntry(id: $0.id, label: $0.label, color: $0.color) }, selection: $picked)
+                NativeChartLegend(entries: legend ?? series.map { NativeLegendEntry(id: $0.id, label: $0.label, color: $0.color) }, selection: $picked)
             }
         }
         .onChange(of: series) {
@@ -317,10 +321,24 @@ struct NativeLineChart: View {
         .chartXScale(domain: NativeChartMath.domain(points.map(\.x), includeZero: false))
         .chartYScale(domain: yDomain)
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 6)) { value in
-                AxisGridLine().foregroundStyle(Theme.grid)
-                AxisValueLabel {
-                    if let x = value.as(Double.self) { Text(xFormat(x)).font(Theme.mono(9)).foregroundStyle(Theme.muted) }
+            if let xTicks {
+                let ticks = xTicks(points.map(\.x))
+                AxisMarks(values: ticks) { value in
+                    AxisGridLine().foregroundStyle(Theme.grid)
+                    if let x = value.as(Double.self) {
+                        let anchor: UnitPoint = ticks.count == 1 ? .top : value.index == 0 ? .topLeading
+                            : value.index == ticks.count - 1 ? .topTrailing : .top
+                        AxisValueLabel(centered: false, anchor: anchor, collisionResolution: .disabled) {
+                            Text(xFormat(x)).font(Theme.mono(9)).foregroundStyle(Theme.muted).fixedSize()
+                        }
+                    }
+                }
+            } else {
+                AxisMarks(values: .automatic(desiredCount: 6)) { value in
+                    AxisGridLine().foregroundStyle(Theme.grid)
+                    AxisValueLabel {
+                        if let x = value.as(Double.self) { Text(xFormat(x)).font(Theme.mono(9)).foregroundStyle(Theme.muted) }
+                    }
                 }
             }
         }

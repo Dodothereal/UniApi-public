@@ -12,7 +12,7 @@ struct NativeArenaRunCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(ArenaPresentationPolicy.matchStatus(match).capitalized)
+                    Text(ready ? ArenaMatchSelection.JudgeGroup.ready.title : ArenaPresentationPolicy.matchStatus(match).capitalized)
                         .font(Theme.ui(Theme.textXs, weight: .medium)).foregroundStyle(ready ? Theme.okFg : Theme.muted)
                     Text(match["prompt"].string).font(Theme.ui(Theme.textSm, weight: .semibold)).lineLimit(2)
                 }.frame(maxWidth: .infinity, alignment: .leading)

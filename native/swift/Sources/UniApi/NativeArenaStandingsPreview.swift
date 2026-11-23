@@ -20,12 +20,16 @@ struct NativeArenaStandingsPreview: View {
                     } else {
                         let series = chartSeries
                         let dates = series.flatMap { $0.points.map(\.x) }
-                        let span = (dates.max() ?? 0) - (dates.min() ?? 0)
+                        let first = Date(timeIntervalSince1970: (dates.min() ?? 0) / 1000)
+                        let last = Date(timeIntervalSince1970: (dates.max() ?? 0) / 1000)
+                        let sameDay = Calendar.current.isDate(first, inSameDayAs: last)
+                        let format: (Double) -> String = { timestamp in
+                            let date = Date(timeIntervalSince1970: timestamp / 1000)
+                            return sameDay ? date.formatted(date: .omitted, time: .shortened) : date.formatted(.dateTime.month(.abbreviated).day())
+                        }
                         NativeLineChart(series: series, height: 130, monotone: false, includeZero: false,
-                            xFormat: {
-                                let date = Date(timeIntervalSince1970: $0 / 1000)
-                                return span < 86_400_000 ? date.formatted(date: .omitted, time: .shortened) : date.formatted(.dateTime.month(.abbreviated).day())
-                            }, yFormat: { String(format: "%.0f", $0) })
+                            xFormat: format, yFormat: { String(format: "%.0f", $0) },
+                            xTicks: { ArenaPresentationPolicy.trendTicks($0, label: format) }, legend: trendLegend(series))
                             .nativeEntrance(.growVertical)
                     }
                 }
@@ -38,14 +42,16 @@ struct NativeArenaStandingsPreview: View {
 
     private var podium: some View {
         let top = Array(rows.prefix(3))
-        let names = ArenaPresentationPolicy.compactModelNames(top.map { $0["model"].string })
+        let names = ArenaPresentationPolicy.compactModelNames(top.map { $0["model"].string }, trimSharedSuffix: true)
         return HStack(alignment: .bottom, spacing: 8) {
             ForEach(top.indices, id: \.self) { index in
                 let row = top[index], key = row["key"].string
                 let label = row["model"].string
                 VStack(alignment: .leading, spacing: 5) {
                     Text("#\(index + 1)").font(Theme.num(Theme.textXs, weight: .semibold)).foregroundStyle(Theme.muted)
-                    Text(names[label] ?? label).font(Theme.mono(Theme.textXs)).lineLimit(1).truncationMode(names[label] == nil ? .middle : .tail)
+                    Text(names[label] ?? label).font(Theme.mono(10))
+                        .lineLimit(2, reservesSpace: true).truncationMode(names[label] == nil ? .middle : .tail)
+                        .accessibilityLabel(label)
                     NativeNumberText(text: row["elo"].string, font: Theme.num(Theme.textSm, weight: .semibold))
                     NativeGrowBar(fraction: Double(top.count - index) / Double(top.count), color: Theme.pairColor(key), delay: Double(index) * NativeMotion.stagger)
                         .accessibilityHidden(true)
@@ -79,6 +85,13 @@ struct NativeArenaStandingsPreview: View {
         trend.map { series in
             let points = series["points"].array.map { NativeChartPoint(x: $0["ts"].double, y: $0["elo"].double) }
             return NativeChartSeries(id: series["key"].string, label: "\(series["model"].string) · \(series["route"].string)", points: points)
+        }
+    }
+
+    private func trendLegend(_ series: [NativeChartSeries]) -> [NativeLegendEntry] {
+        rows.prefix(3).enumerated().compactMap { index, row in
+            guard let line = series.first(where: { $0.id == row["key"].string }) else { return nil }
+            return NativeLegendEntry(id: line.id, label: "#\(index + 1)", color: line.color, detail: line.label)
         }
     }
 }

@@ -107,7 +107,7 @@ public enum ArenaPresentationPolicy {
             match["slots"].array.contains { $0["revealed"].bool && $0["model"].string.localizedCaseInsensitiveContains(term) }
     }
 
-    public static func compactModelNames(_ models: [String]) -> [String: String] {
+    public static func compactModelNames(_ models: [String], trimSharedSuffix: Bool = false) -> [String: String] {
         let fullNames = Set(models)
         let names = fullNames.sorted()
         let minimumSharedPrefix = 12
@@ -122,7 +122,29 @@ public enum ArenaPresentationPolicy {
             }
         }
         let labelCounts = compact.values.reduce(into: [String: Int]()) { $0[$1, default: 0] += 1 }
-        return compact.filter { labelCounts[$0.value] == 1 && !fullNames.contains($0.value) }
+        let unique = compact.filter { labelCounts[$0.value] == 1 && !fullNames.contains($0.value) }
+        guard trimSharedSuffix, unique.count > 1 else { return unique }
+        let reversed = unique.values.map { String($0.reversed()) }
+        let suffix = reversed.dropFirst().reduce(reversed[0]) { $0.commonPrefix(with: $1) }
+        guard let separator = suffix.lastIndex(of: "-") else { return unique }
+        let length = suffix.distance(from: suffix.startIndex, to: separator) + 1
+        let shortened = unique.mapValues { String($0.dropLast(length)) }
+        guard shortened.values.allSatisfy({ $0.count > 1 && !fullNames.contains($0) }),
+              Set(shortened.values).count == shortened.count else { return unique }
+        return shortened
+    }
+
+    public static func trendTicks(_ timestamps: [Double], label: (Double) -> String) -> [Double] {
+        let values = timestamps.filter(\.isFinite).sorted()
+        guard let first = values.first, let last = values.last else { return [] }
+        let firstLabel = label(first), lastLabel = label(last)
+        guard firstLabel != lastLabel else { return [first] }
+        let spacing = (last - first) / 3
+        let midpoint = first + (last - first) / 2
+        let middle = values.filter {
+            $0 - first >= spacing && last - $0 >= spacing && label($0) != firstLabel && label($0) != lastLabel
+        }.min { abs($0 - midpoint) < abs($1 - midpoint) }
+        return middle.map { [first, $0, last] } ?? [first, last]
     }
 
     /// Advance in the displayed order, wrapping after the last eligible match.
