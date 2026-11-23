@@ -18,8 +18,8 @@ all other UI sources are copied exactly except the recorded Main.swift transform
 --pricing captures the complete empty Statistics page plus native cost-summary
 components using synthetic empty, unknown, partial and priced data. Component
 captures use finite 420/720-point hosts and do not prove whole-page layout.
---arena captures Judge, revealed performance, Ranking, New match, History and
-an empty queue at 1050x800 and 720x700, using isolated synthetic rows and verdicts.
+--arena captures Arena home, live lanes, blind duel, reveal, standings, History,
+Presets and an empty home at 1050x800 and 720x700, using isolated synthetic rows and verdicts.
 No product file is edited. Parent-built public Core/Presentation/CZstd objects are retained and
 linked; this tool never rebuilds them, downloads a model or runs the app owner.
 
@@ -150,7 +150,7 @@ def main():
     mode.add_argument("--onboarding", action="store_true", help="Capture the single setup screen at 820x660, 760x580, 700x580 and 640x520, plus Settings, in Light/Dark")
     mode.add_argument("--settings-details", action="store_true", help="Capture default pages and expanded Settings sections in two appearances and sizes")
     mode.add_argument("--pricing", action="store_true", help="Capture synthetic pricing components and the complete empty Statistics page")
-    mode.add_argument("--arena", action="store_true", help="Capture Arena Judge, revealed performance, Ranking, New match, History and the empty queue in Light/Dark, wide and compact")
+    mode.add_argument("--arena", action="store_true", help="Capture Arena home, live lanes, blind duel, reveal, standings, History, Presets and empty home in Light/Dark, wide and compact")
     args = parser.parse_args()
     label = ARENA_LABEL if args.arena else DETAIL_LABEL if args.settings_details else LABEL
     if not args.execute:
@@ -320,7 +320,7 @@ def main():
     if args.pricing:
         viewports = [("stats", 1050, 800)] + [("pricing-" + state, width, 160) for state in ("empty", "unknown", "partial", "priced") for width in (420, 720)]
     if args.arena:
-        viewports = [("arena-" + view, width, height) for view in ("judge", "revealed", "ranking", "new-match", "history", "empty")
+        viewports = [("arena-" + view, width, height) for view in ("home", "live", "duel", "revealed", "ranking", "history", "presets", "empty")
                      for width, height in ((1050, 800), (720, 700))]
 
     def sized_capture(page, width):

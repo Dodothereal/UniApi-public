@@ -236,21 +236,24 @@ not an operator's usage or billed spend.
 
 **Arena — blind comparison and ranking**
 
-Judge shows matches ready for review and those still running. Choose any two
-contestants to compare, then rank the finished answers or skip. A skipped
-match stays revealed until you choose Next. History has its own selection
-and search. After reveal, performance bars show total elapsed time, output
-tokens, and reported cost when recorded. Ranking shows Elo, rated comparison
-counts, and the win rate against each opponent for the selected ledger scope.
+Start from Arena home: write a task or choose a preset, draw from a random
+pool or pick your own contestants, and watch the run in blind live lanes.
+Judge two answers at a time with Left better, Tie, or Right better (left,
+down, or right arrow). Submit to reveal the models, routes, ranks, and Elo
+changes, or skip the match. Ties share a rank. Performance shows elapsed time,
+output tokens, and reported cost when available. Home previews the standings
+and recent Elo trends; full standings shows rated comparison counts and the
+head-to-head win-rate matrix. Find past matches in searchable History.
 
-![Arena Judge with anonymous contestants, Dark appearance](assets/screenshots/arena-judge-dark.png)
+![Arena home and standings preview, Dark appearance](assets/screenshots/arena-home-dark.png)
 
-[Judge — Light](assets/screenshots/arena-judge-light.png) ·
-[Revealed performance](assets/screenshots/arena-revealed-dark.png) ·
-[Ranking and head-to-head](assets/screenshots/arena-ranking-dark.png) ·
-[New match](assets/screenshots/arena-new-match-dark.png) ·
+[Home in Light](assets/screenshots/arena-home-light.png) ·
+[Live lanes](assets/screenshots/arena-live-dark.png) ·
+[Blind duel](assets/screenshots/arena-duel-dark.png) ·
+[Reveal](assets/screenshots/arena-revealed-dark.png) ·
+[Standings and head-to-head](assets/screenshots/arena-ranking-dark.png) ·
 [History](assets/screenshots/arena-history-dark.png) ·
-[Compact Ranking](assets/screenshots/arena-ranking-light-720x700.png)
+[Compact standings](assets/screenshots/arena-ranking-light-720x700.png)
 
 **Results — sample comparison, Dark**
 

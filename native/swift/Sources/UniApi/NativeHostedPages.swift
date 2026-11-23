@@ -36,16 +36,13 @@ struct NativeArenaHost: View {
     static let viewKey = "uniapi.arena.view"
     let runtime: NativeRuntime
     var opens: String?
-    @AppStorage(NativeArenaHost.viewKey) private var view = "Judge"
-    private static let arena: [(value: String, label: String)] = ["Judge", "Ranking", "Presets", "History"].map { ($0, $0) }
+    @AppStorage(NativeArenaHost.viewKey) private var view = "Home"
     var body: some View {
         Group {
             if view == "prompts" {
-                NativePromptsPage(runtime: runtime)
-                    .environment(\.nativeHostTabs, NativeHostTabs(title: "Arena", view: view, before: Self.arena, current: ("prompts", "Prompts")) { view = $0 })
+                NativePromptsPage(runtime: runtime, back: { view = "Home" })
             } else {
-                NativeArenaPage(runtime: runtime)
-                    .environment(\.nativeHostTabs, NativeHostTabs(title: "Arena", view: view, after: [("prompts", "Prompts")]) { view = $0 })
+                NativeArenaPage(runtime: runtime, openPrompts: { view = "prompts" })
             }
         }
         .onAppear { if let opens { view = opens } }

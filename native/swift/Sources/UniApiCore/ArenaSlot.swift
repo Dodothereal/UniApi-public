@@ -9,6 +9,7 @@ actor ArenaSlotRunner {
     private let factory: ArenaChannelFactory?
     private var driver: CodeDriver?, presentations: [JSONValue] = [], finalText = "", session: JSONValue = .null
     private var result: JSONValue = .null, failure: String?, blocked = 0, toolCalls = 0, lastLive: Double = 0, liveText = "", liveTool: JSONValue = .null
+    private var observedMessages = Set<String>()
     private var live = CodeLiveState()
     private var liveFlush: Task<Void, Never>?
     private let latch = ArenaResultLatch()
@@ -72,6 +73,10 @@ actor ArenaSlotRunner {
         if type == "assistant" {
             toolCalls += payload["content"].array.filter { $0["type"].string == "tool_use" }.count
             if payload["parent_tool_use_id"].isNull { let text = payload["content"].array.filter { $0["type"].string == "text" }.map { $0["text"].string }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines); if !text.isEmpty { finalText = text } }
+            if payload["parent_tool_use_id"].isNull, !payload["message_id"].string.isEmpty,
+               observedMessages.insert(payload["message_id"].string).inserted {
+                if liveFlush == nil { await flushLive() }
+            }
         }
         if type == "result" {
             result = payload
@@ -84,6 +89,7 @@ actor ArenaSlotRunner {
     private func flushLive() async {
         liveFlush?.cancel(); liveFlush = nil; lastLive = Date().timeIntervalSince1970 * 1000
         var value = live.json; value["text"] = .string(String(liveText.suffix(2000))); value["tool"] = liveTool
+        value["observedSteps"] = .number(Double(observedMessages.count))
         await onLive(value)
     }
     private func permission(_ request: JSONValue) async {

@@ -8,6 +8,7 @@ import UniApiCore
     @Published package var matches: [JSONValue] = []
     @Published package var standings: [JSONValue] = []
     @Published package private(set) var comparisons: [JSONValue] = []
+    @Published package private(set) var trend: [JSONValue] = []
     @Published package var ledger: JSONValue = .null
     @Published package var recent: [JSONValue] = []
     @Published package private(set) var rankingLoadedMode: String? = nil
@@ -212,7 +213,7 @@ import UniApiCore
         if readActive { rankingLoadingMode = mode; rankingFailureMode = nil }
         let value = await read("ranking", operation: { ticket in
             try self.check(ticket)
-            let ranking = try await self.service.handle("ranking", input: ["mode": .string(mode)])
+            let ranking = try await self.service.handle("ranking", input: ["mode": .string(mode), "trend": true])
             try self.check(ticket)
             let recent = try await self.service.handle("ledger.records", input: [:])
             try self.check(ticket)
@@ -220,6 +221,7 @@ import UniApiCore
         }, commit: { value in
             self.standings = value["ranking"]["standings"].array
             self.comparisons = value["ranking"]["comparisons"].array
+            self.trend = value["ranking"]["trend"].array
             self.ledger = value["ranking"]["ledger"]; self.recent = value["recent"].array
             self.rankingLoadedMode = mode
         })

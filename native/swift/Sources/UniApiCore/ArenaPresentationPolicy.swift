@@ -77,6 +77,25 @@ public struct ArenaPresetGroup: Identifiable, Equatable, Sendable {
 
 /// Presentation only; category and task order follow the saved preset catalog.
 public enum ArenaPresentationPolicy {
+    public static func observedSteps(_ events: [JSONValue]) -> Int {
+        Set(events.compactMap { event -> String? in
+            let payload = event["payload"], id = payload["message_id"].string
+            return event["type"].string == "assistant" && payload["parent_tool_use_id"].isNull && !id.isEmpty ? id : nil
+        }).count
+    }
+
+    public static func verdictOrder(_ record: JSONValue) -> String {
+        let contestants = record["contestants"].array
+        let groups = Dictionary(grouping: contestants.filter { !$0["rank"].isNull }, by: { $0["rank"].int })
+        let order = groups.keys.sorted().map { rank in
+            groups[rank, default: []].map { $0["model"].string }.joined(separator: " = ")
+        }.joined(separator: " > ")
+        let unranked = contestants.filter { $0["rank"].isNull }.map {
+            $0["model"].string + ($0["status"].string == "failed" ? " (failed)" : "")
+        }.joined(separator: ", ")
+        return [order, unranked].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
     public static func matchStatus(_ match: JSONValue) -> String {
         if ArenaMatchSelection.JudgeGroup(match) == .ready { return "ready to judge" }
         let status = match["verdict"].isNull ? match["status"] : match["verdict"]

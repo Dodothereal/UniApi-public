@@ -52,6 +52,19 @@ final class ArenaTests: XCTestCase {
         do { _ = try await service.handle("vote", input: ["id": m["id"], "allBad": true]); XCTFail("Expected ledger failure") } catch {}
         XCTAssertTrue(try store.rawMatch(m["id"])!["voted_at"].isNull)
     }
+    func testTiedVoteWritesEqualRanksWithoutChangingMatchRankingShape() async throws {
+        let runtime = try runtime(), store = try ArenaStore(runtime: runtime), m = try finished(store)
+        let service = NativeArenaService(runtime: runtime)
+        let result = try await service.handle("vote", input: ["id": m["id"], "rankGroups": [[0, 1]]])
+        XCTAssertTrue(result["revealed"].bool)
+        XCTAssertEqual(result["ranking"], [0, 1])
+        let record = try XCTUnwrap(ArenaLedger(runtime: runtime).records().first)
+        XCTAssertEqual(record["contestants"].array.map { $0["rank"].int }, [1, 1])
+        let ranking = try await service.handle("ranking", input: ["matchId": m["id"], "trend": true])
+        XCTAssertEqual(ranking["verdict"], record)
+        XCTAssertEqual(ranking["comparisons"].array.first?["draws"].int, 1)
+        XCTAssertEqual(Set(ranking["deltas"].object.values.map(\.int)), [0])
+    }
     func testPairwiseEloAllBadFailureAndModeScopes() {
         let rows: [JSONValue] = [["v": 1, "id": "one", "ts": 1, "mode": "random", "verdict": "ranked", "contestants": [["route": "p", "model": "a", "status": "done", "rank": 1, "duration_ms": 1000, "turns": 2], ["route": "p", "model": "b", "status": "done", "rank": 2], ["route": "p", "model": "c", "status": "failed", "rank": .null]]], ["v": 1, "id": "two", "ts": 2, "mode": "chosen", "verdict": "all_bad", "contestants": [["route": "p", "model": "a", "status": "done"], ["route": "p", "model": "b", "status": "done"]]]]
         let random = ArenaRanking.standings(rows, mode: "random")

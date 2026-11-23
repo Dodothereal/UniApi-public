@@ -63,14 +63,14 @@ There is no title block, subtitle or description under the bar. Content
 starts immediately.
 
 A destination can hold several pages as views. `NativeBenchmarkPage` (Run,
-Free test, Results, Charts, Runs), `NativeArenaHost` (Judge, Ranking,
-Presets, History, Prompts) and `NativeEnergyHost` (Now, History, Sensors,
+Free test, Results, Charts, Runs) and `NativeEnergyHost` (Now, History, Sensors,
 Preferences, Charge limit) pass `NativeHostTabs` to the page they show, and
 the bar draws one strip with the destination's name. The identifiers
-`results`, `prompts` and `battery` still resolve; they open their view.
+`results` and `battery` still resolve; they open their view. Arena opens
+without tabs; the `prompts` deep link still opens its library within Arena.
 
-Four patterns from `NativePatterns.swift` carry the interaction on every
-page. Use them instead of a page-specific arrangement.
+These patterns carry the interaction across native pages. Use the shared
+components instead of building a page-specific arrangement.
 
 - **Setup steps** (`NativeSetup`). Whatever a page needs before it works (a
   provider, a helper, a permission, a model download, a service) is one
@@ -97,12 +97,16 @@ page. Use them instead of a page-specific arrangement.
   selected target is the one line drawn in Charts. `NativeSplitTicks` divides one quantity into its parts on the tick
   scale, as Energy does for where power comes from and where it goes.
 - **List and detail panes.** A page about one selected object keeps the list
-  on the left and the object on the right: Transcribe, Settings (categories),
-  Benchmark Run (providers and models on the left, the run on the right), and
-  Arena Judge and History (matches on the left, an answer pair on the right).
-  Arena keeps a separate selection per view and uses a match picker at narrow
-  widths. The contestant selectors change the two panes without hiding the
-  verdict controls. Performance is shown only after reveal.
+  on the left and the object on the right: Transcribe, Settings (categories)
+  and Benchmark Run (providers and models on the left, the run on the right).
+- **Arena flow.** A composer, match cards, and a ledger-derived standings
+  preview share Home. The preview moves below the cards on narrower windows.
+  History, Presets, Prompts, and full standings are secondary pages. A running
+  match gets a horizontal lane per blind contestant; the lanes use observed
+  top-level assistant steps during a run and recorded steps when finished.
+  Duels keep two independently scrollable answers and a fixed verdict footer.
+  Reveal shows the ranking and Elo changes from the ledger; performance
+  comparisons only appear after reveal.
 - **Route line** (`NativeRouteLine`). A tool's route reads left to right as
   tool, source, model, effort. The stops are the controls and one action on
   the right applies them. Switcher edits it; Home shows it.

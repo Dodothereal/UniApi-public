@@ -97,14 +97,16 @@ public actor NativeArenaService {
         case "vote":
             guard let match = try s.rawMatch(id), match["status"].string == "done", match["voted_at"].isNull else { throw NativeFailure("Only an unjudged finished match can be voted") }
             let slots = try s.slots(id), finished = slots.filter { $0["status"].string == "done" }.map { $0["idx"].int }.sorted()
-            let ranking: [Int]?
-            if b["allBad"].bool { ranking = nil } else { let values = b["ranking"].array; guard values.allSatisfy({ if case .number(let value) = $0 { return value.isFinite && value == value.rounded() }; return false }), values.map(\.int).sorted() == finished else { throw NativeFailure("Rank every finished contestant exactly once") }; ranking = values.map(\.int) }
+            let groups = b["allBad"].bool ? nil : try ArenaVoteOrder.groups(ranking: b["ranking"], rankGroups: b["rankGroups"], finished: finished)
+            let ranking = groups?.flatMap { $0 }
             // No await from validation through durable ledger write and verdict
             // update: overlapping votes cannot publish two incompatible records.
             // Recover a ledger-first verdict if a previous database update was
             // interrupted. A conflicting second vote is refused by write().
             let existing = ledger.records().first { $0["id"] == id }
-            let now = existing?["ts"] ?? CodeStore.now(), record = ArenaLedger.record(match: match, slots: slots, ranking: ranking, voter: try s.voter(), at: now), file = try ledger.write(record)
+            let now = existing?["ts"] ?? CodeStore.now()
+            let record = ArenaLedger.record(match: match, slots: slots, ranking: ranking, voter: try s.voter(), at: now, tiedRanks: ArenaVoteOrder.ranks(groups ?? []))
+            let file = try ledger.write(record)
             try s.patchMatch(id, ["ranking": ranking.map { .string(String(decoding: try! JSONValue.array($0.map { .number(Double($0)) }).encoded(), as: UTF8.self)) } ?? .null, "verdict": ranking == nil ? "all_bad" : "ranked", "voted_at": now])
             let updated = try s.match(id)!; await runtime.events.publish("arena.match", updated); await runtime.events.publish("arena.voted", ["id": id, "file": .string(file.path)]); return updated
         case "skip": guard let match = try s.rawMatch(id), match["voted_at"].isNull, !["queued", "running"].contains(match["status"].string) else { throw NativeFailure("A running or already judged match cannot be skipped") }; try s.patchMatch(id, ["verdict": "skipped", "voted_at": CodeStore.now()]); return try await publish(id)
@@ -124,8 +126,12 @@ public actor NativeArenaService {
             let workspace = try ownedWorkspace(slot)
             return operation == "files" ? ["files": .array(try ArenaSandbox.files(workspace: workspace, home: runtime.paths.home))] : try ArenaSandbox.preview(b["path"].string, workspace: workspace, home: runtime.paths.home)
         case "ranking":
-            let records = ledger.records(), ranking = ArenaRanking.fold(records, mode: b["mode"].string.isEmpty ? "all" : b["mode"].string)
-            return ["standings": .array(ranking.standings), "comparisons": .array(ranking.comparisons), "records": .number(Double(records.count)), "ledger": await ledger.status()]
+            let records = ledger.records()
+            let ranking = ArenaRanking.fold(records, mode: b["mode"].string.isEmpty ? "all" : b["mode"].string, trend: b["trend"].bool, matchID: b["matchId"].string)
+            var response: JSONObject = ["standings": .array(ranking.standings), "comparisons": .array(ranking.comparisons), "records": .number(Double(records.count)), "ledger": await ledger.status()]
+            if b["trend"].bool { response["trend"] = .array(ranking.trend) }
+            if !b["matchId"].isNull { response["verdict"] = ranking.verdict; response["deltas"] = ranking.deltas }
+            return .object(response)
         case "ledger.status": return await ledger.status()
         case "ledger.records": return .array(Array(ledger.records().sorted { $0["ts"].double > $1["ts"].double }.prefix(b["limit"].isNull ? 100 : max(1, min(500, b["limit"].int)))))
         case "ledger.publish", "ledger.sync": guard !sharing else { throw NativeFailure("Arena sharing is already active") }; sharing = true; defer { sharing = false }; return operation == "ledger.publish" ? try await ledger.publish(voter: s.voter()) : try await ledger.sync()

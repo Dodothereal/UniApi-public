@@ -40,11 +40,12 @@ struct ArenaLedger {
         // replacing a verdict written concurrently by another runtime.
         guard link(temporary.path, url.path) == 0 else { throw NativeFailure("The immutable verdict destination already exists or is unavailable") }
     }
-    static func record(match: JSONValue, slots: [JSONValue], ranking: [Int]?, voter: JSONValue, at: JSONValue) -> JSONValue {
+    static func record(match: JSONValue, slots: [JSONValue], ranking: [Int]?, voter: JSONValue, at: JSONValue, tiedRanks: [Int: Int] = [:]) -> JSONValue {
         let allBad = ranking == nil
         return ["v": 1, "id": match["id"], "ts": at, "mode": match["mode"], "preset": match["preset_id"], "category": match["category"], "prompt": .string(String(match["prompt"].string.prefix(300))), "prompt_sha": .string(sha(match["prompt"].string)), "voter": voter, "verdict": .string(allBad ? "all_bad" : "ranked"), "contestants": .array(slots.map { slot in
-            let done = slot["status"].string == "done", position = ranking?.firstIndex(of: slot["idx"].int)
-            return ["route": slot["route"], "model": slot["model"], "status": .string(done ? "done" : "failed"), "rank": done && !allBad ? position.map { .number(Double($0 + 1)) } ?? .null : .null, "duration_ms": slot["duration_ms"], "turns": slot["turns"].int == 0 ? .null : slot["turns"], "output_tokens": slot["output_tokens"].double == 0 ? .null : slot["output_tokens"], "cost_usd": slot["cost_usd"].double == 0 ? .null : slot["cost_usd"]]
+            let done = slot["status"].string == "done", index = slot["idx"].int
+            let rank = tiedRanks[index] ?? ranking?.firstIndex(of: index).map { $0 + 1 }
+            return ["route": slot["route"], "model": slot["model"], "status": .string(done ? "done" : "failed"), "rank": done && !allBad ? rank.map { .number(Double($0)) } ?? .null : .null, "duration_ms": slot["duration_ms"], "turns": slot["turns"].int == 0 ? .null : slot["turns"], "output_tokens": slot["output_tokens"].double == 0 ? .null : slot["output_tokens"], "cost_usd": slot["cost_usd"].double == 0 ? .null : slot["cost_usd"]]
         })]
     }
     func git(_ args: [String], env extra: [String: String] = [:], input: Data? = nil) async throws -> NativeProcessResult {

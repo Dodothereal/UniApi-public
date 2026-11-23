@@ -6,6 +6,7 @@ import UniApiPresentation
 
 struct NativePromptsPage: View {
     let runtime: NativeRuntime
+    var back: (() -> Void)?
     @State private var service: NativePromptsService?
     @StateObject private var mediaReads = NativeMediaPageReads()
     private var reads: NativePageReadScope { mediaReads.scope }
@@ -47,7 +48,7 @@ struct NativePromptsPage: View {
     private var pageError: String? { error ?? mediaReads.detailError ?? mediaReads.previewError }
     var body: some View {
         GeometryReader { geometry in
-        NativePage(title: "Prompts", readiness: pageError != nil ? .failed : catalog.isNull || selected != nil && detail.isNull ? .pending : .ready, scrolls: false, actions: {
+        NativePage(title: "Prompts", readiness: pageError != nil ? .failed : catalog.isNull || selected != nil && detail.isNull ? .pending : .ready, scrolls: false, backTitle: "Arena", back: back, actions: {
             T3IconButton(system: "refresh-cw", help: "Reload") { Task { await reload() } }
             Button { error = nil; promptEditor = NativePresentedValue(value: .null) } label: {
                 HStack(spacing: 6) { NativeIcon("plus", size: 13); Text("New prompt") }
@@ -597,4 +598,3 @@ private struct NativePromptIconButton: View {
             .help(title).accessibilityLabel(title)
     }
 }
-
