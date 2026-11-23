@@ -11,6 +11,17 @@ final class ArenaMatrixTests: XCTestCase {
         ])
     }
 
+    func testCompactLeaderboardNamesFallBackWhenLabelsCollide() {
+        let models = [
+            "gpt-enterprise-x-mini-2026", "gpt-enterprise-x-pro-2026",
+            "claude-enterprise-x-mini-2026", "claude-enterprise-x-ultra-2026",
+            "…pro-2026"
+        ]
+        XCTAssertEqual(ArenaPresentationPolicy.compactModelNames(models), [
+            "claude-enterprise-x-ultra-2026": "…ultra-2026"
+        ])
+    }
+
     func testScopeDrawsMissingPairsAndDirectionFollowLedgerOutcomes() {
         func slot(_ model: String, _ rank: JSONValue, status: JSONValue = "done") -> JSONValue {
             ["model": .string(model), "route": "route", "status": status, "rank": rank]

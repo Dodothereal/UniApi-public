@@ -89,7 +89,8 @@ public enum ArenaPresentationPolicy {
     }
 
     public static func compactModelNames(_ models: [String]) -> [String: String] {
-        let names = Array(Set(models)).sorted()
+        let fullNames = Set(models)
+        let names = fullNames.sorted()
         let minimumSharedPrefix = 12
         var compact: [String: String] = [:]
         for index in names.indices {
@@ -101,7 +102,8 @@ public enum ArenaPresentationPolicy {
                 compact[name] = "…" + name.dropFirst(shared)
             }
         }
-        return compact
+        let labelCounts = compact.values.reduce(into: [String: Int]()) { $0[$1, default: 0] += 1 }
+        return compact.filter { labelCounts[$0.value] == 1 && !fullNames.contains($0.value) }
     }
 
     /// Advance in the displayed order, wrapping after the last eligible match.
