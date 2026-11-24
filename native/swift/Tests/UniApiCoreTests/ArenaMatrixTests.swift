@@ -2,6 +2,14 @@ import XCTest
 @testable import UniApiCore
 
 final class ArenaMatrixTests: XCTestCase {
+    func testHorizontalContestantOverflowTracksTheVisibleTrailingEdge() {
+        XCTAssertTrue(ArenaPresentationPolicy.hasTrailingOverflow(contentEnd: 1_740, viewportWidth: 1_300))
+        XCTAssertTrue(ArenaPresentationPolicy.hasTrailingOverflow(contentEnd: 1_328, viewportWidth: 1_300))
+        XCTAssertFalse(ArenaPresentationPolicy.hasTrailingOverflow(contentEnd: 1_300.5, viewportWidth: 1_300))
+        XCTAssertFalse(ArenaPresentationPolicy.hasTrailingOverflow(contentEnd: 920, viewportWidth: 1_300))
+        XCTAssertFalse(ArenaPresentationPolicy.hasTrailingOverflow(contentEnd: 1_740, viewportWidth: 0))
+    }
+
     func testCompactLeaderboardNamesKeepTheDifferingPart() {
         let cedar = "reading-assistant-enterprise-cedar-regional-preview-2026"
         let maple = "reading-assistant-enterprise-maple-regional-preview-2026"

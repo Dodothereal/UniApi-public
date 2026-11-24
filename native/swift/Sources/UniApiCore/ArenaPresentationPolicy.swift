@@ -77,6 +77,10 @@ public struct ArenaPresetGroup: Identifiable, Equatable, Sendable {
 
 /// Presentation only; category and task order follow the saved preset catalog.
 public enum ArenaPresentationPolicy {
+    public static func hasTrailingOverflow(contentEnd: Double, viewportWidth: Double) -> Bool {
+        contentEnd.isFinite && viewportWidth.isFinite && viewportWidth > 0 && contentEnd - viewportWidth > 1
+    }
+
     public static func observedSteps(_ events: [JSONValue]) -> Int {
         Set(events.compactMap { event -> String? in
             let payload = event["payload"], id = payload["message_id"].string

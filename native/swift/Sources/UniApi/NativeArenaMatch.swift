@@ -178,7 +178,7 @@ struct NativeArenaMatch: View {
         return VStack(alignment: .leading, spacing: 8) {
             Text(match["verdict"].isNull ? "Contestants revealed" : match["verdict"].string.replacingOccurrences(of: "_", with: " ").capitalized)
                 .font(Theme.ui(18, weight: .semibold)).accessibilityAddTraits(.isHeader)
-            ScrollView(.horizontal) {
+            NativeArenaHorizontalStrip {
                 HStack(spacing: 8) {
                     ForEach(ordered, id: \.self["id"]) { slot in
                         let key = ArenaContestantPolicy.key(slot), delta = outcome["deltas"][key]

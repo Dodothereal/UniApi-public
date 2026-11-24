@@ -45,11 +45,17 @@ private enum PublicArenaCapture {
         let cedar = "reading-assistant-enterprise-cedar-regional-preview-2026"
         let models = [(cedar, "sample-source"), ("reading-assistant-enterprise-maple-regional-preview-2026", "sample-source"),
                       (cedar, "sample-alternate"), ("sample-pine", "sample-source")]
+        let extraModels = [("sample-birch", "sample-source"), ("sample-willow", "sample-alternate"),
+                           ("sample-oak", "sample-source"), ("sample-spruce", "sample-alternate")]
         let answers = [
             "Make Add a book the first focused action. It opens a search field and a short list of matches. Enter adds the highlighted book; Escape returns to the library without losing the query.\n\nWhen a book is in progress, put Resume reading first. Show a short excerpt and the last saved page beside it.",
             "Use one command palette for Add, Find, and Resume. A keyboard shortcut opens it from anywhere, and the default action changes when the library is empty.\n\nKeep a recent books section and show the last completed chapter inline.",
             "Start with a focused search field. Offer title search, a recent books list, and a simple detail pane with notes and progress.",
-            "Show a small reading queue sorted by last opened. Keep Resume and Add available without opening settings."
+            "Show a small reading queue sorted by last opened. Keep Resume and Add available without opening settings.",
+            "Give the first-run view a single Add book command. After adding a title, put its next unread page in the main view.",
+            "Keep a Continue reading section at the top, with Add book in the same position from empty state to full library.",
+            "Open on the most recently read title. Let the user switch back to the library or add a book from a single shortcut.",
+            "Put search and resume side by side. Show reading progress in the list so reopening a book takes one action."
         ]
         let folder = runtime.paths.root.appendingPathComponent("arena/results")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -58,7 +64,9 @@ private enum PublicArenaCapture {
             let ranked = (2...4).contains(index), status: JSONValue = index == 1 ? "running" : index == 5 ? "queued" : "done"
             let prompt = index == 0 || index == 4 ? task : ["", "Compare two ways to organize a local library.", "Draft an accessible command palette.", "Sketch a desktop notes workspace.", "", "Plan a small offline search index."][index]
             let created = now - (ranked ? Double(index - 1) * 86_400_000 : Double(index + 2) * 120_000)
-            let count = index == 0 || index == 1 || index == 4 ? 4 : 2
+            let expanded = (page == "arena-live" && index == 1) || (page == "arena-revealed" && index == 4)
+            let count = expanded ? 8 : index == 0 || index == 1 || index == 4 ? 4 : 2
+            let contestantsBySlot = expanded ? models + extraModels : models
             let order = index == 3 ? [0, 1] : Array(0..<count).map { ($0 + index) % count }
             try runtime.db.execute("INSERT INTO arena_matches(id,mode,prompt,category,status,ranking,verdict,timeout_s,max_turns,created_at,started_at,finished_at,voted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", [
                 .string(id), mode, .string(prompt), "design", status,
@@ -68,8 +76,8 @@ private enum PublicArenaCapture {
             ])
             var contestants: [JSONValue] = []
             for slot in 0..<count {
-                let (name, route) = models[(slot + (count == 4 ? 0 : index)) % models.count]
-                let duration = Double([18_500, 29_000, 24_000, 38_000][slot])
+                let (name, route) = contestantsBySlot[(slot + (count == 2 ? index : 0)) % contestantsBySlot.count]
+                let duration = Double([18_500, 29_000, 24_000, 38_000, 20_800, 26_500, 30_400, 35_000][slot])
                 let workdir = runtime.paths.data.appendingPathComponent("arena/matches/\(id)/slot-\(slot)").path
                 let slotID = JSONValue.string("\(id)-slot-\(slot)")
                 let slotStatus: JSONValue = index == 1 && slot == 0 ? "done" : status

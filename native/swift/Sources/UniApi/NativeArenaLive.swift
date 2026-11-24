@@ -65,7 +65,7 @@ struct NativeArenaLive: View {
                 let slots = match["slots"].array
                 let available = viewport.size.width - 2 * density.pageMargin
                 let width = max(216, (available - 12 * CGFloat(max(0, slots.count - 1))) / CGFloat(max(1, slots.count)))
-                ScrollView(.horizontal) {
+                NativeArenaHorizontalStrip {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(slots, id: \.self["id"]) { slot in
                             NativeArenaLane(model: model, slot: slot, budget: match["max_turns"].int)
