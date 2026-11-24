@@ -159,6 +159,14 @@ final class ArenaTests: XCTestCase {
         try await eventually { channels.rows().count == 4 }
         _ = try await hanging.handle("cancel", input: ["id": pending["id"]]); XCTAssertTrue(channels.rows().allSatisfy { $0.didClose() }); let cancelled = try await hanging.handle("match", input: ["id": pending["id"]]); XCTAssertEqual(cancelled["status"].string, "cancelled")
     }
+    func testFinishedAndCancelledMatchesServeNoStaleLiveState() async throws {
+        let runtime = try runtime()
+        let service = NativeArenaService(runtime: runtime, channelFactory: { _,_,_,_,_ in CodeFixtureChannel { frame in if frame["type"].string == "control_request" { return Self.controlReply(frame, hooks: true) }; if frame["type"].string == "user" { return [["type": "assistant", "message": ["content": [["type": "text", "text": "Fixture answer"]]]], ["type": "result", "subtype": "success", "usage": ["output_tokens": 3]]] }; return [] } })
+        let m = try await service.handle("match.create", input: ["mode": "chosen", "prompt": "Fixture", "notify": false, "contestants": [["route": "subscription", "model": "sonnet"], ["route": "subscription", "model": "haiku"]]])
+        try await eventually { (try? await service.handle("match", input: ["id": m["id"]])["status"].string) == "done" }
+        XCTAssertTrue(try await service.handle("match", input: ["id": m["id"]])["live"].object.isEmpty)
+        XCTAssertTrue(try await service.handle("matches", input: [:]).array.allSatisfy { $0["live"].object.isEmpty })
+    }
     func testNativeCredentialGateScansLongLinesWithoutPlaceholderBypass() {
         let synthetic = "sk-" + String(repeating: "Z", count: 32)
         XCTAssertTrue(ArenaSecretScan.hasSecret(String(repeating: "a", count: 9000) + " " + synthetic)); XCTAssertTrue(ArenaSecretScan.hasSecret("example in unrelated text " + synthetic)); XCTAssertFalse(ArenaSecretScan.hasSecret("fixture output"))
