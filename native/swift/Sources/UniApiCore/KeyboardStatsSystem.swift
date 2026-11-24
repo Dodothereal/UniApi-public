@@ -82,9 +82,14 @@ final class NativeKeyboardObserver: @unchecked Sendable {
         let thread = Thread { [weak self] in
             guard let self else { return }
             let current = CFRunLoopGetCurrent()
-            self.lock.withLock { self.runLoop = current }
-            CFRunLoopAddSource(current, source, .commonModes)
-            CGEvent.tapEnable(tap: port, enable: true)
+            let started = self.lock.withLock {
+                guard self.port === port else { return false }
+                self.runLoop = current
+                CFRunLoopAddSource(current, source, .commonModes)
+                CGEvent.tapEnable(tap: port, enable: true)
+                return true
+            }
+            guard started else { return }
             CFRunLoopRun()
         }
         thread.name = "UniApi keyboard statistics"; thread.qualityOfService = .utility
@@ -110,6 +115,7 @@ final class NativeKeyboardObserver: @unchecked Sendable {
         let keyboard = Int(event.getIntegerValueField(.keyboardEventKeyboardType))
         var repeated = false
         lock.lock(); defer { lock.unlock() }
+        guard port != nil else { return }
         if keyboard > 0 { lastType = keyboard }
         if type == .flagsChanged {
             // One event per modifier press and release; only presses count.

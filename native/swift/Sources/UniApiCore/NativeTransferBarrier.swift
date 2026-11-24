@@ -2,9 +2,16 @@ import Foundation
 
 public struct NativeTransferWork: Sendable {
     public var jobs = 0, code = 0, unknownChildren = 0, temporaryFanOwner = false
-    public var isIdle: Bool { jobs == 0 && code == 0 && unknownChildren == 0 && !temporaryFanOwner }
+    public var isIdle: Bool { retirementBlocker == nil }
     public init(jobs: Int = 0, code: Int = 0, unknownChildren: Int = 0, temporaryFanOwner: Bool = false) {
         self.jobs = jobs; self.code = code; self.unknownChildren = unknownChildren; self.temporaryFanOwner = temporaryFanOwner
+    }
+
+    var retirementBlocker: String? {
+        if temporaryFanOwner { return "A temporary fan-control session is still open" }
+        if unknownChildren != 0 { return "UniApi has an unverified child process" }
+        if jobs != 0 || code != 0 { return "UniApi has queued or active jobs or coding turns" }
+        return nil
     }
 }
 
@@ -34,7 +41,7 @@ enum NativeTransferBarrier {
         guard started.isFinite, deadline.isFinite else { throw NativeFailure("Invalid retirement clock") }
         var frozen: [NativeTransferIdentity] = []
         do {
-            guard try io.work().isIdle else { throw NativeFailure("Existing app work is active; retirement refused") }
+            if let blocker = try io.work().retirementBlocker { throw NativeFailure(blocker) }
             for process in processes {
                 try time(io: io, started: started, deadline: deadline)
                 try Task.checkCancellation()
@@ -70,7 +77,7 @@ enum NativeTransferBarrier {
     private static func check(_ processes: [NativeTransferIdentity], io: NativeTransferBarrierIO, started: Double, deadline: Double) throws {
         try Task.checkCancellation()
         try time(io: io, started: started, deadline: deadline)
-        guard try io.work().isIdle else { throw NativeFailure("Work arrived or service ownership is unknown; retirement refused") }
+        if let blocker = try io.work().retirementBlocker { throw NativeFailure(blocker) }
         for process in processes {
             guard try io.sameProcess(process), try io.stopped(process), try io.sockets(process).isIdle else { throw NativeFailure("A service has traffic or changed identity; retirement refused") }
             try time(io: io, started: started, deadline: deadline)

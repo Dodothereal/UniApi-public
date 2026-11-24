@@ -83,6 +83,7 @@ struct NativeKeyboardPage: View {
     private var totals: JSONValue { state["totals"] }
     private var enabled: Bool { state["enabled"].bool }
     private var recording: Bool { live.isNull ? state["recording"].bool : live["recording"].bool }
+    private var permitted: Bool { live.isNull ? state["permitted"].bool : live["permitted"].bool }
     private var hasKeys: Bool { totals["keys"].double > 0 }
     private var counts: [Int: Double] { Dictionary(uniqueKeysWithValues: state["keys"].array.map { ($0["code"].int, $0["count"].double) }) }
     private var rangeTitle: String {
@@ -112,7 +113,7 @@ struct NativeKeyboardPage: View {
                 } else if !started {
                     welcome
                 } else {
-                    if enabled && !state["permitted"].bool { permissionNotice }
+                    if enabled && !recording { permissionNotice }
                     if !hasKeys {
                         NativeEmptyState(title: "No keys \(rangeTitle)", detail: enabled ? "" : "Recording is off.", icon: "keyboard")
                     } else {
@@ -215,10 +216,11 @@ struct NativeKeyboardPage: View {
     private var permissionNotice: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             NativeIcon("triangle-alert", size: 14).foregroundStyle(Theme.warnFg).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
-            Text("Allow UniApi under Privacy & Security, Input Monitoring. Reopen UniApi if recording does not start.")
+            Text(permitted ? "Input Monitoring is allowed, but recording could not start. Try again after returning to UniApi." :
+                "Allow UniApi under Privacy & Security, Input Monitoring. If macOS asks to restart the app, recording resumes once UniApi starts again.")
                 .font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            Button("Ask again") { Task { await operation("request-permission") } }.buttonStyle(T3Button(.outline)).disabled(pending)
+            Button(permitted ? "Retry recording" : "Ask again") { Task { await operation("request-permission") } }.buttonStyle(T3Button(.outline)).disabled(pending)
             Button("Open settings") {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") { NSWorkspace.shared.open(url) }
             }.buttonStyle(T3Button(.primary))

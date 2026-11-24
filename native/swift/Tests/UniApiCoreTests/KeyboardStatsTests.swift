@@ -295,6 +295,23 @@ final class KeyboardStatsTests: XCTestCase {
         XCTAssertFalse(state["recording"].bool); XCTAssertFalse(board.isRunning)
         await service.stop()
     }
+    func testEnablingBeforeStartupTracksPermissionChanges() async throws {
+        let (service, board, _, root) = try service()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pending = try await service.handle("set-enabled", input: ["enabled": true])
+        XCTAssertFalse(pending["recording"].bool)
+        board.allow(true)
+        for _ in 0..<400 where !board.isRunning { try await Task.sleep(nanoseconds: 5_000_000) }
+        let recording = try await service.handle("live")
+        XCTAssertTrue(recording["recording"].bool)
+        XCTAssertTrue(recording["permitted"].bool)
+        board.allow(false)
+        for _ in 0..<400 where board.isRunning { try await Task.sleep(nanoseconds: 5_000_000) }
+        let revoked = try await service.handle("live")
+        XCTAssertFalse(revoked["recording"].bool)
+        XCTAssertFalse(revoked["permitted"].bool)
+        await service.stop()
+    }
     func testCountsPersistAcrossServicesAndReset() async throws {
         let (service, board, runtime, root) = try service(); defer { try? FileManager.default.removeItem(at: root) }
         board.allow(true)

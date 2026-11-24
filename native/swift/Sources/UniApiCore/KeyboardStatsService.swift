@@ -41,6 +41,7 @@ public actor NativeKeyboardService {
     /// Chosen key arrangement: Apple or third-party. Nil follows detection.
     private var apple: Bool?
     private var recording = false
+    private var permission = false
     private var error: String?
     private var loop: Task<Void, Never>?
     private var lastPublished: Double = 0
@@ -75,11 +76,15 @@ public actor NativeKeyboardService {
 
     public func start() async throws {
         try initialize()
+        startPolling()
+        refreshRecording()
+    }
+
+    private func startPolling() {
         guard !runtime.paths.readOnly, io.supported(), loop == nil else { return }
-        if enabled { recording = io.permitted() && io.begin() }
         loop = Task { [weak self] in
-            while !Task.isCancelled {
-                do { try await self?.io.sleep(1) } catch { return }
+            while !Task.isCancelled, let sleep = self?.io.sleep {
+                do { try await sleep(1); try Task.checkCancellation() } catch { return }
                 await self?.tick()
             }
         }
@@ -91,15 +96,28 @@ public actor NativeKeyboardService {
     }
 
     private func tick() async {
-        if enabled, !recording, io.permitted() { recording = io.begin() }
+        let stateChanged = refreshRecording()
         let events = recording ? io.take() : []
         let changed = persist(events)
         let now = io.now()
         // Follow live typing, then publish once more when it falls silent.
-        if changed || (lastPublished > 0 && now - lastPublished < 4_000) {
+        if stateChanged || changed || (lastPublished > 0 && now - lastPublished < 4_000) {
             if changed { lastPublished = now }
             await runtime.events.publish("keyboard.state", .object(live(now: now)))
         } else { lastPublished = 0 }
+    }
+
+    @discardableResult private func refreshRecording() -> Bool {
+        let wasPermitted = permission, wasRecording = recording
+        permission = enabled && !runtime.paths.readOnly && io.supported() && io.permitted()
+        if permission, !recording {
+            recording = io.begin()
+        } else if !permission, recording {
+            io.end()
+            recording = false
+            persist(io.take())
+        }
+        return permission != wasPermitted || recording != wasRecording
     }
 
     @discardableResult private func persist(_ events: [NativeKeyboardEvent]) -> Bool {
@@ -141,7 +159,7 @@ public actor NativeKeyboardService {
 
     private func live(now: Double) -> JSONObject {
         ["wpm": .number(fold.liveWpm(now: now)), "sessionKeys": .number(Double(fold.sessionKeys)),
-         "lastKeyAt": fold.lastKeyAt.map(JSONValue.number) ?? .null, "recording": .bool(recording)]
+         "lastKeyAt": fold.lastKeyAt.map(JSONValue.number) ?? .null, "recording": .bool(recording), "permitted": .bool(permission)]
     }
 
     private func status(range requested: String) throws -> JSONValue {
@@ -207,11 +225,14 @@ public actor NativeKeyboardService {
             try runtime.paths.assertWritable()
             guard io.supported() else { throw NativeFailure("Keyboard statistics are unavailable on this Mac") }
             let next = input["enabled"]?.bool == true
-            if next, !io.permitted() { _ = io.requestPermission() }
+            let previous = enabled
             enabled = next
-            try savePreferences()
-            if next { if !recording { recording = io.permitted() && io.begin() } }
-            else if recording { io.end(); recording = false; persist(io.take()) }
+            do { try savePreferences() } catch { enabled = previous; throw error }
+            if next {
+                startPolling()
+                if !io.permitted() { _ = io.requestPermission() }
+            }
+            refreshRecording()
         case "set-layout":
             try runtime.paths.assertWritable()
             if let value = input["form"]?.string { form = .init(rawValue: value) }
@@ -219,8 +240,11 @@ public actor NativeKeyboardService {
             if let value = input["style"]?.string { apple = Self.style(value) }
             try savePreferences()
         case "request-permission":
-            _ = io.requestPermission()
-            if enabled, !recording, io.permitted() { recording = io.begin() }
+            try runtime.paths.assertWritable()
+            guard enabled, io.supported() else { break }
+            startPolling()
+            if !io.permitted() { _ = io.requestPermission() }
+            refreshRecording()
         case "reset":
             try runtime.paths.assertWritable()
             _ = io.take()

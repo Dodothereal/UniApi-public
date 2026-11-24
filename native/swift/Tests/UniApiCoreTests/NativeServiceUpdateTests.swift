@@ -91,6 +91,34 @@ final class NativeServiceUpdateTests: XCTestCase {
         XCTAssertEqual(f.dyingIdentityQueries, 0); XCTAssertEqual(f.issuedBackendWorkReads, 0)
         XCTAssertFalse(f.signals.contains { $0.1 == SIGKILL }); XCTAssertTrue(f.pids.isEmpty)
     }
+    func testTemporaryFanHandoffWaitsForRestorationAndRollsBackOnTimeout() async throws {
+        for mode in 0..<4 {
+            let f = try InstallRetirementFixture(); defer { f.cleanup() }
+            var dependencies = f.updateDependencies
+            dependencies.system.verifyTemporaryFanHandoff = { $0.pid == 111 && mode != 2 }
+            dependencies.system.fanOwner = { pid in
+                guard pid == (mode == 3 ? 222 : 111) else { return false }
+                return f.nodes[pid] != nil || mode == 1 || f.time < 1
+            }
+            let value = await Self.update(f, dependencies: dependencies)
+            switch mode {
+            case 0:
+                XCTAssertEqual(value["status"], "retired", value["message"].string)
+                XCTAssertGreaterThanOrEqual(f.time, 1)
+                XCTAssertTrue(f.pids.isEmpty)
+            case 1:
+                XCTAssertEqual(value["status"], "rolled-back", value["message"].string)
+                XCTAssertEqual(value["safeToInstall"], false)
+                XCTAssertEqual(value["message"], "The old fan-control session has not restored automatic control")
+                XCTAssertEqual(f.commands.filter { $0[0] == "bootstrap" }.count, 2)
+            default:
+                XCTAssertEqual(value["status"], "refused")
+                XCTAssertEqual(value["safeToInstall"], false)
+                XCTAssertTrue(f.signals.isEmpty)
+                XCTAssertFalse(f.commands.contains { $0[0] == "bootout" })
+            }
+        }
+    }
     func testGUIRegularMinimizedVisibleForeignUnknownAndMissingMembershipRefuseBeforePause() async throws {
         for mode in 0..<6 {
             let f = try InstallRetirementFixture(); defer { f.cleanup() }; f.guiMode = mode

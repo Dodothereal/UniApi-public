@@ -28,6 +28,7 @@ struct NativeLegacySystemDependencies: Sendable {
     var pause: @Sendable (Double) async throws -> Void
     var clock: @Sendable () -> Double
     var resolveSystemPython: (@Sendable (Double) async throws -> NativeLegacyPythonResolution)? = nil
+    var verifyTemporaryFanHandoff: (@Sendable (NativeTransferIdentity) throws -> Bool)? = nil
 
     static func production(paths: NativePaths) throws -> Self {
         guard let account = getpwuid(getuid()), let name = account.pointee.pw_dir else { throw NativeFailure("Cannot establish transfer user home") }

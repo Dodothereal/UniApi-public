@@ -50,10 +50,23 @@ identity="$(plutil -extract CFBundleIdentifier raw -o - "$source_app/Contents/In
 executable="$source_app/Contents/MacOS/UniApiNative"
 [[ -x "$executable" && ! -L "$executable" ]] || exit 1
 codesign --verify --strict "$source_app"
+reported_message() {
+  local reason
+  reason="$(plutil -extract message raw -o - "$1" 2>/dev/null)" || return 0
+  printf '%s' "${reason:0:220}" | tr '\r\n' ' '
+}
+report_preflight_failure() {
+  local plan="$1" reason
+  reason="$(reported_message - <<< "$plan")"
+  printf '%s\n' "$plan"
+  if [[ -n "$reason" ]]; then
+    printf 'Update preflight refused: %s\n' "$reason" >&2
+  fi
+}
 # Selection is based on protected launch definitions, never a failed transport.
 # Both plans perform admission only and cannot construct an app runtime.
 if plan="$("$executable" --prepare-install "$applications/UniApi.app")"; then :
-else plan_result=$?; printf '%s\n' "$plan"; exit "$plan_result"; fi
+else plan_result=$?; report_preflight_failure "$plan"; exit "$plan_result"; fi
 printf '%s\n' "$plan"
 installation_kind="$(plutil -extract kind raw -o - - <<< "$plan")"
 case "$installation_kind" in native|legacy) ;; *) echo 'Unknown installation kind; no services changed.' >&2; exit 1;; esac
@@ -182,7 +195,7 @@ cp -R "$staged" "$backup/native-app"
 # The adapter freezes admission and rechecks actual work/socket ownership. It
 # restores its own partial removal on failure; sampled idle alone grants no stop.
 if prepared_plan="$("$executable" --prepare-install "$applications/UniApi.app")"; then :
-else plan_result=$?; printf '%s\n' "$prepared_plan"; exit "$plan_result"; fi
+else plan_result=$?; report_preflight_failure "$prepared_plan"; exit "$plan_result"; fi
 [[ "$(plutil -extract kind raw -o - - <<< "$prepared_plan")" == "$installation_kind" ]] \
   || { echo 'The installation owner changed; no retirement requested.' >&2; exit 1; }
 if [[ "$installation_kind" == native ]]; then
@@ -201,13 +214,25 @@ retirement="$backup/retirement.json"
 if [[ "$installation_kind" == native ]]; then
   retirement_command=("$executable" --retire-native-update "$old_instance" "$applications/UniApi.app" "$prepared_plan")
 else retirement_command=("$executable" --retire-legacy); fi
-if ! "${retirement_command[@]}" > "$retirement"; then
-  echo "Native transfer refused or recovery needs attention; installed files were retained. Retirement evidence: $retirement" >&2
+retirement_exit=0
+"${retirement_command[@]}" > "$retirement" || retirement_exit=$?
+retirement_status="$(plutil -extract status raw -o - "$retirement" 2>/dev/null || true)"
+if [[ "$retirement_exit" != 0 || "$retirement_status" != retired || "$(plutil -extract safeToInstall raw -o - "$retirement" 2>/dev/null)" != true ]]; then
+  reason="$(reported_message "$retirement")"
+  printf 'Retirement evidence: %s\n' "$retirement" >&2
+  case "$retirement_status" in
+    refused) summary='Native transfer refused' ;;
+    rolled-back) summary='The installer restored the previous services' ;;
+    recovery-incomplete) summary='Service recovery is incomplete' ;;
+    *) summary='The installer could not verify service retirement' ;;
+  esac
+  if [[ -n "$reason" ]]; then
+    printf '%s: %s\n' "$summary" "$reason" >&2
+  else
+    printf '%s.\n' "$summary" >&2
+  fi
   exit 1
 fi
-[[ "$(plutil -extract status raw -o - "$retirement")" == retired \
-   && "$(plutil -extract safeToInstall raw -o - "$retirement")" == true ]] \
-  || { echo 'Retirement did not prove safe installation; inspect retained evidence.' >&2; exit 1; }
 changed=1
 "$executable" --check-transfer
 if [[ -d "$applications/UniApi.app" ]]; then

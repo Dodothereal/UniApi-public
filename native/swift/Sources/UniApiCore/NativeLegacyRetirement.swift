@@ -58,6 +58,7 @@ public enum NativeLegacyUnregisterObservation: Equatable, Sendable {
 public struct NativeLegacyRetirementIO: Sendable {
     var role: NativeRetirementRole = .legacy
     var admission: @Sendable () throws -> Void = {}
+    var verifyTemporaryFanHandoff: (@Sendable (NativeTransferIdentity) throws -> Bool)?
     public var owner: UInt32
     /// A protected stable per-user lock must cover both known launch labels,
     /// even when two CLI invocations select different source/storage roots.
@@ -199,7 +200,14 @@ public enum NativeLegacyRetirement {
                                 if try !io.sameInstance(captured) { value.unknownChildren += 1 }
                             } else { value.unknownChildren += 1 }
                         }
-                        if try io.temporaryFanOwner(node.pid) { value.temporaryFanOwner = true }
+                        if try io.temporaryFanOwner(node.pid) {
+                            let canHandoff = service.registration.label == labels[0] &&
+                                io.role.root(node, service: service.registration)
+                            let verified = canHandoff ? try io.verifyTemporaryFanHandoff?(node) : nil
+                            if verified != true {
+                                value.temporaryFanOwner = true
+                            }
+                        }
                     }
                 }
                 return value
@@ -304,7 +312,20 @@ public enum NativeLegacyRetirement {
                     // neither address reuse nor a busy-port exception proves
                     // ownership. Both ports must pass the original claim within
                     // one separately bounded, control-free settlement phase.
-                    try await awaitPortsAbsent(io: io, budget: Budget(portDeadline, clock: io.clock))
+                    let settlement = try Budget(portDeadline, clock: io.clock)
+                    if io.verifyTemporaryFanHandoff != nil,
+                       let backend = plan.services.first(where: { $0.registration.label == labels[0] }) {
+                        // The root helper releases the fans on owner exit and
+                        // removes its socket only after restoration succeeds.
+                        while try io.temporaryFanOwner(backend.registration.pid) {
+                            try Task.checkCancellation()
+                            let remaining: Double
+                            do { remaining = try settlement.remaining() }
+                            catch { throw NativeFailure("The old fan-control session has not restored automatic control") }
+                            try await io.pause(min(0.1, remaining))
+                        }
+                    }
+                    try await awaitPortsAbsent(io: io, budget: settlement)
                 }, rollbackRetirement: rollback, clock: io.clock)
             try await NativeTransferBarrier.retire(plan.nodes, owner: io.owner, io: barrier, deadline: freezeDeadline)
             return result("retired", services: plan.services.map { $0.registration.label })

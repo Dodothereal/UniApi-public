@@ -19,9 +19,11 @@ final class TransferBarrierTests: XCTestCase {
         }
     }
     func testUnknownChildrenAndTemporaryHardwareOwnerNeverProceed() async throws {
-        for work in [NativeTransferWork(unknownChildren: 1), NativeTransferWork(temporaryFanOwner: true)] {
+        for (work, message) in [(NativeTransferWork(unknownChildren: 1), "UniApi has an unverified child process"),
+                                (NativeTransferWork(temporaryFanOwner: true), "A temporary fan-control session is still open")] {
             let fixture = TransferBarrierFixture(); fixture.pending = work
-            do { try await NativeTransferBarrier.retire(fixture.processes, owner: 503, io: fixture.io); XCTFail("Unknown work was stopped") } catch {}
+            do { try await NativeTransferBarrier.retire(fixture.processes, owner: 503, io: fixture.io); XCTFail("Unknown work was stopped") }
+            catch { XCTAssertEqual(error.localizedDescription, message) }
             XCTAssertTrue(fixture.frozen.isEmpty); XCTAssertEqual(fixture.retireCalls, 0)
         }
     }

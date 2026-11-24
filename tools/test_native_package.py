@@ -100,7 +100,8 @@ elif operation in ("--retire-legacy", "--retire-native-update"):
         assert plan["definitionHashes"] == {label: hashlib.sha256((agents / (label + ".plist")).read_bytes()).hexdigest() for label in labels}
     else: assert not flag("NATIVE"), "native update must not use the legacy transaction"
     log(operation[2:])
-    if flag("RETIRE_REFUSE"): emit({"status": "refused", "safeToInstall": False}, 2)
+    if flag("RETIRE_REFUSE"):
+        emit({"status": "refused", "safeToInstall": False, "message": "Owned service changed before pause"}, 2)
     emit({"status": "retired", "safeToInstall": True})
 elif operation == "--retire-native-install":
     log("retire-native-install")
@@ -228,7 +229,8 @@ class NativePackageTests(unittest.TestCase):
             environment["UNIAPI_FIXTURE_RETIRE_REFUSE"] = "1"
             result = self.execute(environment, "--install")
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Native transfer refused", result.stderr)
+            self.assertIn("Retirement evidence:", result.stderr)
+            self.assertEqual(result.stderr.splitlines()[-1], "Native transfer refused: Owned service changed before pause")
             self.assertEqual((directory / "Applications/UniApi.app/old-app").read_text(), "retained")
             self.assertEqual((directory / "LaunchAgents/app.devved.uniapi-server.plist").read_text(), "old app.devved.uniapi-server")
             commands = (directory / "calls").read_text().splitlines()

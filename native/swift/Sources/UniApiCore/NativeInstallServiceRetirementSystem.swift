@@ -46,6 +46,7 @@ final class NativeInstallRetirementSystem: @unchecked Sendable {
             }, pause: d.pause,
             settlement: { try await self.settlement($0, seconds: $1) }, clock: d.clock)
         io.role = role; io.admission = { try self.guiAdmission() }
+        if expectedHashes != nil { io.verifyTemporaryFanHandoff = d.verifyTemporaryFanHandoff }
         return io
     }
     func exclusive() throws -> NativeLegacyRetirementLease {

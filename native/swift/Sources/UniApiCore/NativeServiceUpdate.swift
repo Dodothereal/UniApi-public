@@ -117,10 +117,33 @@ struct NativeUpdateDependencies: Sendable {
         }
         let backend = application.appendingPathComponent("Contents/MacOS/UniApiNative").path
         system.sockets = { try NativeInstallServiceSockets.read($0, backend: backend) }
+        system.verifyTemporaryFanHandoff = { node in
+            try NativeTemporaryFanSession.verify(node: node, paths: paths)
+        }
         return .init(system: system, gui: { try NativeUpdateGUIAdmission.read() }, nativeStatus: { _, _ in
             let bytes = try NativeLegacyProtected.read(anchor: paths.data, relative: "native-status.json", owner: getuid(), maximum: 65536)
             return try JSONValue.decode(bytes)
         })
+    }
+}
+
+/// The existing privileged helper creates its PID socket in a directory only
+/// root can modify. It restores automatic control before unlinking the socket.
+enum NativeTemporaryFanSession {
+    static func verify(node: NativeTransferIdentity, paths: NativePaths) throws -> Bool {
+        guard node.uid == getuid(), node.pid > 1, try NativeTransferProcessSystem.sameInstance(node) else { return false }
+        let location = URL(fileURLWithPath: NativeHardwareLocations(paths: paths).fanSocket(owner: node.pid))
+        let directory = "/private/var/run/" + location.deletingLastPathComponent().lastPathComponent
+        let fd = open(directory, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var parent = stat(), socket = stat()
+        guard fstat(fd, &parent) == 0, parent.st_uid == 0, parent.st_mode & 0o022 == 0 else { return false }
+        try NativeLegacyProtected.directoryACL(fd)
+        guard fstatat(fd, location.lastPathComponent, &socket, AT_SYMLINK_NOFOLLOW) == 0 else { return false }
+        let born = socket.st_birthtimespec
+        return socket.st_mode & S_IFMT == S_IFSOCK && socket.st_uid == node.uid && socket.st_mode & 0o777 == 0o600 &&
+            (born.tv_sec, born.tv_nsec) >= (Int(node.bornSeconds), Int(node.bornMicroseconds) * 1_000)
     }
 }
 
