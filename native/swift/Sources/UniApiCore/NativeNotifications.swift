@@ -126,14 +126,20 @@ public enum NativeNotifications {
         return cleaned.isEmpty ? "Chat \(id)" : String(cleaned.prefix(80))
     }
 
-    private static func boundedChatTransport(_ request: URLRequest) async throws -> (Data, Int) {
+    /// One ephemeral session shape for every credential-carrying chat request:
+    /// no shared cookies, credential stores or cache.
+    static func chatSessionConfiguration() -> URLSessionConfiguration {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 20
         config.timeoutIntervalForResource = 20
         config.urlCache = nil
         config.httpCookieStorage = nil
         config.urlCredentialStorage = nil
-        let session = URLSession(configuration: config, delegate: ChatRedirectGuard(), delegateQueue: nil)
+        return config
+    }
+
+    private static func boundedChatTransport(_ request: URLRequest) async throws -> (Data, Int) {
+        let session = URLSession(configuration: chatSessionConfiguration(), delegate: ChatRedirectGuard(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let (bytes, response) = try await session.bytes(for: request)
         var data = Data()
@@ -182,17 +188,21 @@ public enum NativeNotifications {
         request.httpMethod = "POST"; request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try JSONValue.object(["chat_id": .string(configuration.chat), "text": .string(String(text.prefix(4096))), "disable_web_page_preview": true]).encoded()
-        let perform = transport ?? { request in let (data, response) = try await URLSession.shared.data(for: request); return (data, (response as? HTTPURLResponse)?.statusCode ?? 0) }
+        // Delivery shares the lookup transport's redirect guard and bounds: the
+        // bot token rides in the URL path, and a redirect would forward the
+        // request (with its body on 307/308) to an unowned host.
+        let perform = transport ?? boundedChatTransport
         do {
             let (data, status) = try await perform(request)
             guard status == 200, (try? JSONValue.decode(data)["ok"].bool) == true else { throw NativeFailure("Telegram did not confirm notification delivery") }
-        } catch { throw NativeFailure("Telegram notification delivery failed") }
+        } catch is CancellationError { throw CancellationError() }
+        catch { throw NativeFailure("Telegram notification delivery failed") }
         return true
     }
 }
 
 /// Telegram credentials are in the URL path, so never forward a redirect.
-private final class ChatRedirectGuard: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+final class ChatRedirectGuard: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)

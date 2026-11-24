@@ -81,6 +81,29 @@ final class NativeNotificationChatLookupTests: XCTestCase {
         } catch { XCTFail("Unexpected lookup result") }
     }
 
+    func testSharedChatSessionIsEphemeralWithoutStoresOrCache() {
+        let configuration = NativeNotifications.chatSessionConfiguration()
+        XCTAssertNil(configuration.identifier)
+        XCTAssertNil(configuration.urlCache)
+        XCTAssertNil(configuration.httpCookieStorage)
+        XCTAssertNil(configuration.urlCredentialStorage)
+        XCTAssertEqual(configuration.timeoutIntervalForRequest, 20)
+        XCTAssertEqual(configuration.timeoutIntervalForResource, 20)
+    }
+
+    func testCredentialPathRequestsNeverFollowRedirects() throws {
+        let session = URLSession(configuration: NativeNotifications.chatSessionConfiguration())
+        defer { session.invalidateAndCancel() }
+        let original = URLRequest(url: try XCTUnwrap(URL(string: "https://api.telegram.org/botfixture-bot-token/sendMessage")))
+        let forwarded = URLRequest(url: try XCTUnwrap(URL(string: "https://authority.invalid/landing")))
+        let response = try XCTUnwrap(HTTPURLResponse(url: try XCTUnwrap(original.url), statusCode: 307,
+                                                   httpVersion: nil, headerFields: ["Location": "https://authority.invalid/landing"]))
+        var accepted: URLRequest? = forwarded
+        ChatRedirectGuard().urlSession(session, task: session.dataTask(with: original),
+                                       willPerformHTTPRedirection: response, newRequest: forwarded) { accepted = $0 }
+        XCTAssertNil(accepted)
+    }
+
     func testInvalidTokenDoesNotCallTransport() async throws {
         for invalid in ["", "bad/token", String(repeating: "a", count: 257)] {
             do {
