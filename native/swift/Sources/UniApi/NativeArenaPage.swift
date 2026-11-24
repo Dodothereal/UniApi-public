@@ -7,132 +7,219 @@ typealias NativeArenaModel = UniApiPresentation.NativeArenaModel
 
 struct NativeArenaPage: View {
     let runtime: NativeRuntime
+    let openPrompts: (() -> Void)?
     @StateObject private var model: NativeArenaModel
-    @State private var tab = "Judge"
-    @Environment(\.nativeHostTabs) private var host
-    @State private var selected = ""
+    @State private var screen: String
+    @State private var origin = "Home"
+    @State private var selection = ArenaMatchSelection()
+    @State private var historySearch = ""
     @State private var preset = ""
+    @State private var outcome: JSONValue = .null
+    @State private var loadedOutcomeID: String?
     @State private var rankingMode = "all"
     @State private var editing: JSONValue?
     @State private var presetID = ""
     @State private var standingKey = ""
+    @State private var rankingSearch = ""
     @Environment(\.nativeInterfaceDensity) private var density
     @Environment(\.nativePageActive) private var pageActive
-    init(runtime: NativeRuntime) { self.runtime = runtime; _model = StateObject(wrappedValue: NativeArenaModel(runtime: runtime)) }
-    private var visible: [JSONValue] { model.matches.filter { tab == "History" || $0["id"].string == selected || $0["voted_at"].isNull && ["done", "running", "queued"].contains($0["status"].string) }.sorted { tab == "History" ? $0["created_at"].double > $1["created_at"].double : $0["created_at"].double < $1["created_at"].double } }
-    private var pageReadiness: NativePageReadiness {
+    @Environment(\.nativeReducedMotion) private var reducedMotion
+    @Environment(\.nativeMotionVisible) private var motionVisible
+    private var selectionMotion: Animation? { reducedMotion || !motionVisible ? nil : NativeMotion.selection }
+
+    init(runtime: NativeRuntime, opens: String = "Home", matchID: String? = nil, initialPreset: String = "", openPrompts: (() -> Void)? = nil) {
+        self.runtime = runtime
+        self.openPrompts = openPrompts
+        _screen = State(initialValue: opens)
+        _preset = State(initialValue: initialPreset)
+        var selection = ArenaMatchSelection()
+        selection[.judge] = matchID
+        _selection = State(initialValue: selection)
+        _model = StateObject(wrappedValue: NativeArenaModel(runtime: runtime))
+    }
+
+    private var home: Bool { screen == "Home" }
+    private var scope: ArenaMatchSelection.Scope { origin == "History" ? .history : .judge }
+    private var queue: [JSONValue] { selection.visible(model.matches, in: .judge) }
+    private var history: [JSONValue] {
+        let term = historySearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return term.isEmpty ? allHistory : allHistory.filter { ArenaPresentationPolicy.matchesHistorySearch($0, term: term) }
+    }
+    private var allHistory: [JSONValue] { selection.visible(model.matches, in: .history) }
+    private var selectedMatch: JSONValue? {
+        model.matches.first { $0["id"].string == selection[scope] }
+    }
+    private var verdictID: String? {
+        guard ["Match", "Watch"].contains(screen), let match = selectedMatch, match["revealed"].bool,
+              ["ranked", "all_bad"].contains(match["verdict"].string) else { return nil }
+        return match["id"].string
+    }
+    private var readiness: NativePageReadiness {
         if model.failed { return .failed }
         guard model.loaded else { return .pending }
-        guard tab == "Ranking" else { return .ready }
-        switch model.rankingPhase(for: rankingMode) {
+        if let verdictID, loadedOutcomeID != verdictID { return .pending }
+        guard screen == "Ranking" || home else { return .ready }
+        switch model.rankingPhase(for: home ? "all" : rankingMode) {
         case .ready: return .ready
         case .failed: return .failed
         case .loading, .pending: return .pending
         }
     }
-    private var waiting: Int { model.matches.filter { $0["voted_at"].isNull && $0["status"].string == "done" }.count }
+
+    private func open(_ id: String, from source: String = "Home", watch: Bool = false) {
+        origin = source
+        selection[source == "History" ? .history : .judge] = id
+        let running = model.matches.first { $0["id"].string == id }.map { ArenaMatchSelection.JudgeGroup($0) == .inProgress } ?? false
+        screen = watch || running ? "Watch" : "Match"
+    }
+    private var title: String {
+        switch screen {
+        case "Ranking": "Standings"
+        case "Watch": selectedMatch.map { ArenaMatchSelection.JudgeGroup($0) == .reviewed } == true ? "Match result" : "Live lanes"
+        case "Match": selectedMatch.map { ArenaMatchSelection.JudgeGroup($0) == .ready } == true ? "Blind duel" : "Match result"
+        case "History", "Presets": screen
+        default: "Arena"
+        }
+    }
+
     var body: some View {
         GeometryReader { viewport in
-        // Keep room for the rail and two minimum-width contestant columns.
-        let showsRail = viewport.size.width >= 900
-        NativePage(title: "Arena", readiness: pageReadiness, scrolls: false, tabs: {
-            NativeTabs(options: ["Judge", "Ranking", "Presets", "History"].map { (value: $0, label: $0) }, selection: tab, counts: ["Judge": waiting]) { tab = $0; host?.select($0) }
-                .nativeHostedView(["Judge", "Ranking", "Presets", "History"]) { tab = $0 }
-        }, actions: {
-            if tab == "Ranking" {
-                T3Segmented(options: [("all", "All"), ("random", "Random"), ("chosen", "Chosen")], selection: rankingMode) { rankingMode = $0 }
-                    .accessibilityLabel("Ranking scope").help("Matches with random contestants, ones you chose, or both")
-            }
-            T3IconButton(system: "refresh-cw", help: "Reload") { Task { await model.reload(ranking: tab == "Ranking" ? rankingMode : nil) } }
-            if tab == "Presets" { Button("New preset", nativeIcon: "plus") { editing = [:] }.buttonStyle(T3Button(.outline)) }
-            if tab == "New match" { Button("Cancel") { tab = "Judge" }.buttonStyle(T3Button(.ghost)) }
-            else { Button("New match", nativeIcon: "plus") { preset = ""; tab = "New match" }.buttonStyle(T3Button(.primary)) }
-        }) {
-            VStack(alignment: .leading, spacing: 0) {
-            if !model.pageError(includeRanking: tab == "Ranking").isEmpty {
-                NativeError(message: model.pageError(includeRanking: tab == "Ranking")).padding(.horizontal, density.pageMargin).padding(.top, 16)
-            }
-            if !model.loaded && tab != "Ranking" {
-                if !model.failed { ShimmerText(text: "Loading…").padding(.horizontal, density.pageMargin).padding(.top, density.pageGap) }
-            } else { switch tab {
-            case "New match": NativeArenaNewMatch(model: model, initialPreset: preset) { id in selected = id; tab = "Judge" }
-            case "Presets": presets
-            case "Ranking": rankings(width: viewport.size.width)
-            default:
-                if visible.isEmpty {
-                    EmptyState(icon: "swords", title: tab == "Judge" ? "Nothing to judge" : "No matches",
-                               detail: "A match gives several models the same task. They run in the background and wait here for your ranking.",
-                               actionTitle: "New match") { preset = ""; tab = "New match" }
-                        .padding(.horizontal, density.pageMargin).padding(.top, density.pageGap)
-                } else {
-                    HStack(alignment: .top, spacing: 0) {
-                        if showsRail {
-                            matchRail.frame(width: 264).background(Theme.sunken.opacity(0.5))
-                            Theme.border.frame(width: 1)
-                        }
-                        VStack(alignment: .leading, spacing: 0) {
-                            if !showsRail {
-                                compactMatchPicker.padding(.horizontal, density.pageMargin).padding(.vertical, 10)
-                                Theme.rule.frame(height: 1)
-                            }
-                            if let match = model.matches.first(where: { $0["id"].string == selected }) ?? visible.first {
-                                // Delete removes the current row before its success callback.
-                                let nextID = ArenaPresentationPolicy.nextMatchID(in: visible, after: match["id"].string, history: tab == "History") ?? ""
-                                NativeArenaMatch(runtime: runtime, model: model, match: match) { selected = nextID }.id(match["id"].string).frame(minWidth: 0, maxWidth: .infinity)
-                            }
-                        }
+            let back: (() -> Void)? = home ? nil : { screen = ["Watch", "Match"].contains(screen) ? origin : "Home" }
+            NativePage(title: title, readiness: readiness, scrolls: home, back: back, actions: {
+                if home {
+                    NativeIconMenu(help: "Arena pages") {
+                        Button("History") { screen = "History" }
+                        Button("Presets") { screen = "Presets" }
+                        if let openPrompts { Button("Prompts", action: openPrompts) }
                     }
                 }
-            } }
+                if screen == "History" {
+                    TextField("Search matches", text: $historySearch).textFieldStyle(.roundedBorder).frame(maxWidth: 170)
+                }
+                if screen == "Ranking" {
+                    T3Segmented(options: [("all", "All"), ("random", "Random"), ("chosen", "Chosen")], selection: rankingMode) { rankingMode = $0 }
+                        .accessibilityLabel("Ranking scope").help("Matches with random contestants, ones you chose, or both")
+                }
+                T3IconButton(system: "refresh-cw", help: "Reload") {
+                    Task { await model.reload(ranking: home ? "all" : screen == "Ranking" ? rankingMode : nil) }
+                }
+                if screen == "Presets" { Button("New preset", nativeIcon: "plus") { editing = [:] }.buttonStyle(T3Button(.outline)) }
+            }) {
+                VStack(alignment: .leading, spacing: 0) {
+                    let error = model.pageError(includeRanking: screen == "Ranking" || home)
+                    if !error.isEmpty {
+                        NativeError(message: error).padding(.horizontal, home ? 0 : density.pageMargin).padding(.bottom, 10)
+                    }
+                    if !model.loaded && screen != "Ranking" {
+                        if !model.failed { ShimmerText(text: "Loading…").padding(density.pageMargin) }
+                    } else {
+                        content(width: viewport.size.width)
+                    }
+                }
             }
         }
         .nativePageTask { await model.begin(runtime: runtime) }
-        .nativePageTask(id: "\(tab):\(rankingMode):\(model.readActive):\(model.readGeneration)") { if tab == "Ranking", model.readActive { await model.ranking(rankingMode) } }
+        .nativePageTask(id: "\(screen):\(rankingMode):\(model.readActive):\(model.readGeneration)") {
+            if model.readActive && (home || screen == "Ranking") { await model.ranking(home ? "all" : rankingMode) }
+        }
+        .nativePageTask(id: "\(verdictID ?? ""):\(model.readActive):\(model.readGeneration)") {
+            guard let id = verdictID, model.readActive else { return }
+            let value = await model.call("ranking", ["matchId": .string(id)])
+            guard !Task.isCancelled, verdictID == id else { return }
+            outcome = value ?? .null
+            loadedOutcomeID = id
+        }
         .nativePageActivity(suspended: { model.stop() })
-        .sheet(item: Binding(get: { editing.map { NativeArenaPresetItem(value: $0) } }, set: { editing = $0?.value })) { item in NativeArenaPresetEditor(value: item.value) { input in if let saved = await model.call("preset.save", input) { editing = nil; await model.load(); return saved }; return nil } }
+        .onChange(of: screen) { previous, current in
+            if previous == "Home", current != "Home" { preset = "" }
+        }
+        .sheet(item: Binding(get: { editing.map { NativeArenaPresetItem(value: $0) } }, set: { editing = $0?.value })) { item in
+            NativeArenaPresetEditor(value: item.value) { input in
+                if let saved = await model.call("preset.save", input) { editing = nil; await model.load(); return saved }
+                return nil
+            }
         }
     }
-    private var compactMatchPicker: some View {
-        let current = model.matches.first(where: { $0["id"].string == selected }) ?? visible.first
-        let index = visible.firstIndex(where: { $0["id"] == current?["id"] }) ?? 0
-        return Menu {
-            ForEach(Array(visible.enumerated()), id: \.element["id"]) { position, match in
-                Button {
-                    selected = match["id"].string
-                } label: {
-                    Text("\(position + 1). \(match["mode"].string) · \(matchStatus(match)) · \(String(match["prompt"].string.prefix(100)))")
-                }.help(match["prompt"].string)
-                    .accessibilityLabel("Match \(position + 1). \(match["prompt"].string)")
-                    .accessibilityValue("\(match["mode"].string). \(matchStatus(match))")
-                    .accessibilityAddTraits(match["id"] == current?["id"] ? [.isSelected] : [])
-            }
-        } label: {
-            HStack(spacing: 10) {
-                Text("\(index + 1)/\(visible.count)").font(Theme.num(11, weight: .medium)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: true, vertical: false)
-                Text(current?["prompt"].string ?? "Choose a match").font(Theme.ui(12.5)).lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(current.map { "\($0["mode"].string) · \($0["slots"].array.count) · \(matchStatus($0))" } ?? "")
-                    .font(Theme.mono(10.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: true, vertical: false)
-                NativeIcon("chevrons-up-down", size: 12).foregroundStyle(Theme.faint)
-            }.accessibilityElement(children: .ignore)
-                .padding(.horizontal, 12).frame(height: Theme.controlLg).foregroundStyle(Theme.ink)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
-        }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
-            .accessibilityLabel("Selected match")
-            .accessibilityValue("\(index + 1) of \(visible.count). \(current.map { "\($0["mode"].string), \($0["slots"].array.count) contestants, \(matchStatus($0))" } ?? ""). \(current?["prompt"].string ?? "")")
-            .help(current?["prompt"].string ?? "Choose a match")
-    }
-    private func matchStatus(_ match: JSONValue) -> String {
-        (match["verdict"].isNull ? match["status"].string : match["verdict"].string).replacingOccurrences(of: "_", with: " ")
-    }
-    private var matchRail: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(visible.enumerated()), id: \.offset) { index, match in
-                    NativeArenaMatchRow(match: match, viewed: match["id"].string == (selected.isEmpty ? visible.first?["id"].string : selected)) { selected = match["id"].string }
+
+    @ViewBuilder private func content(width: CGFloat) -> some View {
+        switch screen {
+        case "Home": homeContent(width: width)
+        case "Presets": presets
+        case "Ranking": rankings(width: width)
+        case "History": historyPage
+        case "Watch", "Match":
+            if let match = selectedMatch {
+                let id = match["id"].string, group = ArenaMatchSelection.JudgeGroup(match)
+                let next = ArenaPresentationPolicy.nextMatchID(in: scope == .history ? history : queue, after: id, history: scope == .history)
+                if group == .inProgress || screen == "Watch" && group == .ready {
+                    NativeArenaLive(model: model, match: match) { screen = "Match" }.id(id)
+                } else {
+                    NativeArenaMatch(runtime: runtime, model: model, match: match, outcome: loadedOutcomeID == id ? outcome : .null) {
+                        if let next, next != id { open(next, from: origin) }
+                        else { screen = origin }
+                    }.id(id)
                 }
+            } else {
+                EmptyState(icon: "swords", title: "Match unavailable", detail: "This match is no longer in the current match list.")
+                    .padding(density.pageMargin)
+            }
+        default: homeContent(width: width)
+        }
+    }
+
+    private func homeContent(width: CGFloat) -> some View {
+        let layout = width >= 920 ? AnyLayout(HStackLayout(alignment: .top, spacing: 24)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 24))
+        return layout {
+            VStack(alignment: .leading, spacing: 22) {
+                NativeArenaNewMatch(model: model, initialPreset: preset) { open($0, watch: true) }.id(preset)
+                cards("Ready to judge", rows: queue.filter { ArenaMatchSelection.JudgeGroup($0) == .ready })
+                cards("In progress", rows: queue.filter { ArenaMatchSelection.JudgeGroup($0) == .inProgress })
+                let recent = allHistory.filter { ArenaMatchSelection.JudgeGroup($0) == .reviewed }
+                if !recent.isEmpty {
+                    HStack {
+                        Text("Recent results").font(Theme.ui(18, weight: .semibold)).accessibilityAddTraits(.isHeader)
+                        Spacer()
+                        Button("History", nativeIcon: "arrow-right") { screen = "History" }.buttonStyle(T3Button(.ghost))
+                    }
+                    ForEach(recent.prefix(3), id: \.self["id"]) { match in
+                        NativeArenaMatchRow(match: match) { open(match["id"].string, from: "History") }
+                    }
+                }
+                if queue.allSatisfy({ ArenaMatchSelection.JudgeGroup($0) == .reviewed }) && recent.isEmpty {
+                    EmptyState(icon: "swords", title: "No matches yet", detail: "Start a match to watch contestants work and judge their answers blind.")
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            NativeArenaStandingsPreview(rows: model.rankingHasContent(for: "all") ? model.standings : [], trend: model.rankingHasContent(for: "all") ? model.trend : []) { screen = "Ranking" }
+                .frame(maxWidth: width >= 920 ? 310 : .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder private func cards(_ title: String, rows: [JSONValue]) -> some View {
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title).font(Theme.ui(18, weight: .semibold)).accessibilityAddTraits(.isHeader)
+                ForEach(rows, id: \.self["id"]) { match in
+                    NativeArenaRunCard(model: model, match: match) {
+                        open(match["id"].string, watch: ArenaMatchSelection.JudgeGroup(match) == .inProgress)
+                    }
+                }
+            }
+        }
+    }
+
+    private var historyPage: some View {
+        ScrollView {
+            if history.isEmpty {
+                EmptyState(icon: "swords", title: "No matches", detail: historySearch.isEmpty ? "Matches will appear here." : "No matches fit this search.")
+                    .padding(density.pageMargin)
+            } else {
+                LazyVStack(spacing: 0) {
+                    ForEach(history, id: \.self["id"]) { match in
+                        NativeArenaMatchRow(match: match) {
+                            open(match["id"].string, from: "History")
+                        }
+                    }
+                }.padding(.horizontal, density.pageMargin)
             }
         }
     }
@@ -187,7 +274,7 @@ struct NativeArenaPage: View {
                         }
                         Spacer(minLength: 0)
                         Button("Edit", nativeIcon: "pencil") { editing = item }.buttonStyle(T3Button(.outline))
-                        Button("New match", nativeIcon: "play") { preset = item["id"].string; tab = "New match" }.buttonStyle(T3Button(.primary))
+                        Button("Use preset", nativeIcon: "play") { preset = item["id"].string; screen = "Home" }.buttonStyle(T3Button(.primary))
                     }
                 }
             })
@@ -197,6 +284,11 @@ struct NativeArenaPage: View {
     // MARK: Ranking
 
     private var inspectedStanding: JSONValue? { model.standings.first { $0["key"].string == standingKey } }
+    private var filteredStandings: [JSONValue] {
+        let terms = rankingSearch.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !terms.isEmpty else { return model.standings }
+        return model.standings.filter { row in terms.contains { (row["model"].string + " " + row["route"].string).localizedCaseInsensitiveContains($0) } }
+    }
     private func verdicts(for row: JSONValue?) -> [JSONValue] {
         guard let row else { return model.recent }
         return model.recent.filter { $0["contestants"].array.contains { $0["route"] == row["route"] && $0["model"] == row["model"] } }
@@ -217,13 +309,22 @@ struct NativeArenaPage: View {
                         if model.standings.isEmpty {
                             EmptyState(icon: "trophy", title: "No verdicts", detail: "Judge a match or sync the shared ledger.")
                                 .padding(.horizontal, density.pageMargin).padding(.top, density.pageGap)
-                        } else { standingsTable(width: wide ? width - 341 : width) }
+                        } else {
+                            rankingHeader
+                            if filteredStandings.isEmpty {
+                                EmptyState(icon: "search", title: "No models found", detail: "Search by model or route.")
+                                    .padding(density.pageMargin)
+                            } else {
+                                standingsTable(width: wide ? width - 341 : width)
+                                NativeArenaHeadToHead(rows: filteredStandings, comparisons: model.comparisons)
+                            }
+                        }
                         if !wide { rankingPane.padding(.top, 24); ledgerActions }
                     }.padding(.bottom, 32).frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .scrollContentBackground(.hidden).focusable().focusEffectDisabled()
                 .onMoveCommand { direction in
-                    let keys = model.standings.map { $0["key"].string }
+                    let keys = filteredStandings.map { $0["key"].string }
                     guard let index = keys.firstIndex(of: standingKey) else { if direction == .down, let first = keys.first { standingKey = first }; return }
                     let next = direction == .down ? index + 1 : direction == .up ? index - 1 : index
                     if keys.indices.contains(next) { standingKey = keys[next] }
@@ -240,32 +341,58 @@ struct NativeArenaPage: View {
             }
         }
     }
+    private var rankingHeader: some View {
+        HStack(spacing: 10) {
+            Text("Elo leaderboard").font(Theme.ui(18, weight: .semibold)).accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+            TextField("Search model or route", text: $rankingSearch).textFieldStyle(.roundedBorder).frame(maxWidth: 200)
+                .help("Separate terms with commas to show either model in a head-to-head comparison.")
+        }.padding(.horizontal, density.pageMargin).padding(.vertical, 16)
+    }
     private func standingsTable(width: CGFloat) -> some View {
-        let columns: [(String, CGFloat)] = [("Elo", 56), ("W", 36), ("L", 36), ("D", 36)] + (width >= 640 ? [("Matches", 64), ("Failed", 56)] : []) + (width >= 760 ? [("Avg time", 72)] : [])
-        let meter: CGFloat = width >= 720 ? 110 : 0
+        let columns: [(String, CGFloat)] = [("Elo", 54), ("Rated pairs", 72), ("Failed", 50)] + (width >= 570 ? [("Avg time", 72)] : [])
+        let meter: CGFloat = width >= 660 ? 120 : width >= 450 ? 80 : 42
+        let rows = filteredStandings, ranks = Dictionary(uniqueKeysWithValues: model.standings.enumerated().map { ($0.element["key"].string, $0.offset + 1) })
+        let compactNames = ArenaPresentationPolicy.compactModelNames(rows.map { $0["model"].string })
+        let lower = floor(min(model.standings.last?["elo"].double ?? 1000, 1000) / 100) * 100
+        let upper = max(lower + 100, ceil(max(model.standings.first?["elo"].double ?? 1000, 1000) / 100) * 100)
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
                 Text("#").frame(width: 28, alignment: .leading)
                 Text("Model").frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(Int(lower))–\(Int(upper))").font(Theme.num(10, weight: .regular)).lineLimit(1)
+                    .frame(width: meter).padding(.trailing, 8).accessibilityLabel("Elo bar scale: \(Int(lower)) through \(Int(upper))")
                 ForEach(columns, id: \.0) { column in Text(column.0).frame(width: column.1, alignment: .trailing) }
             }.font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.muted).frame(height: 32).padding(.horizontal, density.pageMargin)
             LazyVStack(spacing: 0) {
-                ForEach(Array(model.standings.enumerated()), id: \.element["key"]) { index, row in
+                ForEach(rows, id: \.self["key"]) { row in
                     let key = row["key"].string
-                    NativeArenaListRow(selected: standingKey == key, margin: density.pageMargin) { standingKey = standingKey == key ? "" : key } content: {
-                        Text("\(index + 1)").font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(index == 0 ? Theme.ink : Theme.faint).frame(width: 28, alignment: .leading)
+                    let name = row["model"].string, route = row["route"].string
+                    NativeArenaListRow(selected: standingKey == key, margin: density.pageMargin) {
+                        withAnimation(selectionMotion) { standingKey = standingKey == key ? "" : key }
+                    } content: {
+                        let rank = ranks[key] ?? 0
+                        Text("\(rank)").font(Theme.num(Theme.textXs, weight: .medium)).foregroundStyle(rank == 1 ? Theme.ink : Theme.muted).frame(width: 28, alignment: .leading)
                         HStack(spacing: 8) {
                             RoundedRectangle(cornerRadius: 1).fill(Theme.pairColor(key)).frame(width: 3, height: 12).accessibilityHidden(true)
-                            Text(row["model"].string).font(Theme.mono(Theme.textXs, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                            Text(row["route"].string).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1)
+                            if let compactName = compactNames[name] {
+                                ViewThatFits(in: .horizontal) {
+                                    Text(name)
+                                    Text(compactName).truncationMode(.tail)
+                                }.font(Theme.mono(Theme.textXs, weight: .medium)).lineLimit(1).accessibilityLabel(name)
+                            } else {
+                                Text(name).font(Theme.mono(Theme.textXs, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                            }
+                            Text(route).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted).lineLimit(1)
                         }.frame(maxWidth: .infinity, alignment: .leading)
-                        if meter > 0 { NativeTickMeter(fraction: fraction(row), color: Theme.ink, height: 8).frame(width: meter).padding(.trailing, 12) }
+                        NativeGrowBar(fraction: (row["elo"].double - lower) / (upper - lower), color: Theme.pairColor(key), height: 7)
+                            .frame(width: meter).padding(.trailing, 8).accessibilityHidden(true)
                         ForEach(columns, id: \.0) { column in
-                            Text(standingCell(row, column.0)).font(Theme.num(Theme.textXs, weight: column.0 == "Elo" ? .semibold : .regular))
-                                .foregroundStyle(column.0 == "Elo" ? Theme.ink : column.0 == "Failed" && row["failures"].int > 0 ? Theme.warnFg : Theme.dim)
+                            NativeNumberText(text: standingCell(row, column.0), font: Theme.num(Theme.textXs, weight: column.0 == "Elo" ? .semibold : .regular),
+                                             color: column.0 == "Elo" ? Theme.ink : column.0 == "Failed" && row["failures"].int > 0 ? Theme.warnFg : Theme.dim)
                                 .frame(width: column.1, alignment: .trailing)
                         }
-                    }.help(ArenaStandingDetail(row).accessibilitySummary)
+                    }.help("\(name) · \(route)\n\(ArenaStandingDetail(row).accessibilitySummary)")
                 }
             }
         }
@@ -273,10 +400,7 @@ struct NativeArenaPage: View {
     private func standingCell(_ row: JSONValue, _ column: String) -> String {
         switch column {
         case "Elo": return "\(row["elo"].int)"
-        case "W": return "\(row["wins"].int)"
-        case "L": return "\(row["losses"].int)"
-        case "D": return "\(row["draws"].int)"
-        case "Matches": return "\(row["matches"].int)"
+        case "Rated pairs": return "\(row["wins"].int + row["losses"].int + row["draws"].int)"
         case "Failed": return "\(row["failures"].int)"
         default: return NativeArenaDuration(row["avg_duration_ms"].double)
         }
@@ -315,12 +439,13 @@ struct NativeArenaPage: View {
                     paneFact("Elo", "\(row["elo"].int)")
                     paneFact("Won, lost, drawn", "\(row["wins"].int) · \(row["losses"].int) · \(row["draws"].int)")
                     paneFact("Matches", "\(row["matches"].int)")
+                    paneFact("Rated comparisons", "\(row["wins"].int + row["losses"].int + row["draws"].int)")
                     paneFact("First places", ArenaStandingDetail(row).firstPlaceLabel)
                     paneFact("Failed runs", "\(row["failures"].int)", tone: row["failures"].int > 0 ? Theme.warnFg : Theme.ink)
                 }
                 paneSection("Effort") {
                     paneFact("Average time", NativeArenaDuration(row["avg_duration_ms"].double))
-                    paneFact("Average steps", "\(Int(row["avg_turns"].double.rounded()))")
+                    paneFact("Average steps", row["avg_turns"].isNull ? "Not recorded" : "\(Int(row["avg_turns"].double.rounded()))")
                 }
             } else {
                 paneSection("Files") {
@@ -357,7 +482,7 @@ struct NativeArenaPage: View {
             ForEach(Array(records.prefix(12).enumerated()), id: \.offset) { _, record in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(record["prompt"].string).lineLimit(2).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.ink)
-                    Text(record["contestants"].array.sorted { ($0["rank"].isNull ? 99 : $0["rank"].int) < ($1["rank"].isNull ? 99 : $1["rank"].int) }.map { "\($0["model"].string)\($0["status"].string == "failed" ? " (failed)" : "")" }.joined(separator: " > ")).font(Theme.mono(11)).foregroundStyle(Theme.dim).textSelection(.enabled)
+                    Text(ArenaPresentationPolicy.verdictOrder(record)).font(Theme.mono(11)).foregroundStyle(Theme.dim).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .help(record["contestants"].array.map { "\($0["route"].string) · \($0["model"].string)" }.joined(separator: "\n"))
                     Text(ArenaPresentationPolicy.recentVerdictMetadata(record, now: now)).font(Theme.ui(11)).foregroundStyle(Theme.faint)
@@ -365,7 +490,6 @@ struct NativeArenaPage: View {
             }
         }
     }
-    private func fraction(_ row: JSONValue) -> Double { let floor = min(1000, model.standings.map { $0["elo"].double }.min() ?? 1000), peak = model.standings.map { $0["elo"].double }.max() ?? 1000; return (row["elo"].double - floor + 50) / max(1, peak - floor + 50) }
 }
 
 /// A selectable row of an Arena list: hairline above, raised when selected.
@@ -390,38 +514,25 @@ private struct NativeArenaListRow<Content: View>: View {
 
 private struct NativeArenaMatchRow: View {
     let match: JSONValue
-    let viewed: Bool
     let open: () -> Void
     @State private var hovering = false
     @Environment(\.nativeReducedMotion) private var reduceMotion
-    /// The model ranked best, once the match is judged and the names are revealed.
-    private var winner: String? {
-        guard !match["voted_at"].isNull, let first = match["ranking"].array.first?.int,
-              let slot = match["slots"].array.first(where: { $0["idx"].int == first }), slot["revealed"].bool, !slot["model"].string.isEmpty else { return nil }
-        return slot["model"].string
-    }
-    private var status: String { match["verdict"].isNull ? match["status"].string : match["verdict"].string.replacingOccurrences(of: "_", with: " ") }
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(match["prompt"].string).font(Theme.ui(Theme.textSm, weight: viewed ? .medium : .regular)).foregroundStyle(Theme.ink).lineLimit(2)
+                Text(match["prompt"].string).font(Theme.ui(Theme.textSm)).foregroundStyle(Theme.ink).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 6) {
                     StatusDot(color: match["status"].string == "failed" ? Theme.fail : match["status"].string == "done" ? (match["voted_at"].isNull ? Theme.warn : Theme.faint) : Theme.accent, pulse: match["status"].string == "running")
-                    if let winner {
-                        Text(winner).font(Theme.mono(11)).foregroundStyle(Theme.dim).truncationMode(.middle).help("Ranked best")
-                    } else {
-                        Text(match["status"].string == "done" && match["voted_at"].isNull ? "ready to judge" : status).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
-                    }
+                    Text(ArenaPresentationPolicy.matchStatus(match)).font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.muted)
                     Spacer(minLength: 4)
                     Text(match["voted_at"].isNull ? "\(match["slots"].array.count) \(match["mode"].string)" : NativeListTimeFormat.ago(match["voted_at"].double))
                         .font(Theme.ui(Theme.textXs)).foregroundStyle(Theme.faint).fixedSize()
                 }.lineLimit(1)
             }.padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 10).contentShape(Rectangle())
-                .background(viewed ? Theme.raised : hovering ? Theme.subtle : .clear)
-                .overlay(alignment: .leading) { Theme.accent.frame(width: 2).opacity(viewed ? 1 : 0) }
+                .background(hovering ? Theme.subtle : .clear)
                 .overlay(alignment: .bottom) { Theme.rule.frame(height: 1) }
-        }.buttonStyle(.plain).pointingHand().onHover { hovering = $0 }.accessibilityAddTraits(viewed ? [.isSelected] : [])
+        }.buttonStyle(.plain).pointingHand().onHover { hovering = $0 }
             .animation(reduceMotion ? nil : NativeMotion.hover, value: hovering)
     }
 }

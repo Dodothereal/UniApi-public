@@ -258,8 +258,489 @@
       "compositionSHA256": "b30034cce032037202a906ebbd75bd05c556a1ab79aa6b66fba838d005ab5b15",
       "harnessSHA256": "49104f8c2ebcbd7973d3135212417b3d422a9da0c76e0bba7a4758d875d7bebb",
       "retainedCorePresentation": "Earlier retained objects; current UI compiled separately. No current service or compositor claim."
+    },
+    {
+      "page": "arena-home",
+      "appearance": "light",
+      "image": "arena-home-light.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "6d1fdd8f419b63d16442a4d372d754a3bb6ccb619087ebd4f3e53ed281d3e76f",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-home",
+      "appearance": "dark",
+      "image": "arena-home-dark.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "f9621856105fbd01dccd1e868181a6e66ed56ac8f87714da627d94b364e0d4c1",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-home",
+      "appearance": "light",
+      "image": "arena-home-light-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "265c5ecdcc3322fe077f908962a21caae3d88c27eba34a2098009d2e04727d62",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-home",
+      "appearance": "dark",
+      "image": "arena-home-dark-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "08590da05fb2c3be1183d62ac498e96ab7d834d10517a8fa2d9718fbc5a044a6",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "3c14c339c8ebc0d6e561a4f4e90a5df118fadd89433de62dbdcf2ba720aae9ff",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-live",
+      "appearance": "light",
+      "image": "arena-live-light.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "74e03c4e93b9f530f4aa879daae0f4ae91f09bdd996c9bf7bb22352318fdbbe2",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "9f6d308ae19a62239ae9cf8707807fd4c1fa56ba1c66c5d520c81d4069151c15",
+      "harnessSHA256": "957b74d136f53b31b582e7e103a898e3a19e6e153a577379faaa58fc2cffad69"
+    },
+    {
+      "page": "arena-live",
+      "appearance": "dark",
+      "image": "arena-live-dark.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "1c758bbb3a4fdfbcb7e1b11b50785adc6e7f0f9b60b489e4876f5d755ea95f5a",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "9f6d308ae19a62239ae9cf8707807fd4c1fa56ba1c66c5d520c81d4069151c15",
+      "harnessSHA256": "957b74d136f53b31b582e7e103a898e3a19e6e153a577379faaa58fc2cffad69"
+    },
+    {
+      "page": "arena-live",
+      "appearance": "light",
+      "image": "arena-live-light-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "939b58a387e8cc29b66d31ed0a7dc60864565d25a1675002b3873952c740a159",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "9f6d308ae19a62239ae9cf8707807fd4c1fa56ba1c66c5d520c81d4069151c15",
+      "harnessSHA256": "957b74d136f53b31b582e7e103a898e3a19e6e153a577379faaa58fc2cffad69"
+    },
+    {
+      "page": "arena-live",
+      "appearance": "dark",
+      "image": "arena-live-dark-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "8b4f83ca74be93a6fcc2f68c9183858bbd21bc494a4488fa5737619bf3d639ce",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "9f6d308ae19a62239ae9cf8707807fd4c1fa56ba1c66c5d520c81d4069151c15",
+      "harnessSHA256": "957b74d136f53b31b582e7e103a898e3a19e6e153a577379faaa58fc2cffad69"
+    },
+    {
+      "page": "arena-duel",
+      "appearance": "light",
+      "image": "arena-duel-light.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "293ea98cdc7020e443d790f4d6a7141667ae67087411a3982833f3700fb6abbe",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-duel",
+      "appearance": "dark",
+      "image": "arena-duel-dark.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "a9b75547ba4288812ce046443c63947090ed392e4f9268b9f2e02aaed16e76c3",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-duel",
+      "appearance": "light",
+      "image": "arena-duel-light-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "520599c24b840a1eed780b041624f8646094fbe979f535c61bbbaf52dd193c89",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-duel",
+      "appearance": "dark",
+      "image": "arena-duel-dark-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "de8f875c0ddccd33d61dbe5d1a3b36f4a4c932a6a72aec3334d3315f61d5a253",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-revealed",
+      "appearance": "light",
+      "image": "arena-revealed-light.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "c55d925663563529ad1f93c1f1fbd30faee63f235140ce111d870e6ee816df18",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "9f6d308ae19a62239ae9cf8707807fd4c1fa56ba1c66c5d520c81d4069151c15",
+      "harnessSHA256": "957b74d136f53b31b582e7e103a898e3a19e6e153a577379faaa58fc2cffad69"
+    },
+    {
+      "page": "arena-revealed",
+      "appearance": "dark",
+      "image": "arena-revealed-dark.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "0dbd87bbaaa35e39225ab8bade1de8c31b209de49b8b095304c522172fecc333",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "9f6d308ae19a62239ae9cf8707807fd4c1fa56ba1c66c5d520c81d4069151c15",
+      "harnessSHA256": "957b74d136f53b31b582e7e103a898e3a19e6e153a577379faaa58fc2cffad69"
+    },
+    {
+      "page": "arena-revealed",
+      "appearance": "light",
+      "image": "arena-revealed-light-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "ceac225cb837fa219ae920ce4f3af7ac06e40ea7ee70fefb56e408936c187f88",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "9f6d308ae19a62239ae9cf8707807fd4c1fa56ba1c66c5d520c81d4069151c15",
+      "harnessSHA256": "957b74d136f53b31b582e7e103a898e3a19e6e153a577379faaa58fc2cffad69"
+    },
+    {
+      "page": "arena-revealed",
+      "appearance": "dark",
+      "image": "arena-revealed-dark-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "1f5f335376c6825b5bfe688c934b5b1686e040e1c79ae13eb7fe60e2bee863f7",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "9f6d308ae19a62239ae9cf8707807fd4c1fa56ba1c66c5d520c81d4069151c15",
+      "harnessSHA256": "957b74d136f53b31b582e7e103a898e3a19e6e153a577379faaa58fc2cffad69"
+    },
+    {
+      "page": "arena-ranking",
+      "appearance": "light",
+      "image": "arena-ranking-light.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "9f6bc0ad72e549d85e1e65f4bcb0fa8629c6d2805994a3f626e1ab9cbd80e7cd",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-ranking",
+      "appearance": "dark",
+      "image": "arena-ranking-dark.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "a5ae7d4962ba9091cd9ef33a7a9f194e58d25bf77e14c2e49f42f768b8b275cd",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-ranking",
+      "appearance": "light",
+      "image": "arena-ranking-light-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "ef851474628ee5f58b9dd4b83e92721dc88f785e02376d1a64562d33861cf0f1",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-ranking",
+      "appearance": "dark",
+      "image": "arena-ranking-dark-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "aa9656d8a2f89398a753dd4414e98f3276ec3f87eb65f2e2badbee01ee6ea20f",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-history",
+      "appearance": "light",
+      "image": "arena-history-light.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "dc458d5cae296770f7ed2afca488eef2cbea77ad9b37c5c807205452d7287552",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-history",
+      "appearance": "dark",
+      "image": "arena-history-dark.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "3975a55fc02a93667153dcb63efe79cbd08ab33b99ca31530b1202ce4b58a1d1",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-history",
+      "appearance": "light",
+      "image": "arena-history-light-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "c105c020df6143248bd98615b8bd73a1325b85d61bcb620d887ab1ca1adab3de",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-history",
+      "appearance": "dark",
+      "image": "arena-history-dark-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "786263bfd3b3ff37b9409b6e84dc7faf5d93efe31792ca4096b25aece8f24e76",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-presets",
+      "appearance": "light",
+      "image": "arena-presets-light.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "e9874173202907dfb9150c141f98750a43d0169861520a194bafe0de29cfb4ae",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-presets",
+      "appearance": "dark",
+      "image": "arena-presets-dark.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "5ff86dfe1caae45a639bedadb931a6fdfd3a6c2d5fa7e5cc8ae2fc37e50c70c2",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-presets",
+      "appearance": "light",
+      "image": "arena-presets-light-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "5f0da83c82e941e47b69d928bbcbd4aea997e3fea3e0f35092fe49f222829901",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-presets",
+      "appearance": "dark",
+      "image": "arena-presets-dark-720x700.png",
+      "label": "Offscreen native Arena; isolated synthetic match and ledger fixtures or empty queue",
+      "sha256": "c2d56332659b5d751b4622639b8ad099040beeb366b10b0082ac8f023e80c438",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-empty",
+      "appearance": "light",
+      "image": "arena-empty-light.png",
+      "label": "Offscreen native page, empty fixture; capture-only session bypass",
+      "sha256": "32230b9723da0da7021533bf0c479665573b784495c277d7fed36d5e27048d88",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-empty",
+      "appearance": "dark",
+      "image": "arena-empty-dark.png",
+      "label": "Offscreen native page, empty fixture; capture-only session bypass",
+      "sha256": "0c2cf0852690976ed2cf24b2625d48095c42ed42300276e618bd0480bb117b65",
+      "viewport": [
+        1050,
+        800
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-empty",
+      "appearance": "light",
+      "image": "arena-empty-light-720x700.png",
+      "label": "Offscreen native page, empty fixture; capture-only session bypass",
+      "sha256": "3d32b7ad4f7bfd1b3af0ec4dff1aeebace0b9d214d92c003f3ab2979b0951d89",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
+    },
+    {
+      "page": "arena-empty",
+      "appearance": "dark",
+      "image": "arena-empty-dark-720x700.png",
+      "label": "Offscreen native page, empty fixture; capture-only session bypass",
+      "sha256": "497f312225729dfc1b171b86e5b0758ca56ff3549edd96cd4fc11ac36027c48d",
+      "viewport": [
+        720,
+        700
+      ],
+      "parentVisualReviewed": true,
+      "sourceSHA256": "273c6fc1766db6edf5cd58024487004cb654a13bad83001f9c48b9431cbb888f",
+      "compositionSHA256": "6cc88de9213643bc93797ea543b2cbbd8028885810fcd4832c752dfde48c4b77",
+      "harnessSHA256": "a322df1b6318844df52b48b4aad3289911af0e44c2fa1c60666c6ac3c0508207"
     }
   ],
   "onboardingReview": "Single-screen welcome: eight exact finite Default-spacing Light/Dark captures at 820x660, 760x580, 700x580 and 640x520, visually reviewed; no compositor or fresh-user acceptance.",
-  "settingsCaptureScope": "Default pages plus disclosure state and programmatic scrolling in detail captures; no interaction proof."
+  "settingsCaptureScope": "Default pages plus disclosure state and programmatic scrolling in detail captures; no interaction proof.",
+  "arenaCaptureScope": "Judge, revealed performance, Ranking, New match, History and empty Judge in Light/Dark at 1050x800 and 720x700. Isolated synthetic SQLite and ledger fixtures; no input, full-shell or compositor claim."
 }

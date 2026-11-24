@@ -38,4 +38,41 @@ final class ArenaNavigationPolicyTests: XCTestCase {
         XCTAssertNil(ArenaPresentationPolicy.nextMatchID(in: rows, after: "current", history: false))
         XCTAssertEqual(ArenaPresentationPolicy.nextMatchID(in: rows, after: "current", history: true), "judged")
     }
+
+    func testHistorySelectionDoesNotReplaceJudgeAndSkipRemainsUntilNext() {
+        let ready: JSONValue = ["id": "ready", "status": "done", "created_at": 1]
+        let prior: JSONValue = ["id": "prior", "status": "done", "voted_at": 10, "created_at": 2]
+        var selection = ArenaMatchSelection()
+        selection[.history] = "prior"
+        XCTAssertEqual(selection.current(selection.visible([prior, ready], in: .judge), in: .judge)?["id"], "ready")
+        selection[.judge] = "ready"
+        var skipped = ready
+        skipped["voted_at"] = 11
+        XCTAssertEqual(selection.visible([prior, skipped], in: .judge), [skipped])
+        XCTAssertEqual(selection.current(selection.visible([prior, skipped], in: .history), in: .history), prior)
+        selection[.judge] = nil
+        XCTAssertTrue(selection.visible([prior, skipped], in: .judge).isEmpty)
+        XCTAssertEqual(selection[.history], "prior")
+    }
+
+    func testNextWrapsFromSkippedMatchToFirstReadyMatchInJudgeOrder() {
+        let first: JSONValue = ["id": "first", "status": "done", "created_at": 1]
+        let skipped: JSONValue = ["id": "skipped", "status": "done", "created_at": 2, "voted_at": 4]
+        let running: JSONValue = ["id": "running", "status": "running", "created_at": 3]
+        var selection = ArenaMatchSelection()
+        selection[.judge] = "skipped"
+        let rows = selection.visible([first, skipped, running], in: .judge)
+        XCTAssertEqual(ArenaPresentationPolicy.nextMatchID(in: rows, after: "skipped", history: false), "first")
+    }
+
+    func testHistorySearchFindsDisplayedStatusWithoutMatchingBlindModels() {
+        let ready: JSONValue = ["status": "done", "slots": [["model": "blind-model", "revealed": false]]]
+        let judged: JSONValue = ["status": "done", "voted_at": 10, "verdict": "all_bad", "slots": [["model": "known-model", "revealed": true]]]
+        XCTAssertEqual(ArenaPresentationPolicy.matchStatus(ready), "ready to judge")
+        XCTAssertTrue(ArenaPresentationPolicy.matchesHistorySearch(ready, term: "Ready to Judge"))
+        XCTAssertFalse(ArenaPresentationPolicy.matchesHistorySearch(judged, term: "ready to judge"))
+        XCTAssertTrue(ArenaPresentationPolicy.matchesHistorySearch(judged, term: "all bad"))
+        XCTAssertFalse(ArenaPresentationPolicy.matchesHistorySearch(ready, term: "blind-model"))
+        XCTAssertTrue(ArenaPresentationPolicy.matchesHistorySearch(judged, term: "known-model"))
+    }
 }

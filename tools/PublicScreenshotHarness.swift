@@ -26,6 +26,91 @@ struct PublicCaptureAnchor: NSViewRepresentable {
     func updateNSView(_ view: PublicCaptureAnchorView, context: Context) { view.anchorName = name }
 }
 
+private enum PublicArenaCapture {
+    static let screens = ["arena-home": "Home", "arena-empty": "Home", "arena-live": "Watch",
+                          "arena-duel": "Match", "arena-revealed": "Match", "arena-history": "History",
+                          "arena-ranking": "Ranking", "arena-presets": "Presets"]
+    static let matches = ["arena-duel": "fixture-match-0", "arena-live": "fixture-match-1", "arena-revealed": "fixture-match-4"]
+    static let task = "Design a keyboard-first reading list. Explain how users add a first book and resume where they left off."
+    static let homePreset = "fixture-home-task"
+
+    static func prepare(page: String, runtime: NativeRuntime) async throws {
+        try await NativeArenaService.shared(runtime: runtime).start()
+        guard page != "arena-empty" else { return }
+        let now = Date().timeIntervalSince1970 * 1000
+        if page == "arena-home" {
+            try runtime.db.execute("INSERT INTO arena_prompts(id,title,category,prompt,builtin,created_at,updated_at) VALUES(?,?,?,?,0,?,?)",
+                                   [.string(homePreset), "Keyboard-first reading list", "design", .string(task), .number(now), .number(now)])
+        }
+        let cedar = "reading-assistant-enterprise-cedar-regional-preview-2026"
+        let models = [(cedar, "sample-source"), ("reading-assistant-enterprise-maple-regional-preview-2026", "sample-source"),
+                      (cedar, "sample-alternate"), ("sample-pine", "sample-source")]
+        let extraModels = [("sample-birch", "sample-source"), ("sample-willow", "sample-alternate"),
+                           ("sample-oak", "sample-source"), ("sample-spruce", "sample-alternate")]
+        let answers = [
+            "Make Add a book the first focused action. It opens a search field and a short list of matches. Enter adds the highlighted book; Escape returns to the library without losing the query.\n\nWhen a book is in progress, put Resume reading first. Show a short excerpt and the last saved page beside it.",
+            "Use one command palette for Add, Find, and Resume. A keyboard shortcut opens it from anywhere, and the default action changes when the library is empty.\n\nKeep a recent books section and show the last completed chapter inline.",
+            "Start with a focused search field. Offer title search, a recent books list, and a simple detail pane with notes and progress.",
+            "Show a small reading queue sorted by last opened. Keep Resume and Add available without opening settings.",
+            "Give the first-run view a single Add book command. After adding a title, put its next unread page in the main view.",
+            "Keep a Continue reading section at the top, with Add book in the same position from empty state to full library.",
+            "Open on the most recently read title. Let the user switch back to the library or add a book from a single shortcut.",
+            "Put search and resume side by side. Show reading progress in the list so reopening a book takes one action."
+        ]
+        let folder = runtime.paths.root.appendingPathComponent("arena/results")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for index in 0..<6 {
+            let id = "fixture-match-\(index)", mode: JSONValue = index.isMultiple(of: 2) ? "random" : "chosen"
+            let ranked = (2...4).contains(index), status: JSONValue = index == 1 ? "running" : index == 5 ? "queued" : "done"
+            let prompt = index == 0 || index == 4 ? task : ["", "Compare two ways to organize a local library.", "Draft an accessible command palette.", "Sketch a desktop notes workspace.", "", "Plan a small offline search index."][index]
+            let created = now - (ranked ? Double(index - 1) * 86_400_000 : Double(index + 2) * 120_000)
+            let expanded = (page == "arena-live" && index == 1) || (page == "arena-revealed" && index == 4)
+            let count = expanded ? 8 : index == 0 || index == 1 || index == 4 ? 4 : 2
+            let contestantsBySlot = expanded ? models + extraModels : models
+            let order = index == 3 ? [0, 1] : Array(0..<count).map { ($0 + index) % count }
+            try runtime.db.execute("INSERT INTO arena_matches(id,mode,prompt,category,status,ranking,verdict,timeout_s,max_turns,created_at,started_at,finished_at,voted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+                .string(id), mode, .string(prompt), "design", status,
+                ranked ? .string("[" + order.map(String.init).joined(separator: ",") + "]") : .null,
+                ranked ? "ranked" : .null, 1200, 80, .number(created), .number(created + 1000),
+                status == "done" ? .number(created + 40_000) : .null, ranked ? .number(created + 50_000) : .null
+            ])
+            var contestants: [JSONValue] = []
+            for slot in 0..<count {
+                let (name, route) = contestantsBySlot[(slot + (count == 2 ? index : 0)) % contestantsBySlot.count]
+                let duration = Double([18_500, 29_000, 24_000, 38_000, 20_800, 26_500, 30_400, 35_000][slot])
+                let workdir = runtime.paths.data.appendingPathComponent("arena/matches/\(id)/slot-\(slot)").path
+                let slotID = JSONValue.string("\(id)-slot-\(slot)")
+                let slotStatus: JSONValue = index == 1 && slot == 0 ? "done" : status
+                try runtime.db.execute("INSERT INTO arena_slots(id,match_id,idx,route,model,status,workdir,final_text,duration_ms,turns,output_tokens,cost_usd,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+                    slotID, .string(id), .number(Double(slot)), .string(route), .string(name), slotStatus,
+                    .string(workdir), slotStatus == "done" ? .string(answers[slot]) : "",
+                    slotStatus == "done" ? .number(duration) : .null, slotStatus == "done" ? .number(Double(slot + 3)) : 0,
+                    .number(Double(640 + slot * 146)), slot == 1 ? 0 : .number(0.014 + Double(slot) * 0.009), .number(created + 1000)
+                ])
+                if index == 1 {
+                    for step in 0..<(slot + 3) {
+                        let tools = ["Read", "Glob", "Edit", "Write"]
+                        let payload: JSONValue = ["message_id": .string("fixture-message-\(step)"), "content": [
+                            ["type": "tool_use", "name": .string(tools[(step + slot) % tools.count])],
+                            ["type": "text", "text": .string(answers[slot])]
+                        ]]
+                        let body = String(decoding: try payload.encoded(), as: UTF8.self)
+                        try runtime.db.execute("INSERT INTO arena_slot_events(slot_id,seq,type,payload,ts) VALUES(?,?,?,?,?)",
+                                               [slotID, .number(Double(step + 1)), "assistant", .string(body), .number(created + Double(step * 1000))])
+                    }
+                }
+                contestants.append(["route": .string(route), "model": .string(name), "status": "done",
+                                     "rank": .number(Double((order.firstIndex(of: slot) ?? 0) + 1)), "duration_ms": .number(duration), "turns": .number(Double(slot + 3))])
+            }
+            if ranked {
+                let value: JSONValue = ["v": 1, "id": .string(id), "ts": .number(created + 50_000), "mode": mode, "category": "design",
+                                        "voter": "sample", "prompt": .string(prompt), "verdict": "ranked", "contestants": .array(contestants)]
+                try NativeFile.writeAtomic(try value.encoded(pretty: true), to: folder.appendingPathComponent(id + ".json"))
+            }
+        }
+    }
+}
+
 final class PublicCaptureAnchorView: NSView {
     var anchorName = ""
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -111,11 +196,12 @@ final class PublicCaptureAnchorView: NSView {
                               "settings-theme-common": "theme-common", "settings-theme-advanced": "theme-advanced"]
         let section = detailSections[page]
         let onboarding = page == "onboarding-welcome"
+        let arenaScreen = PublicArenaCapture.screens[page]
         let pricing = ["pricing-empty": "empty", "pricing-unknown": "unknown", "pricing-partial": "partial", "pricing-priced": "priced"][page]
         let viewportAllowed = pricing == nil
             ? (640...1200).contains(width) && (500...1000).contains(height)
             : (320...1200).contains(width) && (100...1000).contains(height)
-        guard paths.readOnly, ["stats", "transcribe", "settings"].contains(page) || onboarding || section != nil || pricing != nil,
+        guard paths.readOnly, ["stats", "transcribe", "settings"].contains(page) || onboarding || section != nil || pricing != nil || arenaScreen != nil,
               viewportAllowed,
               ["light", "dark"].contains(appearance),
               ProcessInfo.processInfo.environment["UNIAPI_CAPTURE_SETTINGS_SECTION"] == section,
@@ -149,12 +235,12 @@ final class PublicCaptureAnchorView: NSView {
         }
         suite = suiteName; preferences = defaults
         // setVolatileDomain does not create persistent operator preferences.
-        defaults.setVolatileDomain(["uniapi-theme": appearance, "uniapi-density": "standard",
+        let capturePreferences: [String: Any] = ["uniapi-theme": appearance, "uniapi-density": "standard",
                                     "uniapi-motion": "reduced", "uniapi.transcribe.notify": false,
-                                    "uniapi.stats.source": "all", "uniapi.stats.range": 0],
-                                   forName: suiteName)
+                                    "uniapi.stats.source": "all", "uniapi.stats.range": 0]
+        defaults.setVolatileDomain(capturePreferences, forName: suiteName)
         NativeUIReadiness.shared.launched()
-        let destination: NativeDestination = page == "stats" ? .stats : page == "transcribe" ? .transcribe : .settings
+        let destination: NativeDestination = arenaScreen != nil ? .arena : page == "stats" ? .stats : page == "transcribe" ? .transcribe : .settings
         guard let visit = NativeUIReadiness.shared.begin(destination) else {
             throw NativeFailure("Production readiness instrumentation must be enabled")
         }
@@ -163,6 +249,9 @@ final class PublicCaptureAnchorView: NSView {
             content = AnyView(VStack { NativeStatsPricing(cost: pricingFixture(pricing)); Spacer(minLength: 0) }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Theme.bg))
         } else if onboarding {
             content = AnyView(NativeOnboardingView { _ in })
+        } else if let arenaScreen {
+            content = AnyView(NativeArenaPage(runtime: runtime, opens: arenaScreen, matchID: PublicArenaCapture.matches[page],
+                                              initialPreset: page == "arena-home" ? PublicArenaCapture.homePreset : "").background(Theme.bg))
         } else { switch page {
         case "stats": content = AnyView(NativeStatsPage(runtime: runtime))
         case "transcribe": content = AnyView(NativeTranscribePage(runtime: runtime))
@@ -239,7 +328,8 @@ final class PublicCaptureAnchorView: NSView {
             throw NativeFailure("Cannot encode native page bitmap")
         }
         try sample("after-bitmap")
-        let report: [String: Any] = ["kind": pricing == nil ? "offscreen-native-page-empty-fixture" : "offscreen-native-pricing-component-synthetic", "page": page,
+        let fixtureKind = pricing != nil ? "offscreen-native-pricing-component-synthetic" : arenaScreen != nil && page != "arena-empty" ? "offscreen-native-arena-synthetic" : "offscreen-native-page-empty-fixture"
+        let report: [String: Any] = ["kind": fixtureKind, "page": page,
             "appearance": appearance, "viewportWidth": width, "viewportHeight": height,
             "pixelWidth": bitmap.pixelsWide, "pixelHeight": bitmap.pixelsHigh,
             "quiet": true, "samples": samples, "inputActions": 0,
@@ -274,7 +364,7 @@ final class PublicCaptureAnchorView: NSView {
               env["CFFIXED_USER_HOME"] == home.path else {
             fputs("Isolated capture environment required\n", stderr); exit(64)
         }
-        if args[0] == "--prepare-fixture", args.count == 3 {
+        if args[0] == "--prepare-fixture", args.count == 3 || (args.count == 4 && PublicArenaCapture.screens[args[3]] != nil) {
             // A separate process exits after creating only fresh schemas. No
             // default session, ownership lease, recovery, services or UI starts.
             Task {
@@ -282,6 +372,7 @@ final class PublicCaptureAnchorView: NSView {
                     let runtime = try NativeRuntime(paths: NativePaths(root: root, home: home))
                     try await NativeTranscriptionService(runtime: runtime).start()
                     try await NativeStatisticsService(runtime: runtime).start()
+                    if args.count == 4 { try await PublicArenaCapture.prepare(page: args[3], runtime: runtime) }
                     guard try runtime.db.query("SELECT id FROM jobs").isEmpty,
                           try runtime.db.query("SELECT id FROM transcripts").isEmpty,
                           try runtime.providers.list().isEmpty else {

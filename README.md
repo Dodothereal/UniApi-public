@@ -206,8 +206,8 @@ Hardware controls may require compatible devices and an explicitly installed hel
 
 ## Screenshots
 
-These are native views captured offscreen with empty fixture data. Setup uses
-820×660 and 640×520 viewports; the page views use 1050×800 points.
+These are native views captured offscreen with empty or synthetic fixture data. Setup uses
+820×660 and 640×520 viewports. Arena uses 1050×800 and 720×700 points.
 The capture-only session bypasses normal background-service
 startup. They illustrate views, not full-shell interaction, fresh-install
 acceptance or compositor behavior. The [sanitized manifest](assets/screenshots/manifest.json)
@@ -233,6 +233,28 @@ directly. The single-screen guide can be skipped or replayed from Settings.
 
 The sample contains two synthetic records. Its cost is a reference estimate,
 not an operator's usage or billed spend.
+
+**Arena — blind comparison and ranking**
+
+Start from Arena home: write a task or choose a preset, draw from a random
+pool or pick your own contestants, and watch the run in blind live lanes.
+Judge two answers at a time with Left better, Tie, or Right better (Left arrow,
+T, or Right arrow). Up and Down scroll the focused or hovered reading pane.
+Submit to reveal the models, routes, ranks, and Elo
+changes, or skip the match. Ties share a rank. Performance shows elapsed time,
+output tokens, and reported cost when available. Home previews the standings
+and recent Elo trends; full standings shows rated comparison counts and the
+head-to-head win-rate matrix. Find past matches in searchable History.
+
+![Arena home and standings preview, Dark appearance](assets/screenshots/arena-home-dark.png)
+
+[Home in Light](assets/screenshots/arena-home-light.png) ·
+[Live lanes](assets/screenshots/arena-live-dark.png) ·
+[Blind duel](assets/screenshots/arena-duel-dark.png) ·
+[Reveal](assets/screenshots/arena-revealed-dark.png) ·
+[Standings and head-to-head](assets/screenshots/arena-ranking-dark.png) ·
+[History](assets/screenshots/arena-history-dark.png) ·
+[Compact standings](assets/screenshots/arena-ranking-light-720x700.png)
 
 **Results — sample comparison, Dark**
 

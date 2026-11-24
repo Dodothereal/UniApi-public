@@ -480,6 +480,7 @@ struct NativeShell: View {
     private func navigate(_ requested: NativeDestination) {
         guard NativeShellPolicy.admits(requested.rawValue, batterySupported: batterySupported) else { return }
         if let view = requested.hostView { UserDefaults.standard.set(view.value, forKey: view.key) }
+        if requested == .arena { UserDefaults.standard.set("Home", forKey: NativeArenaHost.viewKey) }
         let page = requested.host
         if page != destination { NativePagePanels.shared.invalidatePresentation(); visit = NativeUIReadiness.shared.begin(page) }
         // Only local selection/entrance effects animate, never the complete new chart tree.
