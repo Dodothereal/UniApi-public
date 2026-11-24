@@ -82,9 +82,18 @@ final class NativeKeyboardObserver: @unchecked Sendable {
         let thread = Thread { [weak self] in
             guard let self else { return }
             let current = CFRunLoopGetCurrent()
-            self.lock.withLock { self.runLoop = current }
-            CFRunLoopAddSource(current, source, .commonModes)
-            CGEvent.tapEnable(tap: port, enable: true)
+            // end() can run before this thread first executes. Registering
+            // the run loop and the source must share the lock with end(), or
+            // a loop started afterwards could never be stopped again and the
+            // thread would be leaked for the rest of the process.
+            let live = self.lock.withLock { () -> Bool in
+                guard self.port != nil else { return false }
+                self.runLoop = current
+                CFRunLoopAddSource(current, source, .commonModes)
+                CGEvent.tapEnable(tap: port, enable: true)
+                return true
+            }
+            guard live else { return }
             CFRunLoopRun()
         }
         thread.name = "UniApi keyboard statistics"; thread.qualityOfService = .utility
