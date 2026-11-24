@@ -12,7 +12,7 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     var jump: Int = 0
     let follows: Binding<Bool>?
     var padding: EdgeInsets
-    var readingPanes: NSHashTable<NSScrollView>?
+    var scrollsOnHover: Bool
     @Environment(\.nativePageActivation) private var activation
     @Environment(\.nativeMotionVisible) private var motionVisible
     @Environment(\.nativeReducedMotion) private var reducedMotion
@@ -20,8 +20,8 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
     init(jump: Int = 0, follows: Binding<Bool>? = nil,
          padding: EdgeInsets = .init(top: 12, leading: 12, bottom: 12, trailing: 12),
-         readingPanes: NSHashTable<NSScrollView>? = nil, @ViewBuilder content: () -> Content) {
-        self.jump = jump; self.follows = follows; self.padding = padding; self.readingPanes = readingPanes; self.content = content()
+         scrollsOnHover: Bool = false, @ViewBuilder content: () -> Content) {
+        self.jump = jump; self.follows = follows; self.padding = padding; self.scrollsOnHover = scrollsOnHover; self.content = content()
     }
     func makeCoordinator() -> Coordinator { Coordinator(follows: follows) }
     func makeNSView(context: Context) -> Scroll {
@@ -34,11 +34,7 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     func updateNSView(_ scroll: Scroll, context: Context) {
         let coordinator = context.coordinator
         coordinator.binding = follows
-        if coordinator.readingPanes !== readingPanes {
-            coordinator.readingPanes?.remove(scroll)
-            coordinator.readingPanes = readingPanes
-            readingPanes?.add(scroll)
-        }
+        coordinator.scrollsOnHover = scrollsOnHover && activation.active
         if coordinator.jump != jump { coordinator.jump = jump; coordinator.policy.jumpToBottom() }
         // A nested NSHostingView starts a new environment. Forward policy and
         // appearance explicitly so retained transcripts cannot keep child
@@ -59,7 +55,6 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
         DispatchQueue.main.async { [weak coordinator, weak scroll] in if let scroll { coordinator?.layout(scroll) } }
     }
     static func dismantleNSView(_ scroll: Scroll, coordinator: Coordinator) {
-        coordinator.readingPanes?.remove(scroll)
         scroll.didLayout = nil; coordinator.stop()
     }
     final class Scroll: NSScrollView {
@@ -78,7 +73,7 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     final class Coordinator {
         let host = Host(rootView: AnyView(EmptyView()))
         var policy = CodeScrollPolicy(), binding: Binding<Bool>?, jump = 0, updating = false, layingOut = false
-        var readingPanes: NSHashTable<NSScrollView>?
+        var scrollsOnHover = false
         var root: ((CGFloat) -> AnyView)?
         private var measure: CGFloat = 0
         func apply(_ width: CGFloat) {
@@ -95,13 +90,21 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
                 self.policy.userScrolled(distanceToBottom: Double(distance)); self.publish()
             }
             host.resized = { [weak self, weak scroll] in DispatchQueue.main.async { if let scroll { self?.layout(scroll) } } }
-            keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak scroll] event in
+            keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak scroll] event in
                 // A retained window can still have this reader as its responder
                 // while a sheet or another window owns the incoming key event.
                 guard let scroll, let window = scroll.window, event.window === window,
                       window.isVisible, !window.isMiniaturized, !NSApp.isHidden,
-                      [UInt16(126), 125, 116, 121, 115, 119].contains(event.keyCode), event.modifierFlags.intersection([.command, .option, .shift, .control]).isEmpty,
-                      let responder = window.firstResponder as? NSView else { return event }
+                      [UInt16(126), 125, 116, 121, 115, 119].contains(event.keyCode),
+                      event.modifierFlags.intersection([.command, .option, .shift, .control]).isEmpty else { return event }
+                if self?.scrollsOnHover == true, event.keyCode == 125 || event.keyCode == 126 {
+                    guard window.isKeyWindow, window.attachedSheet == nil, let root = window.contentView,
+                          NativeArenaDuelFocus.routesVerticalArrow(to: scroll, firstResponder: window.firstResponder,
+                                                                 pointer: root.convert(window.mouseLocationOutsideOfEventStream, from: nil),
+                                                                 in: root) else { return event }
+                    scroll.keyDown(with: event); return nil
+                }
+                guard let responder = window.firstResponder as? NSView else { return event }
                 if let text = responder as? NSTextView, text.isEditable { return event }
                 var view: NSView? = responder
                 while let candidate = view, candidate !== scroll {

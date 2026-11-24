@@ -105,6 +105,8 @@ components instead of building a page-specific arrangement.
   match gets a horizontal lane per blind contestant; the lanes use observed
   top-level assistant steps during a run and recorded steps when finished.
   Duels keep two independently scrollable answers and a fixed verdict footer.
+  Left and Right vote, T marks a tie, and Up and Down scroll the focused or
+  hovered reading pane without voting.
   Reveal shows the ranking and Elo changes from the ledger; performance
   comparisons only appear after reveal.
 - **Route line** (`NativeRouteLine`). A tool's route reads left to right as

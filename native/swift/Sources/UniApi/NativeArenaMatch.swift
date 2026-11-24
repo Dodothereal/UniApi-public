@@ -15,8 +15,6 @@ struct NativeArenaMatch: View {
     @State private var leftContent = "Result"
     @State private var rightContent = "Result"
     @State private var compared = [0, 1]
-    @FocusState private var duelFocused: Bool
-    @State private var readingPanes = NSHashTable<NSScrollView>.weakObjects()
     @Environment(\.nativePageActive) private var pageActive
     @Environment(\.nativeInterfaceDensity) private var density
     @Environment(\.nativeReducedMotion) private var reducedMotion
@@ -108,11 +106,9 @@ struct NativeArenaMatch: View {
                 VStack(alignment: .trailing, spacing: 8) { duelChoices; secondaryChoices }
             }.padding(.horizontal, density.pageMargin).padding(.vertical, 12).disabled(busy)
         }
-        .focusable().focusEffectDisabled().focused($duelFocused)
-        .defaultFocus($duelFocused, true)
         .background {
             if pageActive {
-                NativeArenaDuelKeys(readingPanes: readingPanes, choose: choose).allowsHitTesting(false).accessibilityHidden(true)
+                NativeArenaDuelKeys(choose: choose).allowsHitTesting(false).accessibilityHidden(true)
             }
         }
     }
@@ -129,7 +125,9 @@ struct NativeArenaMatch: View {
         if duel.pair != nil {
             HStack {
                 Button("Left better", nativeIcon: "arrow-left") { choose(.left) }.buttonStyle(T3Button(.primary)).help("Left arrow")
-                Button("Tie", nativeIcon: "arrow-down") { choose(.tie) }.buttonStyle(T3Button(.outline)).help("Down arrow")
+                Button { choose(.tie) } label: {
+                    HStack(spacing: 6) { Text("Tie"); Text("T").font(Theme.mono(Theme.textXs)).foregroundStyle(Theme.muted) }
+                }.buttonStyle(T3Button(.outline)).accessibilityLabel("Tie").help("Tie (T)")
                 Button("Right better", nativeIcon: "arrow-right") { choose(.right) }.buttonStyle(T3Button(.primary)).help("Right arrow")
             }
         } else {
@@ -232,7 +230,7 @@ struct NativeArenaMatch: View {
                 .padding(.horizontal, 12).accessibilityLabel("\(slot["label"].string) content")
             Theme.rule.frame(height: 1)
             NativeArenaSlot(runtime: runtime, model: model, slot: slot, tab: selection.wrappedValue,
-                            compactName: compactNames[slot["model"].string], readingPanes: judging ? readingPanes : nil)
+                            compactName: compactNames[slot["model"].string], judging: judging)
         }.frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
@@ -252,68 +250,31 @@ struct NativeArenaMatch: View {
 }
 
 private struct NativeArenaDuelKeys: NSViewRepresentable {
-    let readingPanes: NSHashTable<NSScrollView>
     let choose: (ArenaDuel.Choice) -> Bool
 
     func makeNSView(context: Context) -> MonitorView { MonitorView() }
-    func updateNSView(_ view: MonitorView, context: Context) { view.readingPanes = readingPanes; view.choose = choose }
+    func updateNSView(_ view: MonitorView, context: Context) { view.choose = choose }
     static func dismantleNSView(_ view: MonitorView, coordinator: ()) { view.stop() }
 
     final class MonitorView: NSView {
         var choose: ((ArenaDuel.Choice) -> Bool)?
-        var readingPanes: NSHashTable<NSScrollView>?
         private var monitor: Any?
-        private var click = 0
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             stop()
             guard window != nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-                guard let self, let window = self.window, event.window === window, window.attachedSheet == nil else { return event }
-                if event.type != .keyDown {
-                    self.focusReadingPane(at: event.locationInWindow, in: window)
-                    return event
-                }
-                guard window.isKeyWindow, !event.isARepeat,
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, let window = self.window, event.window === window, window.isKeyWindow,
+                      window.attachedSheet == nil, !event.isARepeat,
                       event.modifierFlags.intersection([.command, .option, .shift, .control]).isEmpty,
-                      !NativeArenaDuelFocus.preservesArrowKeys(for: window.firstResponder) else { return event }
-                let choice: ArenaDuel.Choice
-                switch event.specialKey {
-                case .leftArrow: choice = .left
-                case .downArrow: choice = .tie
-                case .rightArrow: choice = .right
-                default: return event
-                }
+                      let choice = NativeArenaDuelFocus.vote(for: event.specialKey, characters: event.charactersIgnoringModifiers,
+                                                           firstResponder: window.firstResponder) else { return event }
                 return self.choose?(choice) == true ? nil : event
             }
         }
 
-        private func focusReadingPane(at point: NSPoint, in window: NSWindow) {
-            click += 1
-            guard let contentView = window.contentView else { return }
-            let panes = readingPanes?.allObjects.filter { $0.window === window } ?? []
-            guard let pane = NativeArenaDuelFocus.readingPane(at: contentView.convert(point, from: nil), in: contentView, among: panes) else {
-                if NativeArenaDuelFocus.preservesArrowKeys(for: window.firstResponder) { window.makeFirstResponder(nil) }
-                return
-            }
-            let click = click
-            // Let the hit view handle selection and controls before restoring pane focus if needed.
-            DispatchQueue.main.async { [weak self, weak pane, weak window] in
-                guard let self, self.click == click, let pane, let window, self.window === window, pane.window === window,
-                      window.isKeyWindow, window.attachedSheet == nil,
-                      !NativeArenaDuelFocus.preservesArrowKeys(for: window.firstResponder) else { return }
-                window.makeFirstResponder(pane)
-            }
-            if let focused = window.firstResponder as? NSView, focused.isDescendant(of: pane) {
-                let hit = contentView.hitTest(contentView.superview?.convert(point, from: nil) ?? point)
-                if let hit, NativeArenaDuelFocus.preservesArrowKeys(for: hit, excludingScrollViews: true) { return }
-            }
-            window.makeFirstResponder(pane)
-        }
-
         func stop() {
-            click += 1
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
         }
@@ -369,7 +330,7 @@ private struct NativeArenaSlot: View {
     let slot: JSONValue
     let tab: String
     let compactName: String?
-    let readingPanes: NSHashTable<NSScrollView>?
+    let judging: Bool
     @State private var presentation = 0
     @State private var files: [JSONValue] = []
     @State private var preview: NativeArenaPreviewItem?
@@ -404,15 +365,15 @@ private struct NativeArenaSlot: View {
                 else { duration(at: Date()) }
             }.padding(.horizontal, 16).frame(height: 32).background(Theme.sunken)
         }
-        if tab == "Transcript" { NativeCodeScroll(jump: jump, follows: $follows, readingPanes: readingPanes) { VStack(alignment: .leading, spacing: 10) {
+        if tab == "Transcript" { NativeCodeScroll(jump: jump, follows: $follows, scrollsOnHover: judging) { VStack(alignment: .leading, spacing: 10) {
             if model.transcripts[id]?.isEmpty == true, slot["status"].string != "running", model.contentError(id, tab: tab).isEmpty {
                 Text("No transcript was recorded").font(Theme.ui(12)).foregroundStyle(Theme.muted)
             }
             NativeCodeTranscript(events: model.transcripts[id] ?? [], running: slot["status"].string == "running")
             NativeCodeLiveView(live: CodeLiveState(json: model.live[id] ?? .null), events: model.transcripts[id] ?? [])
         } }.frame(maxHeight: .infinity).overlay(alignment: .bottomTrailing) { if !follows { Button("Jump to latest", nativeIcon: "arrow-down") { jump += 1 }.buttonStyle(T3Button(.outline)).padding(8) } } }
-        else if let readingPanes {
-            NativeCodeScroll(padding: .init(top: 14, leading: 16, bottom: 14, trailing: 16), readingPanes: readingPanes) {
+        else if judging {
+            NativeCodeScroll(padding: .init(top: 14, leading: 16, bottom: 14, trailing: 16), scrollsOnHover: true) {
                 readingContent
             }.id(tab).frame(maxHeight: .infinity)
         } else {

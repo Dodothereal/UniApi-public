@@ -238,8 +238,9 @@ not an operator's usage or billed spend.
 
 Start from Arena home: write a task or choose a preset, draw from a random
 pool or pick your own contestants, and watch the run in blind live lanes.
-Judge two answers at a time with Left better, Tie, or Right better (left,
-down, or right arrow). Submit to reveal the models, routes, ranks, and Elo
+Judge two answers at a time with Left better, Tie, or Right better (Left arrow,
+T, or Right arrow). Up and Down scroll the focused or hovered reading pane.
+Submit to reveal the models, routes, ranks, and Elo
 changes, or skip the match. Ties share a rank. Performance shows elapsed time,
 output tokens, and reported cost when available. Home previews the standings
 and recent Elo trends; full standings shows rated comparison counts and the
