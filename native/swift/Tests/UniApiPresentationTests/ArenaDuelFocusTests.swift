@@ -26,4 +26,20 @@ import XCTest
         XCTAssertTrue(NativeArenaDuelFocus.preservesArrowKeys(for: nested))
         XCTAssertTrue(NativeArenaDuelFocus.preservesArrowKeys(for: responder))
     }
+
+    func testClickTargetsUseVisiblePaneBoundsRatherThanTextOrChrome() async {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        let left = NSScrollView(frame: NSRect(x: 0, y: 20, width: 145, height: 140))
+        let right = NSScrollView(frame: NSRect(x: 155, y: 20, width: 145, height: 140))
+        root.addSubview(left)
+        root.addSubview(right)
+        let panes = [left, right]
+
+        XCTAssertTrue(NativeArenaDuelFocus.readingPane(at: NSPoint(x: 140, y: 90), in: root, among: panes) === left)
+        XCTAssertTrue(NativeArenaDuelFocus.readingPane(at: NSPoint(x: 285, y: 90), in: root, among: panes) === right)
+        XCTAssertNil(NativeArenaDuelFocus.readingPane(at: NSPoint(x: 150, y: 90), in: root, among: panes))
+        XCTAssertNil(NativeArenaDuelFocus.readingPane(at: NSPoint(x: 140, y: 165), in: root, among: panes))
+        left.isHidden = true
+        XCTAssertNil(NativeArenaDuelFocus.readingPane(at: NSPoint(x: 140, y: 90), in: root, among: panes))
+    }
 }

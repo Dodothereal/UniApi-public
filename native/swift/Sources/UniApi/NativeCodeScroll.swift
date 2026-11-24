@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import WebKit
 import UniApiCore
 import UniApiPresentation
 
@@ -9,14 +10,20 @@ import UniApiPresentation
 struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     let content: Content
     var jump: Int = 0
-    @Binding var follows: Bool
+    let follows: Binding<Bool>?
+    var padding: EdgeInsets
+    var readingPanes: NSHashTable<NSScrollView>?
     @Environment(\.nativePageActivation) private var activation
     @Environment(\.nativeMotionVisible) private var motionVisible
     @Environment(\.nativeReducedMotion) private var reducedMotion
     @Environment(\.nativeInterfaceDensity) private var density
     @Environment(\.colorScheme) private var colorScheme
-    init(jump: Int = 0, follows: Binding<Bool>, @ViewBuilder content: () -> Content) { self.jump = jump; _follows = follows; self.content = content() }
-    func makeCoordinator() -> Coordinator { Coordinator(follows: $follows) }
+    init(jump: Int = 0, follows: Binding<Bool>? = nil,
+         padding: EdgeInsets = .init(top: 12, leading: 12, bottom: 12, trailing: 12),
+         readingPanes: NSHashTable<NSScrollView>? = nil, @ViewBuilder content: () -> Content) {
+        self.jump = jump; self.follows = follows; self.padding = padding; self.readingPanes = readingPanes; self.content = content()
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(follows: follows) }
     func makeNSView(context: Context) -> Scroll {
         let scroll = Scroll(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = false; scroll.drawsBackground = false; scroll.autohidesScrollers = true
         scroll.documentView = context.coordinator.host; scroll.contentView.postsBoundsChangedNotifications = true
@@ -26,16 +33,21 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     }
     func updateNSView(_ scroll: Scroll, context: Context) {
         let coordinator = context.coordinator
-        coordinator.binding = $follows
+        coordinator.binding = follows
+        if coordinator.readingPanes !== readingPanes {
+            coordinator.readingPanes?.remove(scroll)
+            coordinator.readingPanes = readingPanes
+            readingPanes?.add(scroll)
+        }
         if coordinator.jump != jump { coordinator.jump = jump; coordinator.policy.jumpToBottom() }
         // A nested NSHostingView starts a new environment. Forward policy and
         // appearance explicitly so retained transcripts cannot keep child
         // image reads/motion active or silently lose the chosen density/theme.
         // The measure is applied by the coordinator: the scroll view has no
         // width yet when it is first made, and a resize arrives without an update.
-        let content = content, activation = activation, motionVisible = motionVisible, reducedMotion = reducedMotion, density = density, colorScheme = colorScheme
+        let content = content, padding = padding, activation = activation, motionVisible = motionVisible, reducedMotion = reducedMotion, density = density, colorScheme = colorScheme
         coordinator.root = { width in
-            AnyView(content.padding(12).frame(width: width, alignment: .topLeading).fixedSize(horizontal: false, vertical: true).frame(maxHeight: .infinity, alignment: .topLeading)
+            AnyView(content.padding(padding).frame(width: width, alignment: .topLeading).fixedSize(horizontal: false, vertical: true).frame(maxHeight: .infinity, alignment: .topLeading)
                 .environment(\.nativePageActivation, activation)
                 .environment(\.nativeMotionVisible, motionVisible)
                 .environment(\.nativeReducedMotion, reducedMotion)
@@ -46,7 +58,10 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
         coordinator.layout(scroll)
         DispatchQueue.main.async { [weak coordinator, weak scroll] in if let scroll { coordinator?.layout(scroll) } }
     }
-    static func dismantleNSView(_ scroll: Scroll, coordinator: Coordinator) { scroll.didLayout = nil; coordinator.stop() }
+    static func dismantleNSView(_ scroll: Scroll, coordinator: Coordinator) {
+        coordinator.readingPanes?.remove(scroll)
+        scroll.didLayout = nil; coordinator.stop()
+    }
     final class Scroll: NSScrollView {
         var didLayout: (() -> Void)?
         override var acceptsFirstResponder: Bool { true }
@@ -62,7 +77,8 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
     final class Host: NSHostingView<AnyView> { var resized: (() -> Void)?; override func invalidateIntrinsicContentSize() { super.invalidateIntrinsicContentSize(); resized?() } }
     final class Coordinator {
         let host = Host(rootView: AnyView(EmptyView()))
-        var policy = CodeScrollPolicy(), binding: Binding<Bool>, jump = 0, updating = false, layingOut = false
+        var policy = CodeScrollPolicy(), binding: Binding<Bool>?, jump = 0, updating = false, layingOut = false
+        var readingPanes: NSHashTable<NSScrollView>?
         var root: ((CGFloat) -> AnyView)?
         private var measure: CGFloat = 0
         func apply(_ width: CGFloat) {
@@ -71,7 +87,7 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
         }
         private var observer: NSObjectProtocol?
         private var keys: Any?
-        init(follows: Binding<Bool>) { binding = follows; host.isFlipped = true }
+        init(follows: Binding<Bool>?) { binding = follows; host.isFlipped = true }
         func observe(_ scroll: Scroll) {
             observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self, weak scroll] _ in
                 guard let self, let scroll, !self.updating, !self.layingOut else { return }
@@ -88,7 +104,10 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
                       let responder = window.firstResponder as? NSView else { return event }
                 if let text = responder as? NSTextView, text.isEditable { return event }
                 var view: NSView? = responder
-                while let candidate = view, candidate !== scroll { view = candidate.superview }
+                while let candidate = view, candidate !== scroll {
+                    if candidate is WKWebView || candidate is NSScrollView { return event }
+                    view = candidate.superview
+                }
                 guard view === scroll else { return event }
                 scroll.keyDown(with: event); return nil
             }
@@ -102,11 +121,12 @@ struct NativeCodeScroll<Content: View>: NSViewRepresentable {
             let fitted = max(viewport, host.fittingSize.height)
             guard fitted.isFinite else { return }
             if abs(host.frame.height - fitted) > 0.5 { host.setFrameSize(NSSize(width: width, height: fitted)) }
-            let target = policy.target(oldHeight: Double(old), newHeight: Double(fitted), viewport: Double(viewport), oldOffset: Double(offset))
+            let target = binding == nil ? min(max(0, fitted - viewport), offset)
+                : policy.target(oldHeight: Double(old), newHeight: Double(fitted), viewport: Double(viewport), oldOffset: Double(offset))
             if abs(Double(offset) - target) > 0.5 { scroll.contentView.scroll(to: NSPoint(x: 0, y: target)); scroll.reflectScrolledClipView(scroll.contentView) }
             publish()
         }
-        private func publish() { let value = policy.follows; if binding.wrappedValue != value { DispatchQueue.main.async { [weak self] in self?.binding.wrappedValue = value } } }
+        private func publish() { let value = policy.follows; if let binding, binding.wrappedValue != value { DispatchQueue.main.async { [weak self] in self?.binding?.wrappedValue = value } } }
         func stop() { root = nil; if let observer { NotificationCenter.default.removeObserver(observer) }; if let keys { NSEvent.removeMonitor(keys) }; keys = nil; observer = nil; host.resized = nil }
         deinit { stop() }
     }

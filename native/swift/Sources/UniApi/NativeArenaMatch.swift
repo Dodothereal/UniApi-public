@@ -16,6 +16,7 @@ struct NativeArenaMatch: View {
     @State private var rightContent = "Result"
     @State private var compared = [0, 1]
     @FocusState private var duelFocused: Bool
+    @State private var readingPanes = NSHashTable<NSScrollView>.weakObjects()
     @Environment(\.nativePageActive) private var pageActive
     @Environment(\.nativeInterfaceDensity) private var density
     @Environment(\.nativeReducedMotion) private var reducedMotion
@@ -111,7 +112,7 @@ struct NativeArenaMatch: View {
         .defaultFocus($duelFocused, true)
         .background {
             if pageActive {
-                NativeArenaDuelKeys(choose: choose).allowsHitTesting(false).accessibilityHidden(true)
+                NativeArenaDuelKeys(readingPanes: readingPanes, choose: choose).allowsHitTesting(false).accessibilityHidden(true)
             }
         }
     }
@@ -230,7 +231,8 @@ struct NativeArenaMatch: View {
             NativeTabs(options: ["Result", "Transcript", "Files"].map { ($0, $0) }, selection: selection.wrappedValue, height: 33) { selection.wrappedValue = $0 }
                 .padding(.horizontal, 12).accessibilityLabel("\(slot["label"].string) content")
             Theme.rule.frame(height: 1)
-            NativeArenaSlot(runtime: runtime, model: model, slot: slot, tab: selection.wrappedValue, compactName: compactNames[slot["model"].string])
+            NativeArenaSlot(runtime: runtime, model: model, slot: slot, tab: selection.wrappedValue,
+                            compactName: compactNames[slot["model"].string], readingPanes: judging ? readingPanes : nil)
         }.frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
@@ -250,23 +252,30 @@ struct NativeArenaMatch: View {
 }
 
 private struct NativeArenaDuelKeys: NSViewRepresentable {
+    let readingPanes: NSHashTable<NSScrollView>
     let choose: (ArenaDuel.Choice) -> Bool
 
     func makeNSView(context: Context) -> MonitorView { MonitorView() }
-    func updateNSView(_ view: MonitorView, context: Context) { view.choose = choose }
+    func updateNSView(_ view: MonitorView, context: Context) { view.readingPanes = readingPanes; view.choose = choose }
     static func dismantleNSView(_ view: MonitorView, coordinator: ()) { view.stop() }
 
     final class MonitorView: NSView {
         var choose: ((ArenaDuel.Choice) -> Bool)?
+        var readingPanes: NSHashTable<NSScrollView>?
         private var monitor: Any?
+        private var click = 0
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             stop()
             guard window != nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, let window = self.window, event.window === window, window.isKeyWindow,
-                      window.attachedSheet == nil, !event.isARepeat,
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+                guard let self, let window = self.window, event.window === window, window.attachedSheet == nil else { return event }
+                if event.type != .keyDown {
+                    self.focusReadingPane(at: event.locationInWindow, in: window)
+                    return event
+                }
+                guard window.isKeyWindow, !event.isARepeat,
                       event.modifierFlags.intersection([.command, .option, .shift, .control]).isEmpty,
                       !NativeArenaDuelFocus.preservesArrowKeys(for: window.firstResponder) else { return event }
                 let choice: ArenaDuel.Choice
@@ -280,7 +289,31 @@ private struct NativeArenaDuelKeys: NSViewRepresentable {
             }
         }
 
+        private func focusReadingPane(at point: NSPoint, in window: NSWindow) {
+            click += 1
+            guard let contentView = window.contentView else { return }
+            let panes = readingPanes?.allObjects.filter { $0.window === window } ?? []
+            guard let pane = NativeArenaDuelFocus.readingPane(at: contentView.convert(point, from: nil), in: contentView, among: panes) else {
+                if NativeArenaDuelFocus.preservesArrowKeys(for: window.firstResponder) { window.makeFirstResponder(nil) }
+                return
+            }
+            let click = click
+            // Let the hit view handle selection and controls before restoring pane focus if needed.
+            DispatchQueue.main.async { [weak self, weak pane, weak window] in
+                guard let self, self.click == click, let pane, let window, self.window === window, pane.window === window,
+                      window.isKeyWindow, window.attachedSheet == nil,
+                      !NativeArenaDuelFocus.preservesArrowKeys(for: window.firstResponder) else { return }
+                window.makeFirstResponder(pane)
+            }
+            if let focused = window.firstResponder as? NSView, focused.isDescendant(of: pane) {
+                let hit = contentView.hitTest(contentView.superview?.convert(point, from: nil) ?? point)
+                if let hit, NativeArenaDuelFocus.preservesArrowKeys(for: hit, excludingScrollViews: true) { return }
+            }
+            window.makeFirstResponder(pane)
+        }
+
         func stop() {
+            click += 1
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
         }
@@ -336,6 +369,7 @@ private struct NativeArenaSlot: View {
     let slot: JSONValue
     let tab: String
     let compactName: String?
+    let readingPanes: NSHashTable<NSScrollView>?
     @State private var presentation = 0
     @State private var files: [JSONValue] = []
     @State private var preview: NativeArenaPreviewItem?
@@ -370,21 +404,22 @@ private struct NativeArenaSlot: View {
                 else { duration(at: Date()) }
             }.padding(.horizontal, 16).frame(height: 32).background(Theme.sunken)
         }
-        if tab == "Transcript" { NativeCodeScroll(jump: jump, follows: $follows) { VStack(alignment: .leading, spacing: 10) {
+        if tab == "Transcript" { NativeCodeScroll(jump: jump, follows: $follows, readingPanes: readingPanes) { VStack(alignment: .leading, spacing: 10) {
             if model.transcripts[id]?.isEmpty == true, slot["status"].string != "running", model.contentError(id, tab: tab).isEmpty {
                 Text("No transcript was recorded").font(Theme.ui(12)).foregroundStyle(Theme.muted)
             }
             NativeCodeTranscript(events: model.transcripts[id] ?? [], running: slot["status"].string == "running")
             NativeCodeLiveView(live: CodeLiveState(json: model.live[id] ?? .null), events: model.transcripts[id] ?? [])
         } }.frame(maxHeight: .infinity).overlay(alignment: .bottomTrailing) { if !follows { Button("Jump to latest", nativeIcon: "arrow-down") { jump += 1 }.buttonStyle(T3Button(.outline)).padding(8) } } }
-        else { ScrollView { VStack(alignment: .leading, spacing: 10) {
-            switch tab {
-            case "Files":
-                if files.isEmpty && model.contentError(id, tab: tab).isEmpty { Text("No public workspace files").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
-                ForEach(files, id: \.self) { file in Button { open(file["path"].string) } label: { HStack { Text(file["path"].string).font(Theme.mono(Theme.textXs)).lineLimit(1).truncationMode(.middle); Spacer(); Text(ByteCountFormatter.string(fromByteCount: Int64(file["size"].double), countStyle: .file)).font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted) }.contentShape(Rectangle()) }.buttonStyle(.plain).pointingHand() }
-            default: result
-            }
-        }.padding(.horizontal, 16).padding(.vertical, 14).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: .infinity) }
+        else if let readingPanes {
+            NativeCodeScroll(padding: .init(top: 14, leading: 16, bottom: 14, trailing: 16), readingPanes: readingPanes) {
+                readingContent
+            }.id(tab).frame(maxHeight: .infinity)
+        } else {
+            ScrollView {
+                readingContent.padding(.horizontal, 16).padding(.vertical, 14).frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(maxHeight: .infinity)
+        }
         Theme.rule.frame(height: 1)
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 14) {
@@ -409,6 +444,16 @@ private struct NativeArenaSlot: View {
     }
     .nativePageActivity(reads: reads, suspended: { if let contentOwner { model.endContent(contentOwner) }; contentOwner = nil })
     .sheet(item: $preview) { item in NativeArenaArtifactPreview(runtime: runtime, slotID: id, path: item.path) }
+    }
+    private var readingContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            switch tab {
+            case "Files":
+                if files.isEmpty && model.contentError(id, tab: tab).isEmpty { Text("No public workspace files").font(Theme.ui(12)).foregroundStyle(Theme.muted) }
+                ForEach(files, id: \.self) { file in Button { open(file["path"].string) } label: { HStack { Text(file["path"].string).font(Theme.mono(Theme.textXs)).lineLimit(1).truncationMode(.middle); Spacer(); Text(ByteCountFormatter.string(fromByteCount: Int64(file["size"].double), countStyle: .file)).font(Theme.num(11, weight: .regular)).foregroundStyle(Theme.muted) }.contentShape(Rectangle()) }.buttonStyle(.plain).pointingHand() }
+            default: result
+            }
+        }
     }
     private func duration(at now: Date) -> some View { Text(NativeArenaDuration(now.timeIntervalSince1970 * 1000 - slot["started_at"].double)).font(Theme.mono(10.5)) }
     @ViewBuilder private var result: some View {
