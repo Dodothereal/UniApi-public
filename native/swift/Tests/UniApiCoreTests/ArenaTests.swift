@@ -46,6 +46,14 @@ final class ArenaTests: XCTestCase {
         var changed = record; changed["ts"] = 2000
         XCTAssertThrowsError(try ledger.write(changed)); XCTAssertEqual(ledger.records(), [record])
     }
+    func testVoteAdoptsExistingRecordWhenRetryDiverges() async throws {
+        let runtime = try runtime(), store = try ArenaStore(runtime: runtime), m = try finished(store), service = NativeArenaService(runtime: runtime)
+        let ledger = ArenaLedger(runtime: runtime), record = ArenaLedger.record(match: try store.rawMatch(m["id"])!, slots: try store.slots(m["id"]), ranking: [1,0], voter: try store.voter(), at: 1000)
+        _ = try ledger.write(record)
+        let result = try await service.handle("vote", input: ["id": m["id"], "ranking": [0,1]])
+        XCTAssertEqual(result["voted_at"].int, 1000); XCTAssertEqual(result["verdict"].string, "ranked")
+        XCTAssertEqual(result["ranking"], [1, 0]); XCTAssertTrue(result["revealed"].bool); XCTAssertEqual(ledger.records(), [record])
+    }
     func testLedgerWriteFailureDoesNotMarkMatchJudged() async throws {
         let runtime = try runtime(), store = try ArenaStore(runtime: runtime), m = try finished(store), service = NativeArenaService(runtime: runtime)
         let ledgerRoot = runtime.paths.root.appendingPathComponent("arena"); try Data("blocking-file".utf8).write(to: ledgerRoot)
