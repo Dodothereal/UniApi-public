@@ -102,10 +102,14 @@ public actor NativeArenaService {
             // No await from validation through durable ledger write and verdict
             // update: overlapping votes cannot publish two incompatible records.
             // Recover a ledger-first verdict if a previous database update was
-            // interrupted, or a synced record already covers this match: the
-            // immutable record is adopted instead of writing a conflicting one,
-            // which would leave the match permanently unjudgeable.
-            if let existing = ledger.records().first(where: { $0["id"] == id }) {
+            // interrupted, or a synced record from the same voter already
+            // covers this match: the immutable record is adopted instead of
+            // writing a conflicting one, which would leave the match
+            // permanently unjudgeable. A record from another voter keeps
+            // failing loudly in write() rather than silently finalizing a
+            // pending local vote.
+            let voter = try s.voter()
+            if let existing = ledger.records().first(where: { $0["id"] == id && $0["voter"] == voter }) {
                 let order = existing["contestants"].array.enumerated()
                     .filter { $0.offset < slots.count && !$0.element["rank"].isNull }
                     .sorted { ($0.element["rank"].int, $0.offset) < ($1.element["rank"].int, $1.offset) }
@@ -118,9 +122,9 @@ public actor NativeArenaService {
                 let file = ledger.directory.appendingPathComponent(ArenaLedger.name(existing))
                 let updated = try s.match(id)!; await runtime.events.publish("arena.match", updated); await runtime.events.publish("arena.voted", ["id": id, "file": .string(file.path)]); return updated
             }
-            let record = ArenaLedger.record(match: match, slots: slots, ranking: ranking, voter: try s.voter(), at: CodeStore.now(), tiedRanks: ArenaVoteOrder.ranks(groups ?? []))
+            let at = CodeStore.now(), record = ArenaLedger.record(match: match, slots: slots, ranking: ranking, voter: voter, at: at, tiedRanks: ArenaVoteOrder.ranks(groups ?? []))
             let file = try ledger.write(record)
-            try s.patchMatch(id, ["ranking": ranking.map { .string(String(decoding: try! JSONValue.array($0.map { .number(Double($0)) }).encoded(), as: UTF8.self)) } ?? .null, "verdict": ranking == nil ? "all_bad" : "ranked", "voted_at": CodeStore.now()])
+            try s.patchMatch(id, ["ranking": ranking.map { .string(String(decoding: try! JSONValue.array($0.map { .number(Double($0)) }).encoded(), as: UTF8.self)) } ?? .null, "verdict": ranking == nil ? "all_bad" : "ranked", "voted_at": at])
             let updated = try s.match(id)!; await runtime.events.publish("arena.match", updated); await runtime.events.publish("arena.voted", ["id": id, "file": .string(file.path)]); return updated
         case "skip": guard let match = try s.rawMatch(id), match["voted_at"].isNull, !["queued", "running"].contains(match["status"].string) else { throw NativeFailure("A running or already judged match cannot be skipped") }; try s.patchMatch(id, ["verdict": "skipped", "voted_at": CodeStore.now()]); return try await publish(id)
         case "cancel":
