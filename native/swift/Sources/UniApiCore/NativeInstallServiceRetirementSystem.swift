@@ -325,8 +325,11 @@ final class NativeInstallRetirementSystem: @unchecked Sendable {
 /// either schema still cannot establish idle ownership.
 final class NativeInstallWorkReader: @unchecked Sendable {
     private let paths: NativePaths, lock = NSLock()
+    private let snapshot: @Sendable (URL) throws -> SQLiteSnapshotCore
     private var generation: [String] = [], cached: NativeTransferWork?
-    init(paths: NativePaths) { self.paths = paths }
+    init(paths: NativePaths, snapshot: @escaping @Sendable (URL) throws -> SQLiteSnapshotCore = { try SQLiteSnapshotCore($0) }) {
+        self.paths = paths; self.snapshot = snapshot
+    }
     private func stamp() throws -> [String] {
         let parent = try NativeLegacyProtected.directory(anchor: paths.data, relative: "", owner: getuid())
         defer { close(parent) }
@@ -341,23 +344,32 @@ final class NativeInstallWorkReader: @unchecked Sendable {
     }
     func read() throws -> NativeTransferWork {
         try lock.withLock {
-            try Task.checkCancellation()
-            let before = try stamp()
-            if before == generation, let cached { try Task.checkCancellation(); return cached }
-            let snapshot = try SQLiteSnapshotCore(paths.database)
-            let db = try NativeDatabase(url: snapshot.database, readOnly: true)
-            func count(_ sql: String) throws -> Int {
-                let rows = try db.query(sql)
-                guard rows.count == 1, case .number(let n) = rows[0]["n"], n.isFinite, n >= 0, n.rounded() == n, n < Double(Int.max) else { throw NativeFailure("Native install census has an invalid count") }
-                return Int(n)
+            for _ in 0..<3 {
+                try Task.checkCancellation()
+                let before = try stamp()
+                if before == generation, let cached { try Task.checkCancellation(); return cached }
+                let copy = try snapshot(paths.database)
+                let value = try Self.countWork(in: copy.database)
+                // Telemetry and statistics also write this database. Discard
+                // the census and capture again without approving stale work.
+                guard try stamp() == before else { continue }
+                try Task.checkCancellation(); generation = before; cached = value; return value
             }
-            let value = NativeTransferWork(jobs: try count("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('running','queued')"),
-                                           code: try count("SELECT COUNT(*) AS n FROM code_threads WHERE status IN ('starting','running','waiting')"))
-            guard try count("SELECT COUNT(*) AS n FROM jobs WHERE status IS NULL OR status NOT IN ('queued','running','done','failed','cancelled')") == 0,
-                  try count("SELECT COUNT(*) AS n FROM code_threads WHERE status IS NULL OR status NOT IN ('idle','starting','running','waiting','error','paused')") == 0 else { throw NativeFailure("Native install work census contains unknown state") }
-            guard try stamp() == before else { throw NativeFailure("Native install work changed during its private census") }
-            try Task.checkCancellation(); generation = before; cached = value; return value
+            throw NativeFailure("Native install work changed during its private census")
         }
+    }
+    private static func countWork(in database: URL) throws -> NativeTransferWork {
+        let db = try NativeDatabase(url: database, readOnly: true)
+        func count(_ sql: String) throws -> Int {
+            let rows = try db.query(sql)
+            guard rows.count == 1, case .number(let n) = rows[0]["n"], n.isFinite, n >= 0, n.rounded() == n, n < Double(Int.max) else { throw NativeFailure("Native install census has an invalid count") }
+            return Int(n)
+        }
+        let value = NativeTransferWork(jobs: try count("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('running','queued')"),
+                                       code: try count("SELECT COUNT(*) AS n FROM code_threads WHERE status IN ('starting','running','waiting')"))
+        guard try count("SELECT COUNT(*) AS n FROM jobs WHERE status IS NULL OR status NOT IN ('queued','running','done','failed','cancelled')") == 0,
+              try count("SELECT COUNT(*) AS n FROM code_threads WHERE status IS NULL OR status NOT IN ('idle','starting','running','waiting','error','paused')") == 0 else { throw NativeFailure("Native install work census contains unknown state") }
+        return value
     }
 }
 

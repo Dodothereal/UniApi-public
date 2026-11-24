@@ -2,6 +2,10 @@
 
 User-facing changes are recorded here. Release entries should describe shipped behavior and actual validation, with unresolved limitations kept explicit.
 
+## 0.1.21 — preview
+
+- The updater retries its idle check if the database changes during the check. A new job or coding turn still blocks installation.
+
 ## 0.1.20 — preview
 
 - Fixed updates from a native installation with a temporary fan-control session. The installer verifies the old session's ownership and waits for the helper to restore automatic fan control before starting the replacement app. It reports the reason for a refused or rolled-back update.

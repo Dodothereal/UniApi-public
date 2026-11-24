@@ -113,6 +113,27 @@ final class InstallServiceRetirementTests: XCTestCase {
         XCTAssertEqual(result["safeToRestore"], true)
         XCTAssertEqual(try files.map { try Data(contentsOf: $0) }, before)
     }
+    func testNativeCensusRetriesChangedDatabaseWithoutAdmittingStaleWork() throws {
+        final class Attempts: @unchecked Sendable {
+            let lock = NSLock()
+            var count = 0
+            func next() -> Int { lock.withLock { count += 1; return count } }
+        }
+        for mode in 0..<3 {
+            let f = try InstallRetirementFixture(); defer { f.cleanup() }
+            let db = try f.database(f.paths), attempts = Attempts()
+            try db.executeScript("CREATE TABLE telemetry(n INTEGER);")
+            let reader = NativeInstallWorkReader(paths: f.paths, snapshot: { url in
+                let copy = try SQLiteSnapshotCore(url), attempt = attempts.next()
+                if mode == 2 || attempt == 1 {
+                    try db.executeScript(mode == 1 ? "INSERT INTO jobs VALUES ('queued');" : "INSERT INTO telemetry VALUES (1);")
+                }
+                return copy
+            })
+            if mode == 2 { XCTAssertThrowsError(try reader.read()); XCTAssertEqual(attempts.count, 3) }
+            else { XCTAssertEqual(try reader.read().jobs, mode); XCTAssertEqual(attempts.count, 2) }
+        }
+    }
     func testNativeCensusKeepsActiveAndUnknownOrNullStatesUnsafe() throws {
         let f = try InstallRetirementFixture(); defer { f.cleanup() }
         let db = try NativeDatabase(url: f.paths.database)
