@@ -1,6 +1,18 @@
 import XCTest
 @testable import UniApiCore
 
+private final class ChatTransportSpy: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requests: [String] = []
+    var paths: [String] { lock.withLock { requests } }
+    var transport: NativeNotifications.Transport {
+        { request in
+            self.lock.withLock { self.requests.append(request.url?.path ?? "") }
+            return (Data(#"{"ok":true,"result":[]}"#.utf8), 200)
+        }
+    }
+}
+
 final class NativeNotificationChatLookupTests: XCTestCase {
     private let token = "fixture-bot-token"
 
@@ -102,6 +114,23 @@ final class NativeNotificationChatLookupTests: XCTestCase {
         ChatRedirectGuard().urlSession(session, task: session.dataTask(with: original),
                                        willPerformHTTPRedirection: response, newRequest: forwarded) { accepted = $0 }
         XCTAssertNil(accepted)
+    }
+
+    func testDeliveryAndLookupBothDefaultToTheSharedGuardedTransport() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("chat-transport-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: home) }
+        try NativeNotifications.save(.init(enabled: true, token: token, chat: "fixture-chat"), home: home)
+        let spy = ChatTransportSpy()
+        let original = NativeNotifications.chatTransport
+        defer { NativeNotifications.chatTransport = original }
+        NativeNotifications.chatTransport = spy.transport
+        _ = try await NativeNotifications.findChats(token: token)
+        let sent = try await NativeNotifications.send("fixture", home: home)
+        XCTAssertTrue(sent)
+        // If delivery ever regressed to URLSession.shared the spy would only
+        // see the lookup request — and the send would hit the real endpoint.
+        XCTAssertEqual(spy.paths, ["/bot\(token)/getUpdates", "/bot\(token)/sendMessage"])
     }
 
     func testInvalidTokenDoesNotCallTransport() async throws {

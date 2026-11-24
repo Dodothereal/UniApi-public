@@ -82,7 +82,7 @@ public enum NativeNotifications {
         let response: (Data, Int)
         do {
             try Task.checkCancellation()
-            response = try await (transport ?? boundedChatTransport)(request)
+            response = try await (transport ?? chatTransport)(request)
             try Task.checkCancellation()
         } catch is CancellationError { throw CancellationError() }
         catch let error as ChatLookupError { throw error }
@@ -125,6 +125,10 @@ public enum NativeNotifications {
         let cleaned = String(String.UnicodeScalarView(scalars)).replacingOccurrences(of: token, with: "[redacted]").trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned.isEmpty ? "Chat \(id)" : String(cleaned.prefix(80))
     }
+
+    /// The default transport for every credential-carrying chat request. Tests
+    /// replace it to observe which requests the production paths actually send.
+    nonisolated(unsafe) static var chatTransport: Transport = boundedChatTransport
 
     /// One ephemeral session shape for every credential-carrying chat request:
     /// no shared cookies, credential stores or cache.
@@ -191,7 +195,7 @@ public enum NativeNotifications {
         // Delivery shares the lookup transport's redirect guard and bounds: the
         // bot token rides in the URL path, and a redirect would forward the
         // request (with its body on 307/308) to an unowned host.
-        let perform = transport ?? boundedChatTransport
+        let perform = transport ?? chatTransport
         do {
             let (data, status) = try await perform(request)
             guard status == 200, (try? JSONValue.decode(data)["ok"].bool) == true else { throw NativeFailure("Telegram did not confirm notification delivery") }
