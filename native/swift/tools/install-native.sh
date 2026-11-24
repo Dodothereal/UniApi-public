@@ -86,8 +86,27 @@ for folder in "$data_root" "$data_root/logs" "$data_root/native-install-backups"
 done
 mkdir -p "$data_root/logs" "$applications" "$agents"
 lock="$applications/.UniApi-native-install.lock"
-mkdir "$lock" 2>/dev/null || { echo 'Another native transfer owns the installation lock.' >&2; exit 1; }
-trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+# The noclobber write publishes the owner pid atomically with acquisition, so a
+# lock left behind by SIGKILL or power loss is reclaimed instead of blocking
+# every later install. Only a live owner, or a lock too fresh to judge, refuses.
+acquire_install_lock() {
+  local attempt owner mtime
+  for attempt in 1 2; do
+    ( set -o noclobber; printf '%s\n' "$$" > "$lock" ) 2>/dev/null && return 0
+    owner="$(cat "$lock" 2>/dev/null || true)"
+    if [[ "$owner" =~ ^[0-9]+$ ]]; then
+      kill -0 "$owner" 2>/dev/null && return 1
+    else
+      mtime="$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || echo 0)"
+      [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
+      (( $(date +%s) - mtime >= 60 )) || return 1
+    fi
+    rm -rf "$lock"
+  done
+  return 1
+}
+acquire_install_lock || { echo 'Another native transfer owns the installation lock.' >&2; exit 1; }
+trap 'rm -f "$lock" 2>/dev/null || true' EXIT
 nonce="$(uuidgen)"
 [[ "$nonce" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] \
   || { echo 'A valid new installation identity is required.' >&2; exit 1; }
@@ -186,7 +205,7 @@ rollback() {
     else echo "Native installation failed; recovery is incomplete. Backups and configs retained at $backup; inspect restored services before continuing." >&2; fi
   fi
   rm -rf "$staging"
-  rmdir "$lock" 2>/dev/null || true
+  rm -f "$lock" 2>/dev/null || true
 }
 trap rollback EXIT
 cp -R "$source_app" "$staged"
@@ -299,7 +318,7 @@ done
 changed=0
 trap - EXIT
 rmdir "$staging"
-rmdir "$lock"
+rm -f "$lock"
 printf 'Installed the native Swift app. Recovery backup: %s\n' "$backup"
 # Charging/fan helper installation is a separate explicit in-app administrator
 # action. GUI installation never changes a physical control or target.
