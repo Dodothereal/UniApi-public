@@ -3,10 +3,14 @@ import CryptoKit
 import Darwin
 
 typealias ArenaGitRunner = @Sendable ([String], [String: String], Data?) async throws -> NativeProcessResult
+typealias ArenaLedgerFilePublisher = @Sendable (Data, URL) throws -> Void
 struct ArenaLedger {
     let runtime: NativeRuntime
     private let gitRunner: ArenaGitRunner?
-    init(runtime: NativeRuntime, gitRunner: ArenaGitRunner? = nil) { self.runtime = runtime; self.gitRunner = gitRunner }
+    private let filePublisher: ArenaLedgerFilePublisher?
+    init(runtime: NativeRuntime, gitRunner: ArenaGitRunner? = nil, filePublisher: ArenaLedgerFilePublisher? = nil) {
+        self.runtime = runtime; self.gitRunner = gitRunner; self.filePublisher = filePublisher
+    }
     var directory: URL { runtime.paths.root.appendingPathComponent("arena/results") }
     static let branch = "arena-results", reference = "refs/remotes/origin/arena-results"
     static func sha(_ text: String) -> String { SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined() }
@@ -30,7 +34,20 @@ struct ArenaLedger {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = try runtime.paths.containedFile(Self.name(record), in: directory)
         if FileManager.default.fileExists(atPath: url.path) { guard try NativeFile.readJSON(url) == record else { throw NativeFailure("A conflicting immutable ledger record already exists") }; return url }
-        try writeExclusive(try record.encoded(pretty: true), to: url); return url
+        let data = try record.encoded(pretty: true)
+        do {
+            if let filePublisher { try filePublisher(data, url) } else { try writeExclusive(data, to: url) }
+            return url
+        } catch {
+            // Another runtime may publish the identical immutable verdict after
+            // the existence checks above. Treat that completed write as the
+            // same idempotent operation instead of failing the vote.
+            if let existing = records().first(where: { $0["id"] == record["id"] }) {
+                guard existing == record else { throw NativeFailure("A conflicting immutable ledger record already exists") }
+                return directory.appendingPathComponent(Self.name(existing))
+            }
+            throw error
+        }
     }
     private func writeExclusive(_ data: Data, to url: URL) throws {
         let temporary = directory.appendingPathComponent(".verdict-" + UUID().uuidString)

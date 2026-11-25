@@ -52,6 +52,17 @@ final class ArenaTests: XCTestCase {
         do { _ = try await service.handle("vote", input: ["id": m["id"], "allBad": true]); XCTFail("Expected ledger failure") } catch {}
         XCTAssertTrue(try store.rawMatch(m["id"])!["voted_at"].isNull)
     }
+    func testRacingIdenticalVerdictPublicationIsIdempotent() throws {
+        let runtime = try runtime(), store = try ArenaStore(runtime: runtime), m = try finished(store)
+        let record = ArenaLedger.record(match: try store.rawMatch(m["id"])!, slots: try store.slots(m["id"]), ranking: [0, 1], voter: "fixture", at: 1000)
+        let ledger = ArenaLedger(runtime: runtime, filePublisher: { data, url in
+            try NativeFile.writeAtomic(data, to: url)
+            throw NativeFailure("The immutable verdict destination already exists or is unavailable")
+        })
+        let file = try ledger.write(record)
+        XCTAssertEqual(try NativeFile.readJSON(file), record)
+        XCTAssertEqual(ledger.records(), [record])
+    }
     func testTiedVoteWritesEqualRanksWithoutChangingMatchRankingShape() async throws {
         let runtime = try runtime(), store = try ArenaStore(runtime: runtime), m = try finished(store)
         let service = NativeArenaService(runtime: runtime)
