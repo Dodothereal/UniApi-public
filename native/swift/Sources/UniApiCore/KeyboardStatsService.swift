@@ -122,8 +122,10 @@ public actor NativeKeyboardService {
 
     @discardableResult private func persist(_ events: [NativeKeyboardEvent]) -> Bool {
         for event in events { fold.record(event) }
-        let delta = fold.drain(now: io.now())
-        guard !delta.isEmpty, !runtime.paths.readOnly else { return !events.isEmpty }
+        fold.settle(now: io.now())
+        let delta = fold.pendingDelta
+        guard !delta.isEmpty else { return !events.isEmpty }
+        guard !runtime.paths.readOnly else { fold.clearPending(); return !events.isEmpty }
         do {
             try runtime.db.transaction {
                 for (slot, value) in delta.slots {
@@ -152,6 +154,7 @@ public actor NativeKeyboardService {
                     }
                 }
             }
+            fold.clearPending()
             error = nil
         } catch { self.error = "Keyboard statistics could not be saved: " + error.localizedDescription }
         return true
@@ -247,12 +250,12 @@ public actor NativeKeyboardService {
             refreshRecording()
         case "reset":
             try runtime.paths.assertWritable()
-            _ = io.take()
-            fold = NativeKeyboardFold(slot: io.slot)
             try runtime.db.transaction {
                 try runtime.db.execute("DELETE FROM keyboard_hours"); try runtime.db.execute("DELETE FROM keyboard_keys")
                 try runtime.db.execute("DELETE FROM keyboard_shortcuts")
             }
+            _ = io.take()
+            fold = NativeKeyboardFold(slot: io.slot)
         default: throw NativeFailure("Unknown keyboard statistics operation")
         }
         let state = try status(range: range)

@@ -182,8 +182,10 @@ public struct NativeKeyboardFold: Sendable {
         guard window.count >= 5, let first = window.first, last - first >= 1_500 else { return 0 }
         return Double(window.count - 1) / 5 / ((last - first) / 60_000)
     }
-    /// Removes and returns everything counted since the previous drain.
-    public mutating func drain(now: Double) -> NativeKeyboardDelta {
+    /// Closes an inactive burst and prepares the pending counters without
+    /// clearing them. Persistence callers can therefore discard the prepared
+    /// counters only after their transaction succeeds.
+    public mutating func settle(now: Double) {
         if let last = lastTypedAt, now - last > Self.pause {
             if let burst = finishBurst() {
                 var totals = pending.slots[burst.slot] ?? .init()
@@ -193,8 +195,15 @@ public struct NativeKeyboardFold: Sendable {
             lastTypedAt = nil
         }
         recent.removeAll { now - $0 > Self.liveWindow }
-        defer { pending = .init() }
         pending.slots = pending.slots.filter { !$0.value.isEmpty }
+    }
+    public var pendingDelta: NativeKeyboardDelta { pending }
+    public mutating func clearPending() { pending = .init() }
+
+    /// Removes and returns everything counted since the previous drain.
+    public mutating func drain(now: Double) -> NativeKeyboardDelta {
+        settle(now: now)
+        defer { clearPending() }
         return pending
     }
 }
