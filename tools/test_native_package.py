@@ -211,6 +211,26 @@ class NativePackageTests(unittest.TestCase):
     def execute(self, environment, action):
         return subprocess.run(["bash", str(ROOT / "native/swift/tools/install-native.sh"), action], env=environment, capture_output=True, text=True, timeout=20)
 
+    def test_dead_stale_install_lock_is_reclaimed_and_fresh_legacy_lock_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory, environment = self.fixture(temporary)
+            lock = directory / "Applications/.UniApi-native-install.lock"
+            lock.mkdir()
+            (lock / "pid").write_text("999999999\n")
+            result = self.execute(environment, "--install")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(lock.exists())
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory, environment = self.fixture(temporary)
+            lock = directory / "Applications/.UniApi-native-install.lock"
+            lock.mkdir()
+            result = self.execute(environment, "--install")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Another native transfer owns the installation lock", result.stderr)
+            self.assertTrue(lock.is_dir())
+            self.assertFalse((lock / "pid").exists())
+
     def test_plan_and_busy_preflight_never_touch_services_or_destination(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory, environment = self.fixture(temporary)
