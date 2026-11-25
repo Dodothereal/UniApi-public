@@ -86,60 +86,80 @@ for folder in "$data_root" "$data_root/logs" "$data_root/native-install-backups"
 done
 mkdir -p "$data_root/logs" "$applications" "$agents"
 lock="$applications/.UniApi-native-install.lock"
-# The lock is a directory holding a pid file: an atomic noclobber write of
-# $lock/pid wins ownership. A lock left behind by SIGKILL or power loss is
-# reclaimed instead of blocking every later install, but attribution stays
-# conservative: only a live install-native process counts as an owner; a live
-# pid that cannot be attributed (reused pid, unusual launcher) is trusted for
-# one hour, longer than any plausible install; a dead pid is stale
-# immediately. The stale pid file is moved aside inside the directory — an
-# atomic rename exactly one contender can win — so racing reclaimers can never
-# drop a fresh owner's pid, and a pid file that changed under the check is put
-# back instead.
+# The lock is a directory holding a pid file. Only atomic creation of that
+# directory or of its fixed claim directory grants ownership: an installer
+# never publishes into a pid-less directory it did not create, so it cannot
+# join a legacy install which created the same directory first. A lock left
+# behind by SIGKILL or power loss is reclaimed, but attribution stays
+# conservative: a live install-native process always owns it; a live pid that
+# cannot be attributed (reused pid, unusual launcher) is trusted for one hour,
+# longer than any plausible install; a dead pid is stale immediately.
+lock_mtime() {
+  local mtime
+  mtime="$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0)"
+  [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
+  printf '%s\n' "$mtime"
+}
+lock_fresh() {
+  (( $(date +%s) - $(lock_mtime "$1") < 3600 ))
+}
+pid_is_install_native() {
+  [[ "$1" =~ ^[0-9]+$ ]] && ps -p "$1" -o command= 2>/dev/null | grep -q install-native
+}
+pid_is_live() {
+  [[ "$1" =~ ^[0-9]+$ ]] && kill -0 "$1" 2>/dev/null
+}
+pid_is_trusted() {
+  pid_is_install_native "$1" || { pid_is_live "$1" && lock_fresh "$2"; }
+}
 acquire_install_lock() {
-  local attempt owner mtime claim moved
+  local attempt owner claimant
   [[ -e "$lock" && ! -d "$lock" ]] && rm -f "$lock"
   for attempt in 1 2 3; do
-    if [[ ! -e "$lock/pid" && -d "$lock" ]]; then
-      # A pid-less directory is either a legacy lock or a transfer still
-      # publishing its pid; while the directory is young it may be live.
-      mtime="$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || echo 0)"
-      [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
-      (( $(date +%s) - mtime >= 3600 )) || return 1
-    fi
-    mkdir -p "$lock" 2>/dev/null
-    ( set -o noclobber; printf '%s\n' "$$" > "$lock/pid" ) 2>/dev/null && return 0
-    owner="$(cat "$lock/pid" 2>/dev/null || true)"
-    if [[ "$owner" =~ ^[0-9]+$ ]] \
-      && ps -p "$owner" -o command= 2>/dev/null | grep -q install-native; then
+    if mkdir "$lock" 2>/dev/null; then
+      ( set -o noclobber; printf '%s\n' "$$" > "$lock/pid" ) 2>/dev/null && return 0
+      rmdir "$lock" 2>/dev/null || true
       return 1
     fi
-    if [[ ! "$owner" =~ ^[0-9]+$ ]] || kill -0 "$owner" 2>/dev/null; then
-      mtime="$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || echo 0)"
-      [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
-      (( $(date +%s) - mtime >= 3600 )) || return 1
+    [[ -d "$lock" ]] || continue
+    owner="$(cat "$lock/pid" 2>/dev/null || true)"
+    if pid_is_trusted "$owner" "$lock"; then
+      return 1
     fi
-    # Reclaim by moving the stale pid aside inside the directory — an atomic
-    # rename exactly one contender can win. While it is held the directory is
-    # fresh, so no contender may publish a pid above, and a pid that changed
-    # under the check is put back.
-    claim="$lock/reclaim.$$"
-    [[ "$(cat "$lock/pid" 2>/dev/null || true)" == "$owner" ]] || continue
-    rm -f "$claim"
-    if mv "$lock/pid" "$claim" 2>/dev/null; then
-      moved="$(cat "$claim" 2>/dev/null || true)"
-      if [[ "$moved" == "$owner" ]]; then
-        rm -f "$claim"
-        ( set -o noclobber; printf '%s\n' "$$" > "$lock/pid" ) 2>/dev/null && return 0
-      elif [[ "$moved" =~ ^[0-9]+$ ]] && kill -0 "$moved" 2>/dev/null; then
-        mv "$claim" "$lock/pid" 2>/dev/null || rm -f "$claim"
-      else rm -f "$claim"; fi
+    if [[ ! "$owner" =~ ^[0-9]+$ ]] && lock_fresh "$lock"; then
+      # A pid-less directory is either a legacy lock or a transfer still
+      # publishing its pid; while it is young it may be live.
+      return 1
     fi
+    # Exactly one contender can create the fixed claim directory. While that
+    # claim exists no contender treats a missing pid as permission to publish,
+    # so transferring the stale ownership never leaves a vacant lock.
+    if mkdir "$lock/claim" 2>/dev/null; then
+      printf '%s\n' "$$" > "$lock/claim/pid" 2>/dev/null || true
+      if [[ "$(cat "$lock/pid" 2>/dev/null || true)" == "$owner" ]]; then
+        rm -f "$lock/pid"
+        if ( set -o noclobber; printf '%s\n' "$$" > "$lock/pid" ) 2>/dev/null; then
+          rm -f "$lock/claim/pid"; rmdir "$lock/claim" 2>/dev/null || true
+          return 0
+        fi
+      fi
+      rm -f "$lock/claim/pid"; rmdir "$lock/claim" 2>/dev/null || true
+      continue
+    fi
+    claimant="$(cat "$lock/claim/pid" 2>/dev/null || true)"
+    if pid_is_trusted "$claimant" "$lock/claim"; then
+      return 1
+    fi
+    if [[ ! "$claimant" =~ ^[0-9]+$ ]] && lock_fresh "$lock/claim"; then
+      return 1
+    fi
+    rm -f "$lock/claim/pid"
+    rmdir "$lock/claim" 2>/dev/null || true
   done
   return 1
 }
 acquire_install_lock || { echo 'Another native transfer owns the installation lock.' >&2; exit 1; }
-trap 'rm -f "$lock/pid" "$lock"/reclaim.* 2>/dev/null; rmdir "$lock" 2>/dev/null || true' EXIT
+trap 'rm -f "$lock/pid" "$lock/claim/pid" 2>/dev/null; rmdir "$lock/claim" "$lock" 2>/dev/null || true' EXIT
 nonce="$(uuidgen)"
 [[ "$nonce" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] \
   || { echo 'A valid new installation identity is required.' >&2; exit 1; }
@@ -238,7 +258,7 @@ rollback() {
     else echo "Native installation failed; recovery is incomplete. Backups and configs retained at $backup; inspect restored services before continuing." >&2; fi
   fi
   rm -rf "$staging"
-  rm -f "$lock/pid" "$lock"/reclaim.* 2>/dev/null; rmdir "$lock" 2>/dev/null || true
+  rm -f "$lock/pid" "$lock/claim/pid" 2>/dev/null; rmdir "$lock/claim" "$lock" 2>/dev/null || true
 }
 trap rollback EXIT
 cp -R "$source_app" "$staged"
@@ -351,7 +371,7 @@ done
 changed=0
 trap - EXIT
 rmdir "$staging"
-rm -f "$lock/pid" "$lock"/reclaim.*; rmdir "$lock"
+rm -f "$lock/pid" "$lock/claim/pid"; rmdir "$lock/claim" 2>/dev/null || true; rmdir "$lock"
 printf 'Installed the native Swift app. Recovery backup: %s\n' "$backup"
 # Charging/fan helper installation is a separate explicit in-app administrator
 # action. GUI installation never changes a physical control or target.
