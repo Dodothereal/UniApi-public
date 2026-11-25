@@ -250,12 +250,12 @@ public actor NativeKeyboardService {
             refreshRecording()
         case "reset":
             try runtime.paths.assertWritable()
-            _ = io.take()
-            fold = NativeKeyboardFold(slot: io.slot)
             try runtime.db.transaction {
                 try runtime.db.execute("DELETE FROM keyboard_hours"); try runtime.db.execute("DELETE FROM keyboard_keys")
                 try runtime.db.execute("DELETE FROM keyboard_shortcuts")
             }
+            _ = io.take()
+            fold = NativeKeyboardFold(slot: io.slot)
         default: throw NativeFailure("Unknown keyboard statistics operation")
         }
         let state = try status(range: range)

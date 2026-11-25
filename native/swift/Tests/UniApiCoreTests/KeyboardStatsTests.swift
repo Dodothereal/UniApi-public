@@ -348,6 +348,7 @@ final class KeyboardStatsTests: XCTestCase {
         board.clock = start + 1_000
         try runtime.db.executeScript("DROP TABLE keyboard_hours")
         await service.stop()
+        do { _ = try await service.handle("reset"); XCTFail("Expected reset refusal") } catch {}
         try runtime.db.executeScript("""
         CREATE TABLE keyboard_hours(day TEXT NOT NULL,hour INTEGER NOT NULL,keys INTEGER NOT NULL DEFAULT 0,
           characters INTEGER NOT NULL DEFAULT 0,timed_characters INTEGER NOT NULL DEFAULT 0,words INTEGER NOT NULL DEFAULT 0,
