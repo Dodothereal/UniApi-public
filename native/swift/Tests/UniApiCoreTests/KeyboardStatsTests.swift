@@ -338,6 +338,27 @@ final class KeyboardStatsTests: XCTestCase {
         XCTAssertEqual(state["totals"]["keys"].int, 0); XCTAssertFalse(state["hasData"].bool); XCTAssertTrue(state["enabled"].bool)
         do { _ = try await again.handle("unknown"); XCTFail("Expected refusal") } catch {}
     }
+    func testFailedSaveRetainsCountersUntilALaterWriteSucceeds() async throws {
+        let (service, board, runtime, root) = try service(); defer { try? FileManager.default.removeItem(at: root) }
+        board.allow(true)
+        _ = try await service.handle("set-enabled", input: ["enabled": true])
+        XCTAssertTrue(board.isRunning)
+        let start = board.clock
+        board.press([.init(code: 4, time: start)])
+        board.clock = start + 1_000
+        try runtime.db.executeScript("DROP TABLE keyboard_hours")
+        await service.stop()
+        try runtime.db.executeScript("""
+        CREATE TABLE keyboard_hours(day TEXT NOT NULL,hour INTEGER NOT NULL,keys INTEGER NOT NULL DEFAULT 0,
+          characters INTEGER NOT NULL DEFAULT 0,timed_characters INTEGER NOT NULL DEFAULT 0,words INTEGER NOT NULL DEFAULT 0,
+          deleted INTEGER NOT NULL DEFAULT 0,corrections INTEGER NOT NULL DEFAULT 0,shortcuts INTEGER NOT NULL DEFAULT 0,
+          repeats INTEGER NOT NULL DEFAULT 0,bursts INTEGER NOT NULL DEFAULT 0,active_ms REAL NOT NULL DEFAULT 0,
+          peak_wpm REAL NOT NULL DEFAULT 0,PRIMARY KEY(day,hour))
+        """)
+        await service.stop()
+        XCTAssertEqual(try runtime.db.query("SELECT keys FROM keyboard_hours").first?["keys"]?.int, 1)
+        XCTAssertEqual(try runtime.db.query("SELECT count FROM keyboard_keys").first?["count"]?.int, 1)
+    }
     func testLayoutFollowsTheKeyboardUnlessChosen() async throws {
         let (first, board, runtime, root) = try service(); defer { try? FileManager.default.removeItem(at: root) }
         let start = board.clock
