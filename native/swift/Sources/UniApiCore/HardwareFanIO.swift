@@ -97,18 +97,20 @@ public struct NativeFanIO: Sendable {
     public var now: @Sendable () -> Double
     public var sleep: @Sendable (Double) async throws -> Void
     public var stopMonitor: @Sendable () async -> Void
-    public init(metadata: @escaping @Sendable () -> JSONValue, monitor: @escaping @Sendable () throws -> AsyncThrowingStream<JSONValue, Error>, request: @escaping @Sendable (JSONValue, Bool) async throws -> JSONValue, authorize: @escaping @Sendable (String) async throws -> Void, now: @escaping @Sendable () -> Double = { Date().timeIntervalSince1970 * 1000 }, sleep: @escaping @Sendable (Double) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1e9)) }, stopMonitor: @escaping @Sendable () async -> Void = {}) {
-        self.metadata = metadata; self.monitor = monitor; self.request = request; self.authorize = authorize; self.now = now; self.sleep = sleep; self.stopMonitor = stopMonitor
+    public var keepAwake: @Sendable (Bool) -> Void
+    public init(metadata: @escaping @Sendable () -> JSONValue, monitor: @escaping @Sendable () throws -> AsyncThrowingStream<JSONValue, Error>, request: @escaping @Sendable (JSONValue, Bool) async throws -> JSONValue, authorize: @escaping @Sendable (String) async throws -> Void, now: @escaping @Sendable () -> Double = { Date().timeIntervalSince1970 * 1000 }, sleep: @escaping @Sendable (Double) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1e9)) }, stopMonitor: @escaping @Sendable () async -> Void = {}, keepAwake: @escaping @Sendable (Bool) -> Void = { _ in }) {
+        self.metadata = metadata; self.monitor = monitor; self.request = request; self.authorize = authorize; self.now = now; self.sleep = sleep; self.stopMonitor = stopMonitor; self.keepAwake = keepAwake
     }
     public static func production(runtime: NativeRuntime) -> NativeFanIO {
         let paths = NativeHardwareLocations(paths: runtime.paths)
         let digests = NativeFanDigestCache()
         let readers = NativeFanMonitorOwner()
+        let activity = NativeFanActivityOwner()
         return .init(metadata: {
             let fm = FileManager.default
             let built = digests.digest(paths.fanBinary), installed = digests.digest(paths.fanInstalled)
             let current = built != nil && built == installed
-            return ["supported": true, "installed": .bool(fm.isExecutableFile(atPath: paths.fanBinary.path)), "daemonInstalled": .bool(fm.fileExists(atPath: paths.fanInstalled.path) && fm.fileExists(atPath: paths.fanPlist.path)), "daemonAvailable": .bool(fm.fileExists(atPath: paths.fanDaemonSocket)), "current": .bool(current)]
+            return ["supported": true, "installed": .bool(fm.isExecutableFile(atPath: paths.fanBinary.path)), "daemonInstalled": .bool(fm.fileExists(atPath: paths.fanInstalled.path) && fm.fileExists(atPath: paths.fanPlist.path)), "daemonAvailable": .bool(fm.fileExists(atPath: paths.fanDaemonSocket)), "sessionAvailable": .bool(fm.fileExists(atPath: paths.fanSessionSocket)), "current": .bool(current)]
         }, monitor: {
             let process = try runtime.process.open(paths.fanBinary, arguments: ["--monitor"])
             readers.adopt(process)
@@ -136,12 +138,41 @@ public struct NativeFanIO: Sendable {
         }, request: { body, daemon in try await NativeUnixJSON.request(body, path: daemon ? paths.fanDaemonSocket : paths.fanSessionSocket) }, authorize: { action in
             guard let osascript = runtime.process.which("osascript"), let bash = runtime.process.which("bash") else { throw NativeFailure("Administrator authorization is unavailable") }
             let script: String
-            if action == "enable" { script = NativeHardwareAuthorization.quote(paths.fanBinary.path) + " --serve \(getuid()) \(getpid()) >/dev/null 2>&1 &" }
+            if action == "enable" { script = "nohup " + NativeHardwareAuthorization.quote(paths.fanBinary.path) + " --serve \(getuid()) \(getpid()) </dev/null >/dev/null 2>&1 &" }
             else if action == "install" { script = NativeHardwareAuthorization.quote(bash.path) + " " + NativeHardwareAuthorization.quote(paths.fanInstaller.path) + " install " + NativeHardwareAuthorization.quote(paths.fanBinary.path) + " \(getuid())" }
             else if action == "uninstall" { script = NativeHardwareAuthorization.quote(bash.path) + " " + NativeHardwareAuthorization.quote(paths.fanInstaller.path) + " uninstall" }
             else { throw NativeFailure("Unknown fan authorization operation") }
             try await NativeHardwareAuthorization.run(script: script, prompt: "UniApi needs permission for the requested fan helper operation.", process: runtime.process, osascript: osascript)
-        }, stopMonitor: { await readers.stop() })
+        }, stopMonitor: {
+            activity.setActive(false)
+            await readers.stop()
+        }, keepAwake: { active in
+            activity.setActive(active)
+        })
+    }
+}
+
+/// Prevents macOS App Nap from throttling the 2-second fan heartbeat while
+/// controls are active, without blocking normal idle system sleep.
+private final class NativeFanActivityOwner: @unchecked Sendable {
+    private let lock = NSLock()
+    private var token: NSObjectProtocol?
+    func setActive(_ active: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        if active {
+            if token == nil {
+                token = ProcessInfo.processInfo.beginActivity(
+                    options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+                    reason: "Maintain UniApi fan control heartbeat"
+                )
+            }
+        } else if let current = token {
+            ProcessInfo.processInfo.endActivity(current)
+            token = nil
+        }
+    }
+    deinit {
+        if let current = token { ProcessInfo.processInfo.endActivity(current) }
     }
 }
 

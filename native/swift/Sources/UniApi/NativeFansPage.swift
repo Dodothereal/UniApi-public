@@ -64,7 +64,7 @@ struct NativeFansPage: View {
             T3IconButton(system: "refresh-cw", help: "Refresh") { Task { await reload(); if ["control", "timeline", "settings"].contains(tab) { await loadHistory() } } }
             if tab == "curve" { applyCurveButton }
             if tab != "control", !state.isNull, state["supported"].bool, state["installed"].bool, !state["enabled"].bool {
-                Button(state["daemon"]["installed"].bool ? "Enable controls" : "Enable for this session") { Task { await operation("enable") } }
+                Button(state["daemon"]["installed"].bool ? "Reconnect helper" : "Install helper") { Task { await operation("install") } }
                     .buttonStyle(T3Button(tab == "curve" ? .ghost : .primary)).disabled(pending || snapshot.isNull || runtime.paths.readOnly)
             }
         }) {
@@ -147,8 +147,14 @@ struct NativeFansPage: View {
         return VStack(alignment: .leading, spacing: 24) {
             if !state["enabled"].bool {
                 NativeSetup(steps: [NativeSetupStep(
-                    id: "enable", title: state["daemon"]["installed"].bool ? "Enable controls" : "Enable controls for this session", done: false,
-                    enabled: !(pending || snapshot.isNull || runtime.paths.readOnly), actionTitle: "Enable", actionIcon: "power", action: { Task { await operation("enable") } })])
+                    id: "enable",
+                    title: state["daemon"]["installed"].bool ? "Reconnect fan control helper" : "Install fan control helper",
+                    detail: state["daemon"]["installed"].bool ? "The installed helper is not responding yet." : "Asks for your password once; stays enabled across sleep and restarts.",
+                    done: false,
+                    enabled: !(pending || snapshot.isNull || runtime.paths.readOnly),
+                    actionTitle: state["daemon"]["installed"].bool ? "Reconnect" : "Install",
+                    actionIcon: "power",
+                    action: { Task { await operation("install") } })])
             }
             VStack(alignment: .leading, spacing: 8) {
                 NativeRouteLine(tool: "Fans", icon: "fan", stops: {
@@ -438,11 +444,12 @@ struct NativeFansPage: View {
                 }
             }
             NativeSection("Helper") {
-                SettingRow(title: daemon["installed"].bool ? daemon["current"].bool ? "Installed" : "Update available" : "Not installed",
-                           desc: daemon["installed"].bool ? daemon["current"].bool ? nil : "Updating asks for your password once." : "Without it, controls ask for your password after every restart.") {
+                SettingRow(title: daemon["installed"].bool ? daemon["current"].bool ? (state["enabled"].bool ? "Installed" : "Installed (not running)") : "Update available" : "Not installed",
+                           desc: daemon["installed"].bool ? (daemon["current"].bool ? (state["enabled"].bool ? nil : "Reconnect or reinstall to start the helper.") : "Updating asks for your password once.") : "Install once so fan controls stay enabled across sleep and restarts.") {
                     HStack(spacing: 8) {
+                        if !daemon["installed"].bool && !state["enabled"].bool { Button("Just this session") { Task { await operation("enable") } }.buttonStyle(T3Button(.ghost)).disabled(pending || snapshot.isNull || runtime.paths.readOnly) }
                         if daemon["installed"].bool { Button("Remove") { Task { await operation("uninstall") } }.buttonStyle(T3Button(.ghost)).disabled(pending || runtime.paths.readOnly) }
-                        if !daemon["installed"].bool || !daemon["current"].bool { Button(daemon["installed"].bool ? "Update" : "Install") { Task { await operation("install") } }.buttonStyle(T3Button(.outline)).disabled(pending || runtime.paths.readOnly) }
+                        if !daemon["installed"].bool || !daemon["current"].bool || !state["enabled"].bool { Button(!daemon["installed"].bool ? "Install" : !daemon["current"].bool ? "Update" : "Reconnect") { Task { await operation("install") } }.buttonStyle(T3Button(.outline)).disabled(pending || snapshot.isNull || runtime.paths.readOnly) }
                     }
                 }
                 SettingRow(title: "Kept profile", desc: state["keep"].isNull ? "Cooler, a custom curve, or a manual speed held with Never is restored after sleep and restart." : "Restored after sleep and restart. Choose Automatic to stop.") {
