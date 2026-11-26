@@ -11,12 +11,15 @@ public actor NativeFanService {
     private var preferences: JSONValue = ["unit": "c", "menuMetric": "temperature"]
     private var keep: JSONValue = .null
     private var clientSeen: Double = 0, reassertAt: Double = 0, backoff: Double = 15000, appliedAt: Double = 0
-    private var releaseRequested = false, helperMode = "automatic"
+    private var releaseRequested = false, helperMode = "automatic", pollFailures = 0
     private var monitor: Task<Void, Never>?, poller: Task<Void, Never>?
     private var monitoringStarted = false
     private var monitorError: String?
     public init(runtime: NativeRuntime, io: NativeFanIO? = nil) { self.runtime = runtime; self.io = io ?? .production(runtime: runtime) }
-    deinit { monitor?.cancel(); poller?.cancel() }
+    deinit { monitor?.cancel(); poller?.cancel(); io.keepAwake(false) }
+    private func syncActivity() {
+        io.keepAwake(enabled && (!daemon || helperMode != "automatic" || !keep.isNull))
+    }
     private func initialize() throws {
         guard !initialized else { return }
         try runtime.db.migrate("fans-1", sql: "CREATE TABLE IF NOT EXISTS fans_preferences(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL)")
@@ -53,6 +56,7 @@ public actor NativeFanService {
         monitoringStarted = false
         let pending = monitor; monitor = nil
         pending?.cancel(); await pending?.value
+        io.keepAwake(false)
         await io.stopMonitor()
         snapshot = .null
         await runtime.events.publish("fans.spin", ["spinning": false])
@@ -85,24 +89,54 @@ public actor NativeFanService {
         let metadata = io.metadata(), fresh = !snapshot.isNull && io.now() - snapshot["date"].double < 6000 ? snapshot : .null
         return ["supported": metadata["supported"], "installed": metadata["installed"], "snapshot": fresh, "enabled": .bool(enabled), "busy": .bool(busy), "control": reply, "error": error, "preferences": preferences, "daemon": ["installed": metadata["daemonInstalled"], "running": .bool(enabled && daemon), "current": metadata["current"]], "keep": keep, "historySeconds": 1800]
     }
-    private func attach() async -> Bool {
-        guard !enabled, !busy, io.metadata()["daemonAvailable"].bool else { return false }
-        guard let answer = try? await io.request(["command": "status"], true), !enabled, !busy else { return false }
-        reply = answer; helperMode = answer["mode"].string; daemon = true; enabled = true; error = .null; reassertAt = 0; backoff = 15000; appliedAt = io.now(); return true
+    private func attach(daemonOnly: Bool = false) async -> Bool {
+        guard !enabled, !busy else { return false }
+        let metadata = io.metadata()
+        if metadata["daemonAvailable"].bool,
+           let answer = try? await io.request(["command": "status"], true), !enabled, !busy {
+            reply = answer; helperMode = answer["mode"].string; daemon = true; enabled = true; pollFailures = 0; error = .null; reassertAt = 0; backoff = 15000; appliedAt = io.now(); syncActivity(); return true
+        }
+        if !daemonOnly, metadata["sessionAvailable"].bool,
+           let answer = try? await io.request(["command": "status"], false), !enabled, !busy {
+            reply = answer; helperMode = answer["mode"].string; daemon = false; enabled = true; pollFailures = 0; error = .null; reassertAt = 0; backoff = 15000; appliedAt = io.now(); syncActivity(); return true
+        }
+        return false
     }
     public func poll() async {
         guard !runtime.paths.readOnly, !busy, !pollBusy else { return }
-        if !enabled { pollBusy = true; _ = await attach(); pollBusy = false; return }
+        if !enabled {
+            pollBusy = true
+            let attached = await attach()
+            pollBusy = false
+            if attached { await runtime.events.publish("fans.state", status()) }
+            return
+        }
         pollBusy = true; defer { pollBusy = false }
         let before = helperMode
         let action = NativeHardwarePolicies.fanPoll(mode: reply["mode"].string, ok: reply["ok"].bool, kept: !keep.isNull, releaseRequested: releaseRequested, snapshotAge: snapshot.isNull ? .infinity : io.now() - snapshot["date"].double, clientAge: io.now() - clientSeen, reassertIn: reassertAt - io.now())
         do {
             reply = try await io.request(action == "reassert" ? keep : ["command": .string(action)], daemon)
+            pollFailures = 0
             if action == "reassert" { if reply["ok"].bool { appliedAt = io.now() } else { backoff = NativeHardwarePolicies.fanBackoff(heldMs: 0, previous: backoff) }; reassertAt = io.now() + backoff }
             helperMode = reply["mode"].string
             if !keep.isNull && !releaseRequested && reply["ok"].bool && helperMode == "automatic" && !["automatic", "unknown"].contains(before) { backoff = NativeHardwarePolicies.fanBackoff(heldMs: io.now() - appliedAt, previous: backoff); reassertAt = io.now() + backoff; if !reply["message"].string.isEmpty { error = reply["message"] } }
             if !reply["ok"].bool { error = reply["message"] } else if helperMode != "automatic" { error = .null }
-        } catch { enabled = false; reply = ["ok": false, "mode": "unknown", "message": "Control connection lost; verify automatic fan modes before starting another session."]; self.error = reply["message"] }
+        } catch {
+            if let recovered = try? await io.request(["command": "status"], daemon) {
+                reply = recovered
+                helperMode = recovered["mode"].string
+                pollFailures = 0
+                if !reply["ok"].bool { self.error = reply["message"] }
+            } else {
+                pollFailures += 1
+                if pollFailures >= 2 {
+                    enabled = false
+                    reply = ["ok": false, "mode": "unknown", "message": "Control connection lost; verify automatic fan modes before starting another session."]
+                    self.error = reply["message"]
+                }
+            }
+        }
+        syncActivity()
         await runtime.events.publish("fans.state", status())
     }
     private func remember(_ command: JSONValue) throws {
@@ -110,8 +144,8 @@ public actor NativeFanService {
         try runtime.db.execute("INSERT INTO fans_keep(id,value) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value", [.string(command.isNull ? "" : String(decoding: try command.encoded(), as: UTF8.self))])
     }
     private func connect(daemon: Bool) async throws {
-        for _ in 0..<25 {
-            if let response = try? await io.request(["command": "status"], daemon) { reply = response; helperMode = response["mode"].string; self.daemon = daemon; enabled = true; backoff = 15000; reassertAt = 0; appliedAt = io.now(); return }
+        for _ in 0..<35 {
+            if let response = try? await io.request(["command": "status"], daemon) { reply = response; helperMode = response["mode"].string; self.daemon = daemon; enabled = true; pollFailures = 0; backoff = 15000; reassertAt = 0; appliedAt = io.now(); syncActivity(); return }
             try await io.sleep(0.2)
         }
         throw NativeFailure("The fan control helper did not establish a session")
@@ -145,6 +179,7 @@ public actor NativeFanService {
             releaseRequested = true; try remember(.null)
             for _ in 0..<220 { if !busy && !pollBusy { break }; try await io.sleep(0.1) }
             if enabled && !busy && !pollBusy { reply = (try? await io.request(["command": "automatic"], daemon)) ?? ["ok": false, "mode": "unknown", "message": "Automatic restoration is pending"]; helperMode = reply["mode"].string }
+            syncActivity()
             return ["ok": .bool(!busy && reply["ok"].bool && helperMode == "automatic"), "mode": reply["mode"]]
         }
         if operation == "control" {
@@ -158,10 +193,20 @@ public actor NativeFanService {
                 if let actual = try? await io.request(["command": "status"], daemon), actual["ok"].bool, actual["mode"] == command["command"] { reply = actual }
                 else { self.error = .string(error.localizedDescription); throw error }
             }
-            helperMode = reply["mode"].string; try remember(NativeHardwarePolicies.keptFanCommand(command)); busy = false; let value = status(); await runtime.events.publish("fans.state", value); return value
+            helperMode = reply["mode"].string; try remember(NativeHardwarePolicies.keptFanCommand(command)); syncActivity(); busy = false; let value = status(); await runtime.events.publish("fans.state", value); return value
         }
         guard ["enable", "install", "uninstall"].contains(operation), !busy else { throw NativeFailure("Unknown or busy fan helper operation") }
-        if operation == "enable" && enabled { return status() }
+        if operation == "enable" {
+            if enabled { return status() }
+            if await attach() { let value = status(); await runtime.events.publish("fans.state", value); return value }
+        }
+        if operation == "install" {
+            let meta = io.metadata()
+            if meta["daemonInstalled"].bool && meta["current"].bool {
+                if enabled && daemon { return status() }
+                if !enabled, await attach(daemonOnly: true) { let value = status(); await runtime.events.publish("fans.state", value); return value }
+            }
+        }
         if operation != "uninstall", (!io.metadata()["installed"].bool || snapshot.isNull || io.now() - snapshot["date"].double > 6000) { throw NativeFailure("Wait for live readings and a built helper before enabling controls") }
         busy = true; defer { busy = false }; clientSeen = io.now(); error = .null
         if operation == "uninstall" { releaseRequested = true }
@@ -169,9 +214,9 @@ public actor NativeFanService {
         do {
             if enabled && (operation == "uninstall" || operation == "install" && !daemon) { reply = (try? await io.request(["command": "automatic"], daemon)) ?? reply }
             try await io.authorize(operation)
-            if operation == "uninstall" { try remember(.null); enabled = false; reply = ["ok": true, "mode": "automatic", "message": "macOS manages your fans."] }
-            else { enabled = false; try await connect(daemon: operation == "install") }
+            if operation == "uninstall" { try remember(.null); enabled = false; pollFailures = 0; reply = ["ok": true, "mode": "automatic", "message": "macOS manages your fans."]; syncActivity() }
+            else { enabled = false; pollFailures = 0; try await connect(daemon: operation == "install") }
             busy = false; let value = status(); await runtime.events.publish("fans.state", value); return value
-        } catch { if operation == "uninstall" { releaseRequested = false }; self.error = .string(error.localizedDescription); throw error }
+        } catch { if operation == "uninstall" { releaseRequested = false }; syncActivity(); self.error = .string(error.localizedDescription); throw error }
     }
 }

@@ -100,6 +100,60 @@ final class HardwareFanTests: XCTestCase {
         clock.advance(60001)
         XCTAssertGreaterThan(try history.storage()["bytes"].double, first["bytes"].double + 6000)
     }
+    func testAttachPublishesStateAndReattachesLiveSessionWithoutReauthorizing() async throws {
+        let runtime = try runtime(), fixture = FanFixtureIO()
+        fixture.daemonInstalled = false
+        fixture.daemonAvailable = false
+        fixture.sessionAvailable = true
+        let service = NativeFanService(runtime: runtime, io: fixture.io)
+        let events = await runtime.events.stream()
+        let attachedEvent = expectation(description: "Attach publishes fans.state")
+        let observer = Task {
+            for await event in events where event.topic == "fans.state" && event.data["enabled"].bool {
+                attachedEvent.fulfill(); return
+            }
+        }
+        defer { observer.cancel() }
+        try await service.accept(sample(10000))
+        await service.poll()
+        await fulfillment(of: [attachedEvent], timeout: 2)
+        let enabled = try await service.handle("enable")
+        XCTAssertTrue(enabled["enabled"].bool)
+        XCTAssertEqual(fixture.authorizations, [])
+    }
+    func testTransientPollFailureRecoversAndKeepAwakeTracksActiveControl() async throws {
+        let runtime = try runtime(), fixture = FanFixtureIO()
+        let service = NativeFanService(runtime: runtime, io: fixture.io)
+        try await service.accept(sample(10000)); await service.poll()
+        XCTAssertEqual(fixture.keepAwakeHistory.last, false)
+        _ = try await service.handle("control", input: ["command": "cooler"])
+        XCTAssertEqual(fixture.keepAwakeHistory.last, true)
+        fixture.failNextRequests = 2
+        await service.poll()
+        let afterTransient = try await service.handle("status")
+        XCTAssertTrue(afterTransient["enabled"].bool, "One transient poll error must not drop the session")
+        await service.poll()
+        fixture.failNextRequests = 4
+        await service.poll()
+        await service.poll()
+        let dropped = try await service.handle("status")
+        XCTAssertFalse(dropped["enabled"].bool, "Consecutive unrecoverable poll failures must drop the session")
+        XCTAssertEqual(fixture.keepAwakeHistory.last, false)
+        await service.poll()
+        let reattached = try await service.handle("status")
+        XCTAssertTrue(reattached["enabled"].bool, "A returning helper socket must re-attach automatically")
+        XCTAssertEqual(fixture.keepAwakeHistory.last, true)
+        _ = try await service.handle("release")
+        XCTAssertEqual(fixture.keepAwakeHistory.last, false)
+    }
+    func testInstallReattachesRunningCurrentDaemonWithoutPasswordPrompt() async throws {
+        let runtime = try runtime(), fixture = FanFixtureIO()
+        let service = NativeFanService(runtime: runtime, io: fixture.io)
+        try await service.accept(sample(10000))
+        let state = try await service.handle("install")
+        XCTAssertTrue(state["enabled"].bool)
+        XCTAssertEqual(fixture.authorizations, [])
+    }
 }
 
 private final class HistoryFixtureClock: @unchecked Sendable {
@@ -113,12 +167,38 @@ private final class FanFixtureIO: @unchecked Sendable {
     var now: Double = 10000
     var mode = "automatic"
     var commands: [JSONValue] = []
+    var authorizations: [String] = []
+    var keepAwakeHistory: [Bool] = []
+    var daemonInstalled = true
+    var daemonAvailable = true
+    var sessionAvailable = false
+    var current = true
     var failAfterAccept = false
+    var failNextRequests = 0
+    private func readMetadata() -> JSONValue {
+        lock.lock(); defer { lock.unlock() }
+        return ["supported": true, "installed": true, "daemonInstalled": .bool(daemonInstalled), "daemonAvailable": .bool(daemonAvailable), "sessionAvailable": .bool(sessionAvailable), "current": .bool(current)]
+    }
+    private func handleRequest(_ command: JSONValue) throws -> JSONValue {
+        lock.lock(); defer { lock.unlock() }
+        if failNextRequests > 0 { failNextRequests -= 1; throw NativeFailure("Fixture transient IPC failure") }
+        commands.append(command)
+        if command["command"].string != "status" { mode = command["command"].string; if failAfterAccept { throw NativeFailure("Fixture timeout after acceptance") } }
+        return ["ok": true, "mode": .string(mode), "message": "fixture"]
+    }
+    private func recordAuthorization(_ action: String) {
+        lock.lock(); defer { lock.unlock() }; authorizations.append(action)
+    }
+    private func recordKeepAwake(_ active: Bool) {
+        lock.lock(); defer { lock.unlock() }; keepAwakeHistory.append(active)
+    }
     var io: NativeFanIO {
-        .init(metadata: { ["supported": true, "installed": true, "daemonInstalled": true, "daemonAvailable": true, "current": true] }, monitor: { AsyncThrowingStream { $0.finish() } }, request: { command, _ in
-            self.lock.lock(); defer { self.lock.unlock() }; self.commands.append(command)
-            if command["command"].string != "status" { self.mode = command["command"].string; if self.failAfterAccept { throw NativeFailure("Fixture timeout after acceptance") } }
-            return ["ok": true, "mode": .string(self.mode), "message": "fixture"]
-        }, authorize: { _ in }, now: { self.now }, sleep: { _ in })
+        .init(metadata: { self.readMetadata() }, monitor: { AsyncThrowingStream { $0.finish() } }, request: { command, _ in
+            try self.handleRequest(command)
+        }, authorize: { action in
+            self.recordAuthorization(action)
+        }, now: { self.now }, sleep: { _ in }, keepAwake: { active in
+            self.recordKeepAwake(active)
+        })
     }
 }

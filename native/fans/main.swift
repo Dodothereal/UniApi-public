@@ -45,12 +45,11 @@ guard lstat(folder,&info) == 0, (info.st_mode & S_IFMT) == S_IFDIR, info.st_uid 
 let socketPath = daemon ? IPC.controlPath(uid) : IPC.path(uid,owner!)
 let fd = socket(AF_UNIX,SOCK_STREAM,0)
 guard fd >= 0 else { exit(1) }
-// Never unlink a live session: duplicate enabling must fail instead of stealing it. A session
-// path is unique per server PID, so a leftover file there cannot be live. The daemon's path is
-// fixed, so a crash leaves a socket nobody is listening on and bind would fail forever - probe
-// it first and only remove the ones that refuse a connection.
-if daemon, access(socketPath,F_OK) == 0 {
-    if IPC.reachable(socketPath) { fputs("another uniapi-fans daemon owns \(socketPath)\n",stderr); exit(1) }
+// Never unlink a live session: duplicate enabling must fail instead of stealing it. A crashed
+// helper can leave a socket nobody is listening on, so probe first and only remove stale files
+// that refuse a connection.
+if access(socketPath,F_OK) == 0 {
+    if IPC.reachable(socketPath) { fputs("another uniapi-fans helper owns \(socketPath)\n",stderr); exit(1) }
     unlink(socketPath)
 }
 var address = IPC.address(socketPath)
@@ -59,29 +58,29 @@ guard bound == 0 else { exit(1) }
 chown(socketPath,uid,gid_t.max); chmod(socketPath,0o600)
 listen(fd,4)
 var running = true
-signal(SIGTERM,SIG_IGN); signal(SIGINT,SIG_IGN)
+signal(SIGTERM,SIG_IGN); signal(SIGINT,SIG_IGN); signal(SIGHUP,SIG_IGN)
 let termination = DispatchSource.makeSignalSource(signal:SIGTERM,queue:.global())
 termination.setEventHandler { running = false }; termination.resume()
 let interruption = DispatchSource.makeSignalSource(signal:SIGINT,queue:.global())
 interruption.setEventHandler { running = false }; interruption.resume()
 let power = PowerObserver {
-    // Sleep always returns the fans to macOS before the machine goes down. A temporary session
-    // ends there because its server may be gone when the Mac wakes; the daemon keeps listening,
-    // so the server can re-apply a kept profile on wake without another password. Either way the
-    // hardware is handed back first - waking never resumes an override by itself.
-    if !daemon { running = false }
+    // Sleep always returns the fans to macOS before the machine goes down. Waking never resumes
+    // an override by itself; the helper stays bound to its live owner PID (or launchd for the
+    // daemon) so a running UniApi instance does not lose its session across sleep/wake.
     try? controller.release("Sleep restored automatic control.")
 }
 guard power.available else { close(fd); unlink(socketPath); exit(1) }
-var lastActivity = Date(), lastTick = Date()
+// CLOCK_MONOTONIC_RAW advances across sleep and is immune to NTP/wall-clock jumps.
+func monotonicSeconds() -> Double { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1_000_000_000 }
+var lastTick = monotonicSeconds()
 while running && (owner.map { kill($0,0) == 0 } ?? true) {
     CFRunLoopRunInMode(.defaultMode,0.001,false)
     if !running { break }
-    if Date().timeIntervalSince(lastTick) > 5 {
+    let now = monotonicSeconds()
+    if now - lastTick > 5 {
         // A suspend/resume discontinuity ends the override even if a power event was missed.
         try? controller.release("The control session was interrupted.")
-        if !daemon { break }
-        lastTick = Date()
+        lastTick = monotonicSeconds()
     }
     var poller = pollfd(fd:fd,events:Int16(POLLIN),revents:0)
     if poll(&poller,1,250) > 0 {
@@ -99,22 +98,19 @@ while running && (owner.map { kill($0,0) == 0 } ?? true) {
                     let request = try JSONDecoder().decode(ControlRequest.self,from:IPC.readLine(fd:client))
                     let reply = controller.handle(request)
                     // Hardware acquisition may take several seconds; do not mistake it for sleep.
-                    lastTick = Date()
+                    lastTick = monotonicSeconds()
                     let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .millisecondsSince1970
                     var data = try encoder.encode(reply); data.append(10)
-                    try IPC.sendData(data,fd:client); lastActivity = Date()
+                    try IPC.sendData(data,fd:client)
                 } catch { }
             }
             close(client)
         }
     }
-    if Date().timeIntervalSince(lastTick) >= 1 {
+    if monotonicSeconds() - lastTick >= 1 {
         do { try controller.tick() } catch { }
-        lastTick = Date()
+        lastTick = monotonicSeconds()
     }
-    // A session with nobody talking to it is abandoned. The daemon is supposed to sit idle
-    // between servers; its own heartbeat lease is what stops an *override* outliving its client.
-    if !daemon && Date().timeIntervalSince(lastActivity) > 300 { break }
 }
 // A failed restoration never discards the watchdog. Keep retrying while denying
 // further overrides; the UniApi server shows a disconnected session and can still monitor.
