@@ -2,6 +2,10 @@
 
 User-facing changes are recorded here. Release entries should describe shipped behavior and actual validation, with unresolved limitations kept explicit.
 
+## 0.1.22 — preview
+
+- The installer records its process in the transfer lock and reclaims the lock after the owner dies, so an interrupted install no longer blocks every later update. A live or ambiguous owner is still refused conservatively.
+
 ## 0.1.21 — preview
 
 - The updater retries its idle check if the database changes during the check. A new job or coding turn still blocks installation.
